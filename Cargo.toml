@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "crates/libarc",
+    "crates/arc-daemon",
+    "crates/arc-cli",
+    "crates/arc-frontend",
+]
+resolver = "2"

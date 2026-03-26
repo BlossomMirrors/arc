@@ -1,0 +1,283 @@
+use crate::providers::MultiProvider;
+use crate::providers::PackageProvider;
+use crate::transaction_manager::TransactionManager;
+use libarc::{Provider, TransactionType};
+
+fn provider_from_pk_id(package_id: &str) -> Provider {
+    let data = package_id.splitn(4, ';').nth(3).unwrap_or("");
+    let name = package_id.splitn(2, ';').next().unwrap_or("");
+    if data.contains("flatpak") || data.contains("flathub") || name.matches('.').count() >= 2 {
+        Provider::Flatpak
+    } else {
+        Provider::Native
+    }
+}
+use std::sync::Arc;
+use tracing::{error, info};
+use zbus::interface;
+use zbus::object_server::SignalEmitter;
+
+pub struct ArcDaemonInterface {
+    pub provider: Arc<MultiProvider>,
+    pub transaction_manager: Arc<TransactionManager>,
+}
+
+#[interface(name = "dev.arc.ArcDaemon1")]
+impl ArcDaemonInterface {
+    async fn install_package(
+        &self,
+        package_id: String,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> String {
+        info!("InstallPackage: {}", package_id);
+        let tx = self
+            .transaction_manager
+            .create(
+                TransactionType::Install,
+                package_id.clone(),
+                provider_from_pk_id(&package_id),
+            )
+            .await;
+        let tx_id = tx.id;
+
+        let provider = self.provider.clone();
+        let tm = self.transaction_manager.clone();
+        let emitter = emitter.to_owned();
+
+        tokio::spawn(async move {
+            let _ =
+                Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
+
+            tm.update_progress(tx_id, 10).await;
+            let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 10).await;
+
+            match provider.install(&package_id).await {
+                Ok(()) => {
+                    tm.complete(tx_id, true, "Installation successful".to_string())
+                        .await;
+                    let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
+                    let _ = Self::transaction_finished(
+                        &emitter,
+                        tx_id.to_string(),
+                        true,
+                        "Installation successful".to_string(),
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    error!("Install failed: {}", e);
+                    tm.complete(tx_id, false, e.to_string()).await;
+                    let _ = Self::transaction_finished(
+                        &emitter,
+                        tx_id.to_string(),
+                        false,
+                        e.to_string(),
+                    )
+                    .await;
+                }
+            }
+        });
+
+        tx_id.to_string()
+    }
+
+    async fn remove_package(
+        &self,
+        package_id: String,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> String {
+        info!("RemovePackage: {}", package_id);
+        let tx = self
+            .transaction_manager
+            .create(
+                TransactionType::Remove,
+                package_id.clone(),
+                provider_from_pk_id(&package_id),
+            )
+            .await;
+        let tx_id = tx.id;
+
+        let provider = self.provider.clone();
+        let tm = self.transaction_manager.clone();
+        let emitter = emitter.to_owned();
+
+        tokio::spawn(async move {
+            let _ =
+                Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
+
+            tm.update_progress(tx_id, 10).await;
+            let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 10).await;
+
+            match provider.remove(&package_id).await {
+                Ok(()) => {
+                    tm.complete(tx_id, true, "Removal successful".to_string())
+                        .await;
+                    let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
+                    let _ = Self::transaction_finished(
+                        &emitter,
+                        tx_id.to_string(),
+                        true,
+                        "Removal successful".to_string(),
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    error!("Remove failed: {}", e);
+                    tm.complete(tx_id, false, e.to_string()).await;
+                    let _ = Self::transaction_finished(
+                        &emitter,
+                        tx_id.to_string(),
+                        false,
+                        e.to_string(),
+                    )
+                    .await;
+                }
+            }
+        });
+
+        tx_id.to_string()
+    }
+
+    async fn update_package(
+        &self,
+        package_id: String,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> String {
+        info!("UpdatePackage: {}", package_id);
+        let tx = self
+            .transaction_manager
+            .create(
+                TransactionType::Update,
+                package_id.clone(),
+                provider_from_pk_id(&package_id),
+            )
+            .await;
+        let tx_id = tx.id;
+
+        let provider = self.provider.clone();
+        let tm = self.transaction_manager.clone();
+        let emitter = emitter.to_owned();
+
+        tokio::spawn(async move {
+            let _ =
+                Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
+
+            tm.update_progress(tx_id, 10).await;
+            let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 10).await;
+
+            match provider.update(&package_id).await {
+                Ok(()) => {
+                    tm.complete(tx_id, true, "Update successful".to_string())
+                        .await;
+                    let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
+                    let _ = Self::transaction_finished(
+                        &emitter,
+                        tx_id.to_string(),
+                        true,
+                        "Update successful".to_string(),
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    error!("Update failed: {}", e);
+                    tm.complete(tx_id, false, e.to_string()).await;
+                    let _ = Self::transaction_finished(
+                        &emitter,
+                        tx_id.to_string(),
+                        false,
+                        e.to_string(),
+                    )
+                    .await;
+                }
+            }
+        });
+
+        tx_id.to_string()
+    }
+
+    async fn refresh_cache(&self) -> bool {
+        info!("RefreshCache");
+        match self.provider.refresh_cache().await {
+            Ok(()) => true,
+            Err(e) => {
+                error!("RefreshCache failed: {}", e);
+                false
+            }
+        }
+    }
+
+    async fn search(&self, query: String) -> String {
+        info!("Search: {}", query);
+        match self.provider.search(&query).await {
+            Ok(packages) => serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => {
+                error!("Search failed: {}", e);
+                format!("{{\"error\":\"{}\"}}", e)
+            }
+        }
+    }
+
+    async fn list_installed(&self) -> String {
+        info!("ListInstalled");
+        match self.provider.list_installed().await {
+            Ok(packages) => serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => {
+                error!("ListInstalled failed: {}", e);
+                format!("{{\"error\":\"{}\"}}", e)
+            }
+        }
+    }
+
+    async fn list_updates(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) -> String {
+        info!("ListUpdates");
+        match self.provider.list_updates().await {
+            Ok(packages) => {
+                let count = packages.len() as u32;
+                if count > 0 {
+                    let _ = Self::updates_available(&emitter, count).await;
+                }
+                serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string())
+            }
+            Err(e) => {
+                error!("ListUpdates failed: {}", e);
+                "[]".to_string()
+            }
+        }
+    }
+
+    async fn get_transaction(&self, transaction_id: String) -> String {
+        info!("GetTransaction: {}", transaction_id);
+        match transaction_id.parse::<uuid::Uuid>() {
+            Ok(id) => match self.transaction_manager.get(id).await {
+                Some(tx) => serde_json::to_string(&tx).unwrap_or_else(|_| "null".to_string()),
+                None => "null".to_string(),
+            },
+            Err(_) => "null".to_string(),
+        }
+    }
+
+    #[zbus(signal)]
+    async fn transaction_started(
+        signal_emitter: &SignalEmitter<'_>,
+        transaction_id: String,
+        package_id: String,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn transaction_progress(
+        signal_emitter: &SignalEmitter<'_>,
+        transaction_id: String,
+        progress: u8,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn transaction_finished(
+        signal_emitter: &SignalEmitter<'_>,
+        transaction_id: String,
+        success: bool,
+        message: String,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn updates_available(signal_emitter: &SignalEmitter<'_>, count: u32) -> zbus::Result<()>;
+}

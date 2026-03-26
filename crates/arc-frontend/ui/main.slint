@@ -1,0 +1,529 @@
+import {
+    Button,
+    LineEdit,
+    ListView,
+    VerticalBox,
+    HorizontalBox,
+    ProgressIndicator,
+} from "std-widgets.slint";
+
+export struct PackageItem {
+    id: string,
+    name: string,
+    version: string,
+    description: string,
+    installed: bool,
+    icon: image,
+}
+
+export struct AppDetailData {
+    id: string,
+    name: string,
+    developer: string,
+    description: string,
+    summary: string,
+    version: string,
+    icon: image,
+    installed: bool,
+}
+
+export struct AppCardData {
+    id: string,
+    name: string,
+    summary: string,
+    icon: image,
+}
+
+export struct CategoryItem {
+    id: string,
+    label: string,
+    icon: image,
+    bg-color: color,
+}
+
+component AppCard inherits Rectangle {
+    in property <AppCardData> card;
+    callback clicked(string);
+
+    width: 160px;
+    height: 172px;
+
+    border-radius: 8px;
+    background: #00000010;
+
+    TouchArea {
+        clicked => { root.clicked(root.card.id); }
+    }
+
+    VerticalBox {
+        alignment: center;
+        padding: 12px;
+        spacing: 6px;
+
+        Image {
+            source: root.card.icon;
+            width: 64px;
+            height: 64px;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.card.name;
+            font-weight: 600;
+            font-size: 12px;
+            overflow: elide;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.card.summary;
+            font-size: 10px;
+            overflow: elide;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Arc Software";
+    min-width: 900px;
+    min-height: 640px;
+
+    in-out property <string> search-text: "";
+    in-out property <string> status-text: "Ready";
+    in-out property <[PackageItem]> packages: [];
+    in-out property <bool> is-loading: false;
+    in-out property <float> progress: 0.0;
+    in-out property <string> current-view: "home";
+
+    in-out property <[AppCardData]> popular-apps: [];
+    in-out property <[AppCardData]> recent-apps: [];
+    in-out property <[CategoryItem]> categories: [];
+    in-out property <bool> home-loading: false;
+
+    in-out property <string> prev-view: "home";
+    in-out property <AppDetailData> detail-app;
+    in-out property <bool> detail-loading: false;
+    callback detail-requested(string);
+
+    callback search-requested(string);
+    callback install-requested(string);
+    callback remove-requested(string);
+    callback refresh-requested();
+    callback category-selected(string);
+    callback app-selected(string);
+
+    VerticalBox {
+        padding: 0px;
+        spacing: 0px;
+
+        HorizontalBox {
+            padding: 8px;
+            spacing: 6px;
+
+            LineEdit {
+                horizontal-stretch: 1;
+                placeholder-text: "Search for applications...";
+                text <=> root.search-text;
+                accepted(text) => {
+                    root.current-view = "search";
+                    root.search-requested(text);
+                }
+            }
+
+            Button {
+                text: "Search";
+                clicked => {
+                    root.current-view = "search";
+                    root.search-requested(root.search-text);
+                }
+            }
+
+            Button {
+                text: "Installed";
+                clicked => {
+                    root.current-view = "installed";
+                    root.refresh-requested();
+                }
+            }
+
+            Button {
+                text: "Home";
+                clicked => {
+                    root.current-view = "home";
+                }
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+
+            if root.current-view == "home": Rectangle {
+                width: parent.width;
+                height: parent.height;
+                clip: true;
+
+                if root.home-loading: VerticalBox {
+                    alignment: center;
+                    Text {
+                        text: "Loading...";
+                        horizontal-alignment: center;
+                    }
+                }
+
+                if !root.home-loading: Flickable {
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-width: parent.width;
+                    viewport-height: self.compute-height();
+
+                    function compute-height() -> length {
+                        180px
+                        + (root.popular-apps.length > 0 ? 28px + root.popular-apps.length * 56px : 0px)
+                        + (root.recent-apps.length > 0 ? 28px + 196px + 16px : 0px)
+                        + (root.categories.length > 0 ? 28px + ceil(root.categories.length / 3) * 56px : 0px)
+                        + 32px
+                    }
+
+                    VerticalBox {
+                        padding: 16px;
+                        spacing: 0px;
+                        width: parent.width;
+
+                        Rectangle {
+                            height: 140px;
+                            border-radius: 12px;
+                            background: @linear-gradient(135deg, #5b7fa6, #8a5bab);
+
+                            VerticalBox {
+                                alignment: center;
+                                Text {
+                                    text: "Discover Great Software";
+                                    font-size: 22px;
+                                    font-weight: 700;
+                                    color: white;
+                                    horizontal-alignment: center;
+                                }
+                                Text {
+                                    text: "Install apps from Flathub and your system repositories";
+                                    font-size: 13px;
+                                    color: #ffffffcc;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                        }
+
+                        if root.popular-apps.length > 0: VerticalBox {
+                            padding-top: 20px;
+                            spacing: 4px;
+
+                            Text {
+                                text: "Popular";
+                                font-size: 16px;
+                                font-weight: 700;
+                            }
+
+                            for app[i] in root.popular-apps: Rectangle {
+                                height: 56px;
+                                border-radius: 6px;
+
+                                TouchArea {
+                                    clicked => { root.prev-view = "home"; root.detail-requested(app.id); }
+                                }
+
+                                HorizontalBox {
+                                    padding: 8px;
+                                    spacing: 10px;
+
+                                    Image {
+                                        source: app.icon;
+                                        width: 40px;
+                                        height: 40px;
+                                        vertical-alignment: center;
+                                    }
+
+                                    VerticalBox {
+                                        horizontal-stretch: 1;
+                                        alignment: center;
+                                        spacing: 2px;
+
+                                        Text {
+                                            text: app.name;
+                                            font-weight: 600;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: app.summary;
+                                            font-size: 11px;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.recent-apps.length > 0: VerticalBox {
+                            padding-top: 20px;
+                            spacing: 8px;
+
+                            Text {
+                                text: "Recently Added";
+                                font-size: 16px;
+                                font-weight: 700;
+                            }
+
+                            HorizontalBox {
+                                spacing: 12px;
+                                height: 196px;
+
+                                for app[i] in root.recent-apps: AppCard {
+                                    card: app;
+                                    clicked(id) => { root.prev-view = "home"; root.detail-requested(id); }
+                                }
+                            }
+                        }
+
+                        if root.categories.length > 0: VerticalBox {
+                            padding-top: 20px;
+                            spacing: 8px;
+
+                            Text {
+                                text: "Categories";
+                                font-size: 16px;
+                                font-weight: 700;
+                            }
+
+                            HorizontalBox {
+                                spacing: 10px;
+                                height: 104px;
+
+                                for cat[i] in root.categories: Rectangle {
+                                    width: 120px;
+                                    height: 104px;
+                                    border-radius: 10px;
+                                    background: cat.bg-color;
+
+                                    TouchArea {
+                                        clicked => { root.category-selected(cat.id); }
+                                    }
+
+                                    VerticalBox {
+                                        alignment: center;
+                                        spacing: 4px;
+                                        padding: 8px;
+
+                                        Image {
+                                            source: cat.icon;
+                                            width: 36px;
+                                            height: 36px;
+                                            horizontal-alignment: center;
+                                            image-fit: contain;
+                                        }
+
+                                        Text {
+                                            text: cat.label;
+                                            horizontal-alignment: center;
+                                            font-weight: 600;
+                                            font-size: 10px;
+                                            color: white;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.current-view == "search" || root.current-view == "installed": Rectangle {
+                width: parent.width;
+                height: parent.height;
+
+                if root.is-loading: VerticalBox {
+                    alignment: center;
+                    Text {
+                        text: "Loading...";
+                        horizontal-alignment: center;
+                    }
+                }
+
+                if !root.is-loading && root.packages.length == 0: VerticalBox {
+                    alignment: center;
+                    Text {
+                        text: root.current-view == "search"
+                            ? "No packages found.\nSearch for an application to get started."
+                            : "No applications installed.";
+                        horizontal-alignment: center;
+                    }
+                }
+
+                if !root.is-loading && root.packages.length > 0: ListView {
+                    for pkg[i] in root.packages: Rectangle {
+                        height: 56px;
+
+                        TouchArea {
+                            clicked => { root.detail-requested(pkg.id); }
+                        }
+
+                        HorizontalBox {
+                            padding: 8px;
+                            spacing: 10px;
+
+                            Image {
+                                source: pkg.icon;
+                                width: 40px;
+                                height: 40px;
+                                vertical-alignment: center;
+                            }
+
+                            VerticalBox {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                spacing: 2px;
+
+                                Text {
+                                    text: pkg.name != "" ? pkg.name : pkg.id;
+                                    font-weight: 600;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: pkg.description;
+                                    font-size: 11px;
+                                    overflow: elide;
+                                }
+                            }
+
+                            Text {
+                                text: pkg.version;
+                                min-width: 80px;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                            }
+
+                            Button {
+                                text: pkg.installed ? "Remove" : "Install";
+                                clicked => {
+                                    if pkg.installed {
+                                        root.remove-requested(pkg.id);
+                                    } else {
+                                        root.install-requested(pkg.id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.current-view == "detail": Rectangle {
+                width: parent.width;
+                height: parent.height;
+                clip: true;
+
+                if root.detail-loading: VerticalBox {
+                    alignment: center;
+                    Text {
+                        text: "Loading...";
+                        horizontal-alignment: center;
+                    }
+                }
+
+                if !root.detail-loading: Flickable {
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-width: parent.width;
+                    viewport-height: 600px;
+
+                    VerticalBox {
+                        padding: 16px;
+                        spacing: 12px;
+                        width: parent.width;
+
+                        Button {
+                            text: "← Back";
+                            clicked => {
+                                root.current-view = root.prev-view;
+                            }
+                        }
+
+                        HorizontalBox {
+                            spacing: 16px;
+                            alignment: start;
+
+                            Image {
+                                source: root.detail-app.icon;
+                                width: 96px;
+                                height: 96px;
+                                image-fit: contain;
+                            }
+
+                            VerticalBox {
+                                alignment: center;
+                                spacing: 4px;
+                                horizontal-stretch: 1;
+
+                                Text {
+                                    text: root.detail-app.name;
+                                    font-size: 20px;
+                                    font-weight: 700;
+                                    overflow: elide;
+                                }
+
+                                Text {
+                                    text: root.detail-app.developer;
+                                    font-size: 13px;
+                                }
+
+                                Text {
+                                    text: root.detail-app.version;
+                                    font-size: 11px;
+                                }
+                            }
+
+                            Button {
+                                text: root.detail-app.installed ? "Remove" : "Install";
+                                clicked => {
+                                    if root.detail-app.installed {
+                                        root.remove-requested(root.detail-app.id);
+                                    } else {
+                                        root.install-requested(root.detail-app.id);
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: root.detail-app.summary;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+
+                        Text {
+                            text: root.detail-app.description;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalBox {
+            padding: 6px;
+
+            Text {
+                text: root.status-text;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+
+            if root.progress > 0.0 && root.progress < 1.0: ProgressIndicator {
+                width: 150px;
+                progress: root.progress;
+            }
+        }
+    }
+}
