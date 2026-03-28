@@ -20,3 +20,4 @@ anyhow = "1"
 async-trait = "0.1"
 futures-util = "0.3"
 libflatpak = "0.7"
+appstream = { version = "0.2", features = ["gzip"] }

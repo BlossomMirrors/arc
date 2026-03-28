@@ -22,6 +22,8 @@ impl Daemon {
 
         let provider = Arc::new(MultiProvider::new(native, flatpak));
 
+        // load both flatpak and system packages into memory right away so the
+        // first search request is fast instead of blocking on a cold provider
         info!("Pre-warming package cache...");
         if let Err(e) = provider.refresh_cache().await {
             warn!("Initial cache warm-up failed: {}", e);
@@ -29,6 +31,8 @@ impl Daemon {
             info!("Package cache ready");
         }
 
+        // arc clone is a reference counted pointer so both the spawn and the
+        // daemon struct share the same provider without copying it
         let bg_provider = Arc::clone(&provider);
         tokio::spawn(async move {
             loop {
@@ -55,6 +59,8 @@ impl Daemon {
             transaction_manager: self.transaction_manager,
         };
 
+        // register on the session dbus under our name so clients
+        // can find and connect to us by that name
         let _conn = ConnectionBuilder::session()?
             .name("dev.arc.ArcDaemon1")?
             .serve_at("/dev/arc/ArcDaemon1", interface)?
@@ -64,6 +70,7 @@ impl Daemon {
         info!("D-Bus service registered at dev.arc.ArcDaemon1");
         info!("Arc daemon running. Press Ctrl+C to stop.");
 
+        // wait here until ctrl+c, the actual work happens in the dbus callbacks
         tokio::signal::ctrl_c().await?;
         info!("Shutting down Arc daemon");
 

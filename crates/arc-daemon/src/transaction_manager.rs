@@ -5,6 +5,8 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 pub struct TransactionManager {
+    // rwlock lets many readers run at the same time but only one writer,
+    // useful here because reads (get, list) are way more common than writes
     transactions: Arc<RwLock<HashMap<Uuid, Transaction>>>,
 }
 

@@ -1,15 +1,19 @@
 pub mod errors;
 pub mod events;
 pub mod flathub;
+pub mod settings;
 pub mod types;
 
 pub use errors::ArcError;
 pub use events::ArcEvent;
+pub use settings::Settings;
 pub use types::{Package, Provider, Transaction, TransactionStatus, TransactionType};
 
 use anyhow::Result;
 use zbus::{proxy, Connection};
 
+// this macro generates a strongly typed rust client for our daemon's dbus api,
+// method calls become normal async functions and signals become streams
 #[proxy(
     interface = "dev.arc.ArcDaemon1",
     default_service = "dev.arc.ArcDaemon1",
@@ -25,6 +29,8 @@ pub trait ArcDaemon {
     async fn get_transaction(&self, transaction_id: &str) -> zbus::Result<String>;
     async fn refresh_cache(&self) -> zbus::Result<bool>;
 
+    // signals are one way messages the daemon sends to all connected clients
+    // without them having to ask, fire and forget from the daemon side
     #[zbus(signal)]
     fn transaction_started(&self, transaction_id: String, package_id: String) -> zbus::Result<()>;
 
@@ -43,6 +49,8 @@ pub trait ArcDaemon {
     fn updates_available(&self, count: u32) -> zbus::Result<()>;
 }
 
+// connects to the session bus (per user, not system wide) and returns a proxy
+// you can call methods on like normal async functions
 pub async fn connect() -> Result<ArcDaemonProxy<'static>> {
     let conn = Connection::session().await?;
     let proxy = ArcDaemonProxy::new(&conn).await?;

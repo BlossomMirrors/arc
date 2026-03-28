@@ -4,6 +4,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
+// 15 minutes
+// newly installed packages show up without a manual refresh
 const PACKAGE_CACHE_TTL: Duration = Duration::from_secs(900);
 
 #[async_trait]
@@ -34,11 +36,14 @@ impl MultiProvider {
         }
     }
 
+    // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no semicolons... also why i hate this with flatpaks).
+    // packagekit ids look like "gimp;2.10;x86_64;fedora" (semicolons everywhere)
     fn is_flatpak_id(id: &str) -> bool {
         !id.contains(';') && id.matches('.').count() >= 2
     }
 
     async fn fetch_and_store(&self) -> Result<Vec<Package>, ArcError> {
+        // fetch from both providers at the same time instead of one after the other
         let (flatpak, native) = tokio::join!(self.flatpak.fetch_all(), self.native.fetch_all());
         let mut packages = flatpak.unwrap_or_default();
         packages.extend(native.unwrap_or_default());

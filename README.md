@@ -1,8 +1,8 @@
 # Arc
 
-Arc is a Linux software manager that provides a unified interface for managing
+Arc Software is a Linux software manager that provides a unified interface for managing
 both Flatpak and native system packages. It wraps Flatpak (via libflatpak) and
-PackageKit behind a single D-Bus daemon, then exposes that daemon to a CLI tool
+PackageKit both together with Appstream data behind a single D-Bus daemon, then exposes that daemon to a CLI tool
 and a graphical frontend.
 
 ## Architecture
@@ -93,15 +93,20 @@ results back through return values and D-Bus signals.
 
 ## Building
 
-You will need:
-
-- A Rust toolchain (stable, edition 2021)
-- Development headers for Flatpak (`libflatpak-dev` or equivalent)
-- A running PackageKit service (for native package support)
-- D-Bus session bus
-
+**Install requirements:**
+```sh
+sudo dnf install -y \
+  rust cargo \
+  flatpak-devel \
+  fontconfig-devel \
+  pkgconf-pkg-config \
+  PackageKit PackageKit-glib-devel \
+  dbus dbus-daemon
 ```
-cargo build --release
+
+Then just run:
+```sh
+cargo build
 ```
 
 The workspace produces three binaries:
@@ -130,7 +135,3 @@ Start the daemon first, then use either client:
 
 The daemon logs can be controlled with the `RUST_LOG` environment variable
 (e.g. `RUST_LOG=debug`).
-
-## License
-
-See the project license file for details.

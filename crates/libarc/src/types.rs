@@ -29,9 +29,12 @@ pub enum TransactionStatus {
     Pending,
     Running,
     Success,
+    // carries the error message so the client knows what went wrong
     Failed(String),
 }
 
+// we create this before the work starts so the frontend can track progress
+// and look up status by id at any point
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
     pub id: Uuid,

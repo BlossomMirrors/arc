@@ -1,3 +1,4 @@
+use crate::appstream_db::{entry_to_native_package, AppStreamDb};
 use super::PackageProvider;
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -6,12 +7,22 @@ use std::sync::Arc;
 use tracing::warn;
 use zbus::{proxy, zvariant::OwnedObjectPath, Connection};
 
-const FILTER_NONE: u64 = 1 << 1;
-const FILTER_INSTALLED: u64 = 1 << 2;
-const PK_INFO_INSTALLED: u32 = 1;
-const PK_EXIT_SUCCESS: u32 = 1;
-const TX_FLAG_NONE: u64 = 0;
+// packagekit constants, these are integer flags defined by the packagekit dbus spec.
+// the values look weird because they come from a C enum in the original library
+mod pk {
+    // give me everything, do not filter by installed status
+    pub const FILTER_NONE: u64 = 1 << 1;
+    // only return packages that are already installed
+    pub const FILTER_INSTALLED: u64 = 1 << 2;
+    // info value that packagekit puts on a package signal to say it is installed
+    pub const INFO_INSTALLED: u32 = 1;
 
+    pub const EXIT_SUCCESS: u32 = 1;
+    pub const TX_FLAG_NONE: u64 = 0;
+}
+
+// the main service just creates transactions, the actual work happens on
+// the transaction object at a dynamic path that gets returned by create_transaction
 #[proxy(
     interface = "org.freedesktop.PackageKit",
     default_service = "org.freedesktop.PackageKit",
@@ -49,6 +60,8 @@ trait PackageKitTransaction {
     ) -> zbus::Result<()>;
     async fn resolve(&self, filter: u64, packages: Vec<String>) -> zbus::Result<()>;
 
+    // packagekit pushes one signal per package it finds, then fires finished
+    // when done, so we collect the package signals as a stream
     #[zbus(signal)]
     fn package(&self, info: u32, package_id: String, summary: String) -> zbus::Result<()>;
 
@@ -68,6 +81,8 @@ pub struct PackageKitProvider {
 
 impl PackageKitProvider {
     pub async fn new() -> Result<Self, ArcError> {
+        // packagekit is a system service so it lives on the system bus,
+        // not the session bus (session bus is per user login)
         let connection = Connection::system().await.map_err(|e| {
             ArcError::ProviderError(format!("Failed to connect to system D-Bus: {}", e))
         })?;
@@ -96,6 +111,8 @@ impl PackageKitProvider {
 
     async fn interactive_transaction(&self) -> Result<PackageKitTransactionProxy<'_>, ArcError> {
         let tx = self.transaction().await?;
+        // interactive hint lets packagekit show polkit auth dialogs so the
+        // user can authenticate, without it installs silently fail
         if let Err(e) = tx.set_hints(vec!["interactive=true".to_string()]).await {
             warn!(
                 "Failed to set interactive hint on PackageKit transaction: {}",
@@ -112,6 +129,7 @@ fn parse_pk_package(
     info: u32,
     installed_override: Option<bool>,
 ) -> ArcPackage {
+    // pk package ids look like "name;version;arch;data", data segment hints at the repo
     let parts: Vec<&str> = pkg_id.splitn(4, ';').collect();
     let name = parts.first().copied().unwrap_or("").to_string();
     let version = parts.get(1).copied().unwrap_or("").to_string();
@@ -124,7 +142,7 @@ fn parse_pk_package(
             Provider::Native
         };
 
-    let installed = installed_override.unwrap_or(info == PK_INFO_INSTALLED);
+    let installed = installed_override.unwrap_or(info == pk::INFO_INSTALLED);
 
     ArcPackage {
         id: pkg_id.to_string(),
@@ -138,6 +156,8 @@ fn parse_pk_package(
 
 macro_rules! collect_packages {
     ($tx:expr, $call:expr, $installed_override:expr) => {{
+        // signals must be subscribed before the call, not after,
+        // pk can fire them immediately and you would miss early ones
         let mut pkg_stream = $tx
             .receive_package()
             .await
@@ -158,6 +178,8 @@ macro_rules! collect_packages {
         let mut packages: Vec<ArcPackage> = Vec::new();
         loop {
             tokio::select! {
+                // biased means branches are checked top to bottom when multiple are ready,
+                // so we drain all package signals before checking finished
                 biased;
                 pkg = pkg_stream.next() => {
                     match pkg {
@@ -206,6 +228,8 @@ macro_rules! run_transaction {
         let mut last_error: Option<String> = None;
         loop {
             tokio::select! {
+                // biased: check error before finished so we capture the error message
+                // even when both signals arrive in the same poll cycle
                 biased;
                 err = err_stream.next() => {
                     if let Some(sig) = err {
@@ -217,7 +241,7 @@ macro_rules! run_transaction {
                 fin = fin_stream.next() => {
                     if let Some(sig) = fin {
                         if let Ok(args) = sig.args() {
-                            if *args.exit_enum() != PK_EXIT_SUCCESS {
+                            if *args.exit_enum() != pk::EXIT_SUCCESS {
                                 let msg = match last_error {
                                     Some(details) => details,
                                     None => format!(
@@ -239,7 +263,7 @@ macro_rules! run_transaction {
 impl PackageKitProvider {
     pub async fn fetch_all(&self) -> Result<Vec<ArcPackage>, ArcError> {
         let tx = self.transaction().await?;
-        let packages = collect_packages!(tx, tx.get_packages(FILTER_NONE), None);
+        let packages = collect_packages!(tx, tx.get_packages(pk::FILTER_NONE), None);
         Ok(packages)
     }
 }
@@ -247,32 +271,56 @@ impl PackageKitProvider {
 #[async_trait]
 impl PackageProvider for PackageKitProvider {
     async fn search(&self, query: &str) -> Result<Vec<ArcPackage>, ArcError> {
+        let query_str = query.to_string();
+
+        // try appstream first because it is local and instant, no round trip
+        // to packagekit. if appstream has no data (no cache generated yet, or
+        // searching for a library that is not in the gui catalog) fall through
+        // to packagekit which searches against the repo metadata directly
+        let appstream_packages = tokio::task::spawn_blocking(move || {
+            AppStreamDb::load_system()
+                .search_apps(&query_str)
+                .into_iter()
+                .map(|e| entry_to_native_package(e, false))
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
+
+        if !appstream_packages.is_empty() {
+            return Ok(appstream_packages);
+        }
+
+        // appstream had nothing (no cache, or searching for a lib/cli tool)
+        // pk already uses appstream internally on most backends so this is a
+        // fallback, not a duplicate search
         let tx = self.transaction().await?;
         let values = vec![query.to_string()];
-        let packages = collect_packages!(tx, tx.search_names(FILTER_NONE, values), None);
-        Ok(packages)
+        Ok(collect_packages!(tx, tx.search_names(pk::FILTER_NONE, values), None))
     }
 
     async fn list_installed(&self) -> Result<Vec<ArcPackage>, ArcError> {
         let tx = self.transaction().await?;
-        let packages = collect_packages!(tx, tx.get_packages(FILTER_INSTALLED), Some(true));
+        let packages = collect_packages!(tx, tx.get_packages(pk::FILTER_INSTALLED), Some(true));
         Ok(packages)
     }
 
     async fn list_updates(&self) -> Result<Vec<ArcPackage>, ArcError> {
         let tx = self.transaction().await?;
-        let packages = collect_packages!(tx, tx.get_updates(FILTER_NONE), Some(true));
+        let packages = collect_packages!(tx, tx.get_updates(pk::FILTER_NONE), Some(true));
         Ok(packages)
     }
 
     async fn install(&self, package_id: &str) -> Result<(), ArcError> {
         let tx = self.interactive_transaction().await?;
         let ids = vec![package_id.to_string()];
-        run_transaction!(tx, tx.install_packages(TX_FLAG_NONE, ids));
+        run_transaction!(tx, tx.install_packages(pk::TX_FLAG_NONE, ids));
         Ok(())
     }
 
     async fn remove(&self, package_id: &str) -> Result<(), ArcError> {
+        // resolve the friendly name to a full pk id first (name;ver;arch;repo)
+        // because remove_packages needs the exact id, not just the name
         let name = package_id
             .split(';')
             .next()
@@ -282,7 +330,7 @@ impl PackageProvider for PackageKitProvider {
         let resolve_tx = self.transaction().await?;
         let installed = collect_packages!(
             resolve_tx,
-            resolve_tx.resolve(FILTER_INSTALLED, vec![name.clone()]),
+            resolve_tx.resolve(pk::FILTER_INSTALLED, vec![name.clone()]),
             Some(true)
         );
 
@@ -293,14 +341,14 @@ impl PackageProvider for PackageKitProvider {
 
         let tx = self.interactive_transaction().await?;
         let ids = vec![resolved_id];
-        run_transaction!(tx, tx.remove_packages(TX_FLAG_NONE, ids, true, false));
+        run_transaction!(tx, tx.remove_packages(pk::TX_FLAG_NONE, ids, true, false));
         Ok(())
     }
 
     async fn update(&self, package_id: &str) -> Result<(), ArcError> {
         let tx = self.interactive_transaction().await?;
         let ids = vec![package_id.to_string()];
-        run_transaction!(tx, tx.update_packages(TX_FLAG_NONE, ids));
+        run_transaction!(tx, tx.update_packages(pk::TX_FLAG_NONE, ids));
         Ok(())
     }
 }

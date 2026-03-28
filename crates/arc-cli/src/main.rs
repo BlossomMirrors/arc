@@ -1,11 +1,13 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
+use futures_util::StreamExt;
 use libarc::{connect, ArcDaemonProxy};
-use libarc::{Package, Transaction, TransactionStatus};
+use libarc::Package;
 use serde::Deserialize;
-use tokio::time::{sleep, Duration};
 
+// the daemon returns json strings over dbus, this catches the case where
+// it returned an error object instead of the actual list
 #[derive(Deserialize)]
 struct DaemonError {
     error: String,
@@ -35,33 +37,42 @@ enum Commands {
     RefreshCache,
 }
 
+// instead of polling are we done yet every 500ms we subscribe to the daemon's
+// signals and block until we get the finished one
 async fn wait_for_transaction(proxy: &ArcDaemonProxy<'_>, tx_id: &str) -> Result<()> {
+    let mut progress_stream = proxy.receive_transaction_progress().await?;
+    let mut finished_stream = proxy.receive_transaction_finished().await?;
+
     loop {
-        let json = proxy.get_transaction(tx_id).await?;
-        if json == "null" {
-            println!("{}", "Transaction not found".yellow());
-            break;
+        tokio::select! {
+            sig = progress_stream.next() => {
+                if let Some(sig) = sig {
+                    if let Ok(args) = sig.args() {
+                        if *args.transaction_id() == tx_id {
+                            print!("\r{} {}%", "Progress:".cyan(), args.progress());
+                            let _ = std::io::Write::flush(&mut std::io::stdout());
+                        }
+                    }
+                }
+            }
+            sig = finished_stream.next() => {
+                match sig {
+                    Some(sig) => {
+                        if let Ok(args) = sig.args() {
+                            if *args.transaction_id() == tx_id {
+                                if *args.success() {
+                                    println!("\r{}", "Done!".green());
+                                } else {
+                                    println!("\r{}: {}", "Failed".red(), args.message());
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    None => break,
+                }
+            }
         }
-
-        let tx: Transaction = serde_json::from_str(&json)?;
-        match &tx.status {
-            TransactionStatus::Pending => {
-                print!("\r{}", "Pending...".dimmed());
-            }
-            TransactionStatus::Running => {
-                print!("\r{} {}%", "Progress:".cyan(), tx.progress);
-            }
-            TransactionStatus::Success => {
-                println!("\r{}", "Done!".green());
-                break;
-            }
-            TransactionStatus::Failed(msg) => {
-                println!("\r{}: {}", "Failed".red(), msg);
-                break;
-            }
-        }
-
-        sleep(Duration::from_millis(500)).await;
     }
     Ok(())
 }

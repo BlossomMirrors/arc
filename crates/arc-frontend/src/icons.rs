@@ -29,6 +29,7 @@ pub async fn load_icon(url: &str) -> Option<RawIcon> {
 
 fn read_svg_bytes(path: &Path) -> Option<Vec<u8>> {
     let raw = std::fs::read(path).ok()?;
+    // svgz is just gzipped svg, common in icon themes
     if path.extension().and_then(|e| e.to_str()) == Some("svgz") {
         let mut decoder = GzDecoder::new(&raw[..]);
         let mut buf = Vec::new();
@@ -39,6 +40,31 @@ fn read_svg_bytes(path: &Path) -> Option<Vec<u8>> {
     }
 }
 
+// resvg outputs premultiplied rgba so we have to undo that before handing pixels
+// to slint, otherwise semi-transparent areas look wrong (colors get darker)
+fn render_svg(svg_bytes: &[u8], size: u32) -> Option<RawIcon> {
+    let opt = usvg::Options::default();
+    let tree = usvg::Tree::from_data(svg_bytes, &opt).ok()?;
+    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
+    let sx = size as f32 / tree.size().width();
+    let sy = size as f32 / tree.size().height();
+    let transform = tiny_skia::Transform::from_scale(sx, sy);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    let mut pixels = pixmap.data().to_vec();
+    for chunk in pixels.chunks_exact_mut(4) {
+        let a = chunk[3];
+        if a > 0 && a < 255 {
+            let inv = 255.0 / a as f32;
+            chunk[0] = (chunk[0] as f32 * inv).min(255.0) as u8;
+            chunk[1] = (chunk[1] as f32 * inv).min(255.0) as u8;
+            chunk[2] = (chunk[2] as f32 * inv).min(255.0) as u8;
+        }
+    }
+    Some(RawIcon { width: size, height: size, pixels })
+}
+
+// parse stop-color="#rrggbb" out of svg text to get gradient colors without
+// pulling in a full xml parser, good enough for icon theme svgs
 fn extract_stop_colors(svg_text: &str) -> Vec<(u8, u8, u8)> {
     let mut colors = Vec::new();
     let mut src = svg_text;
@@ -68,27 +94,6 @@ fn most_saturated(colors: &[(u8, u8, u8)]) -> Option<(u8, u8, u8)> {
     })
 }
 
-fn render_svg(svg_bytes: &[u8], size: u32) -> Option<RawIcon> {
-    let opt = usvg::Options::default();
-    let tree = usvg::Tree::from_data(svg_bytes, &opt).ok()?;
-    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
-    let sx = size as f32 / tree.size().width();
-    let sy = size as f32 / tree.size().height();
-    let transform = tiny_skia::Transform::from_scale(sx, sy);
-    resvg::render(&tree, transform, &mut pixmap.as_mut());
-    let mut pixels = pixmap.data().to_vec();
-    for chunk in pixels.chunks_exact_mut(4) {
-        let a = chunk[3];
-        if a > 0 && a < 255 {
-            let inv = 255.0 / a as f32;
-            chunk[0] = (chunk[0] as f32 * inv).min(255.0) as u8;
-            chunk[1] = (chunk[1] as f32 * inv).min(255.0) as u8;
-            chunk[2] = (chunk[2] as f32 * inv).min(255.0) as u8;
-        }
-    }
-    Some(RawIcon { width: size, height: size, pixels })
-}
-
 fn load_png_icon(path: &Path, size: u32) -> Option<RawIcon> {
     let img = image::open(path).ok()?;
     let img = img.resize(size, size, image::imageops::FilterType::Lanczos3);
@@ -113,6 +118,8 @@ fn xdg_data_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+// kdeglobals is a plain ini file, we just hand-parse it because pulling in
+// an ini crate for two lines of config isn't worth it
 fn kde_icon_theme() -> Option<String> {
     let config_home = std::env::var("XDG_CONFIG_HOME")
         .map(PathBuf::from)

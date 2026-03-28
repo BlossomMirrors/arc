@@ -3,6 +3,9 @@ use crate::providers::PackageProvider;
 use crate::transaction_manager::TransactionManager;
 use libarc::{Provider, TransactionType};
 
+// figures out which backend to use from the package id string alone.
+// flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no semicolons... also why i hate this with flatpaks).
+// packagekit ids look like "gimp;2.10;x86_64;fedora" (semicolons everywhere)
 fn provider_from_pk_id(package_id: &str) -> Provider {
     let data = package_id.splitn(4, ';').nth(3).unwrap_or("");
     let name = package_id.splitn(2, ';').next().unwrap_or("");
@@ -27,6 +30,8 @@ impl ArcDaemonInterface {
     async fn install_package(
         &self,
         package_id: String,
+        // zbus injects this automatically, it is how we push events back to
+        // all listening clients without them polling us
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> String {
         info!("InstallPackage: {}", package_id);
@@ -42,12 +47,18 @@ impl ArcDaemonInterface {
 
         let provider = self.provider.clone();
         let tm = self.transaction_manager.clone();
+        // emitter is tied to this request's lifetime so we have to own it
+        // before spawning otherwise the borrow checker will not allow the move
         let emitter = emitter.to_owned();
 
+        // spawn so we return the tx id to the caller right away and do the
+        // actual install in the background, progress comes via signals
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
 
+            // bump to 10% right away so the ui does not look frozen while the
+            // real provider is still initialising the download
             tm.update_progress(tx_id, 10).await;
             let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 10).await;
 
@@ -206,6 +217,8 @@ impl ArcDaemonInterface {
         }
     }
 
+    // returns json because dbus does not have a native list type that maps
+    // cleanly to our structs, easier to serialize and let the client deserialize
     async fn search(&self, query: String) -> String {
         info!("Search: {}", query);
         match self.provider.search(&query).await {
@@ -233,6 +246,8 @@ impl ArcDaemonInterface {
         match self.provider.list_updates().await {
             Ok(packages) => {
                 let count = packages.len() as u32;
+                // fire the signal so any notification daemon listening can
+                // show a badge or popup without polling list_updates itself
                 if count > 0 {
                     let _ = Self::updates_available(&emitter, count).await;
                 }
@@ -256,6 +271,7 @@ impl ArcDaemonInterface {
         }
     }
 
+    // the next four are signal declarations, zbus generates the actual emit
     #[zbus(signal)]
     async fn transaction_started(
         signal_emitter: &SignalEmitter<'_>,

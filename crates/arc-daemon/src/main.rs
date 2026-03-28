@@ -1,3 +1,4 @@
+mod appstream_db;
 mod daemon;
 mod dbus_interface;
 mod providers;
@@ -9,6 +10,7 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // RUST_LOG=debug
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),

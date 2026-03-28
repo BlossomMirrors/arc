@@ -1,9 +1,9 @@
 mod icons;
 
 use anyhow::Result;
+use futures_util::StreamExt;
 use libarc::flathub::{fetch_popular, fetch_recently_added, FlathubApp, CATEGORIES};
-use libarc::{connect, ArcDaemonProxy};
-use libarc::{Package, Provider, Transaction, TransactionStatus};
+use libarc::{connect, ArcDaemonProxy, Package, Provider, Settings};
 use slint::{Model, SharedString};
 use std::sync::{Arc, Mutex};
 
@@ -18,6 +18,47 @@ fn packages_to_slint(pkgs: &[Package]) -> Vec<PackageItem> {
             description: SharedString::from(p.description.as_str()),
             installed: p.installed,
             icon: Default::default(),
+        })
+        .collect()
+}
+
+// When Flatpak is preferred, both a Flatpak and a native package can match the same
+// app name. This collapses those duplicates by keeping only the preferred provider's
+// entry. Apps that only exist in one provider always pass through unchanged.
+fn dedup_by_preference(pkgs: Vec<libarc::Package>, settings: &Settings) -> Vec<libarc::Package> {
+    use std::collections::{HashMap, HashSet};
+
+    // build name → flatpak id so we can check the preference list with the right id
+    let flatpak_id_by_name: HashMap<String, String> = pkgs
+        .iter()
+        .filter(|p| p.provider == Provider::Flatpak)
+        .map(|p| (p.name.to_lowercase(), p.id.clone()))
+        .collect();
+    // let flatpak_names: HashSet<String> = flatpak_id_by_name.keys().cloned().collect();
+    let native_names: HashSet<String> = pkgs
+        .iter()
+        .filter(|p| p.provider == Provider::Native)
+        .map(|p| p.name.to_lowercase())
+        .collect();
+
+    pkgs.into_iter()
+        .filter(|p| {
+            let name = p.name.to_lowercase();
+            match p.provider {
+                Provider::Flatpak => {
+                    // no native counterpart → always show
+                    !native_names.contains(&name)
+                        || settings.preferred_for(&p.id) == Provider::Flatpak
+                }
+                Provider::Native => {
+                    // no flatpak counterpart (native-only app) → always show
+                    let Some(flatpak_id) = flatpak_id_by_name.get(&name) else {
+                        return true;
+                    };
+                    // use the flatpak id for the preference lookup since the list uses those ids
+                    settings.preferred_for(flatpak_id) == Provider::Native
+                }
+            }
         })
         .collect()
 }
@@ -48,33 +89,23 @@ async fn wait_for_transaction(
     pkg_id: String,
     installed_after: bool,
 ) {
+    let Some(p) = get_proxy(&proxy_arc) else { return };
+
+    let (mut progress_stream, mut finished_stream) = match tokio::join!(
+        p.receive_transaction_progress(),
+        p.receive_transaction_finished(),
+    ) {
+        (Ok(ps), Ok(fs)) => (ps, fs),
+        _ => return,
+    };
+
     loop {
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        let proxy = get_proxy(&proxy_arc);
-        if let Some(p) = proxy {
-            if let Ok(json) = p.get_transaction(&tx_id).await {
-                if let Ok(tx) = serde_json::from_str::<Transaction>(&json) {
-                    let progress = tx.progress as f32 / 100.0;
-                    match &tx.status {
-                        TransactionStatus::Success => {
-                            let msg = success_msg.clone();
-                            let pid = pkg_id.clone();
-                            let _ = app_weak.upgrade_in_event_loop(move |app| {
-                                update_package_installed(&app, &pid, installed_after);
-                                app.set_status_text(msg.into());
-                                app.set_progress(0.0);
-                            });
-                            break;
-                        }
-                        TransactionStatus::Failed(msg) => {
-                            let msg = format!("Failed: {}", msg);
-                            let _ = app_weak.upgrade_in_event_loop(move |app| {
-                                app.set_status_text(msg.into());
-                                app.set_progress(0.0);
-                            });
-                            break;
-                        }
-                        _ => {
+        tokio::select! {
+            sig = progress_stream.next() => {
+                if let Some(sig) = sig {
+                    if let Ok(args) = sig.args() {
+                        if *args.transaction_id() == tx_id {
+                            let progress = *args.progress() as f32 / 100.0;
                             let _ = app_weak.upgrade_in_event_loop(move |app| {
                                 app.set_progress(progress);
                             });
@@ -82,8 +113,33 @@ async fn wait_for_transaction(
                     }
                 }
             }
-        } else {
-            break;
+            sig = finished_stream.next() => {
+                match sig {
+                    Some(sig) => {
+                        if let Ok(args) = sig.args() {
+                            if *args.transaction_id() == tx_id {
+                                if *args.success() {
+                                    let msg = success_msg.clone();
+                                    let pid = pkg_id.clone();
+                                    let _ = app_weak.upgrade_in_event_loop(move |app| {
+                                        update_package_installed(&app, &pid, installed_after);
+                                        app.set_status_text(msg.into());
+                                        app.set_progress(0.0);
+                                    });
+                                } else {
+                                    let msg = format!("Failed: {}", args.message());
+                                    let _ = app_weak.upgrade_in_event_loop(move |app| {
+                                        app.set_status_text(msg.into());
+                                        app.set_progress(0.0);
+                                    });
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    None => break,
+                }
+            }
         }
     }
 }
@@ -103,14 +159,16 @@ struct RawCategoryData {
 }
 
 struct RawDetailData {
-    id: String,
     name: String,
     developer: String,
     description: String,
     summary: String,
     version: String,
     icon: Option<icons::RawIcon>,
-    installed: bool,
+    flatpak_id: String,
+    native_id: String,
+    flatpak_installed: bool,
+    native_installed: bool,
 }
 
 struct RawPackage {
@@ -240,6 +298,16 @@ fn main() -> Result<()> {
         }
     }
 
+    let settings: Arc<Mutex<Settings>> = Arc::new(Mutex::new(Settings::load()));
+    {
+        let s = settings.lock().unwrap();
+        app.set_settings_preferred(match s.preferred_provider {
+            Provider::Native => "Native",
+            Provider::Flatpak => "Flatpak",
+        }.into());
+        app.set_settings_ignore_native_pref(s.ignore_native_preference);
+    }
+
     {
         let app_weak = app.as_weak();
         app.set_home_loading(true);
@@ -252,11 +320,13 @@ fn main() -> Result<()> {
         let app_weak = app.as_weak();
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
+        let settings = settings.clone();
 
         app.on_search_requested(move |query| {
             let query_str = query.to_string();
             let app_weak2 = app_weak.clone();
             let proxy = get_proxy(&proxy_arc);
+            let s = settings.lock().unwrap().clone();
 
             rt_handle.spawn(async move {
                 let daemon_future = async {
@@ -275,6 +345,8 @@ fn main() -> Result<()> {
                     .iter()
                     .filter_map(|a| a.icon.as_ref().map(|url| (a.app_id.clone(), url.clone())))
                     .collect();
+
+                let daemon_pkgs = dedup_by_preference(daemon_pkgs, &s);
 
                 let mut raw_pkgs: Vec<RawPackage> = Vec::new();
                 for pkg in daemon_pkgs {
@@ -489,53 +561,113 @@ fn main() -> Result<()> {
 
     {
         let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let settings = settings.clone();
         let rt_handle = rt.handle().clone();
 
         app.on_detail_requested(move |app_id| {
             let id = app_id.to_string();
             let app_weak2 = app_weak.clone();
+            let proxy = get_proxy(&proxy_arc);
+            let s = settings.lock().unwrap().clone();
 
             rt_handle.spawn(async move {
                 let flathub = libarc::flathub::fetch_app(&id).await.unwrap_or(None);
-                let raw = if let Some(info) = flathub {
-                    let icon = if let Some(url) = &info.icon {
-                        icons::load_icon(url).await
-                    } else {
-                        None
-                    };
-                    RawDetailData {
-                        id: info.app_id.clone(),
-                        name: info.name.clone(),
-                        developer: info.developer_name.clone().unwrap_or_default(),
-                        description: info.description.clone().unwrap_or_default(),
-                        summary: info.summary.clone(),
-                        version: String::new(),
-                        icon,
-                        installed: false,
-                    }
+
+                let app_name = flathub.as_ref()
+                    .map(|f| f.name.clone())
+                    .unwrap_or_else(|| id.split(';').next().unwrap_or(&id).to_string());
+
+                // search + installed from daemon so we can find both providers
+                let (search_pkgs, installed_pkgs): (Vec<Package>, Vec<Package>) = if let Some(ref p) = proxy {
+                    tokio::join!(
+                        async {
+                            p.search(&app_name).await.ok()
+                                .and_then(|j| serde_json::from_str(&j).ok())
+                                .unwrap_or_default()
+                        },
+                        async {
+                            p.list_installed().await.ok()
+                                .and_then(|j| serde_json::from_str(&j).ok())
+                                .unwrap_or_default()
+                        }
+                    )
                 } else {
-                    RawDetailData {
-                        id: id.clone(),
-                        name: id.clone(),
-                        developer: String::new(),
-                        description: String::new(),
-                        summary: String::new(),
-                        version: String::new(),
-                        icon: None,
-                        installed: false,
-                    }
+                    (vec![], vec![])
+                };
+
+                let name_lower = app_name.to_lowercase();
+                let all_pkgs: Vec<&Package> = search_pkgs.iter().chain(installed_pkgs.iter()).collect();
+
+                let flatpak_pkg = all_pkgs.iter().copied().find(|p| {
+                    p.provider == Provider::Flatpak
+                        && (p.id == id
+                            || p.id.to_lowercase() == id.to_lowercase()
+                            || p.name.to_lowercase() == name_lower)
+                });
+
+                let native_pkg = all_pkgs.iter().copied().find(|p| {
+                    p.provider == Provider::Native
+                        && (p.id.split(';').next().map(|n| n.to_lowercase()).as_deref() == Some(name_lower.as_str())
+                            || p.name.to_lowercase() == name_lower)
+                });
+
+                let flatpak_id = flatpak_pkg
+                    .map(|p| p.id.clone())
+                    .unwrap_or_else(|| if id.contains('.') && !id.contains(';') { id.clone() } else { String::new() });
+                let native_id = native_pkg.map(|p| p.id.clone()).unwrap_or_default();
+
+                let flatpak_installed = flatpak_pkg.map(|p| p.installed).unwrap_or(false)
+                    || installed_pkgs.iter().any(|p| p.provider == Provider::Flatpak && p.id == flatpak_id);
+                let native_installed = native_pkg.map(|p| p.installed).unwrap_or(false);
+
+                let preferred = s.preferred_for(&id);
+                let selected_provider = if preferred == Provider::Native && !native_id.is_empty() {
+                    "native"
+                } else {
+                    "flatpak"
+                }.to_string();
+
+                let icon = if let Some(ref info) = flathub {
+                    if let Some(url) = &info.icon { icons::load_icon(url).await } else { None }
+                } else if !flatpak_id.is_empty() {
+                    let fid = flatpak_id.clone();
+                    tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&fid))
+                        .await.unwrap_or(None)
+                } else {
+                    None
+                };
+
+                let version = flatpak_pkg.or(native_pkg).map(|p| p.version.clone()).unwrap_or_default();
+
+                let raw = RawDetailData {
+                    name: flathub.as_ref().map(|f| f.name.clone()).unwrap_or_else(|| app_name.clone()),
+                    developer: flathub.as_ref().and_then(|f| f.developer_name.clone()).unwrap_or_default(),
+                    description: flathub.as_ref().and_then(|f| f.description.clone()).unwrap_or_default(),
+                    summary: flathub.as_ref().map(|f| f.summary.clone()).unwrap_or_default(),
+                    version,
+                    icon,
+                    flatpak_id,
+                    native_id,
+                    flatpak_installed,
+                    native_installed,
                 };
 
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                    app.set_detail_selected_provider(selected_provider.into());
                     app.set_detail_app(AppDetailData {
-                        id: raw.id.into(),
+                        id: Default::default(),
                         name: raw.name.into(),
                         developer: raw.developer.into(),
                         description: raw.description.into(),
                         summary: raw.summary.into(),
                         version: raw.version.into(),
                         icon: raw.icon.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
-                        installed: raw.installed,
+                        installed: raw.flatpak_installed || raw.native_installed,
+                        flatpak_id: raw.flatpak_id.into(),
+                        native_id: raw.native_id.into(),
+                        flatpak_installed: raw.flatpak_installed,
+                        native_installed: raw.native_installed,
                     });
                     app.set_detail_loading(false);
                 });
@@ -545,6 +677,16 @@ fn main() -> Result<()> {
                 app_ref.set_detail_loading(true);
                 app_ref.set_current_view("detail".into());
             }
+        });
+    }
+
+    {
+        let settings = settings.clone();
+        app.on_save_settings(move |preferred, ignore_native_pref| {
+            let mut s = settings.lock().unwrap();
+            s.preferred_provider = if preferred == "Native" { Provider::Native } else { Provider::Flatpak };
+            s.ignore_native_preference = ignore_native_pref;
+            let _ = s.save();
         });
     }
 

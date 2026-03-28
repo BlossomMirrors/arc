@@ -1,9 +1,9 @@
+use crate::appstream_db::{entry_to_flatpak_package, AppStreamDb};
 use super::PackageProvider;
 use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider};
 use libflatpak::glib;
 use libflatpak::prelude::*;
-use tokio::process::Command;
 
 pub struct FlatpakProvider;
 
@@ -13,6 +13,8 @@ impl FlatpakProvider {
     }
 }
 
+// flatpak can have multiple "installations", the system one (all users) and
+// a per user one under ~/.local/share/flatpak. we want to cover both
 fn all_installations() -> Vec<libflatpak::Installation> {
     let cancel = libflatpak::gio::Cancellable::NONE;
     let mut out = Vec::new();
@@ -57,26 +59,6 @@ fn installation_with_app(
     )))
 }
 
-fn parse_search_output(out: &str) -> Vec<Package> {
-    out.lines()
-        .filter_map(|line| {
-            let mut c = line.splitn(4, '\t');
-            let id = c.next().unwrap_or("").trim().to_string();
-            if id.is_empty() || !id.contains('.') {
-                return None;
-            }
-            Some(Package {
-                id: id.clone(),
-                name: c.next().unwrap_or("").trim().to_string(),
-                version: c.next().unwrap_or("").trim().to_string(),
-                description: c.next().unwrap_or("").trim().to_string(),
-                provider: Provider::Flatpak,
-                installed: false,
-            })
-        })
-        .collect()
-}
-
 fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
     let id = r.name().map(|s| s.to_string()).unwrap_or_default();
     let name = r
@@ -103,32 +85,70 @@ fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
 
 impl FlatpakProvider {
     pub async fn fetch_all(&self) -> Result<Vec<Package>, ArcError> {
-        let out = Command::new("flatpak")
-            .args([
-                "remote-ls",
-                "--app",
-                "--columns=application,name,version,description",
-            ])
-            .output()
-            .await
-            .map_err(|e| ArcError::ProviderError(format!("flatpak remote-ls: {}", e)))?;
-        Ok(parse_search_output(&String::from_utf8_lossy(&out.stdout)))
+        // libflatpak uses glib under the hood which is not tokio aware, so all (we hate glib btw)
+        // calls to it have to go through spawn_blocking or they'll block the runtime
+        tokio::task::spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
+            let cancel = libflatpak::gio::Cancellable::NONE;
+            let db = AppStreamDb::load_flatpak();
+
+            // collect unique app ids from all remotes across all installations
+            let mut app_ids: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for inst in all_installations() {
+                let remotes = inst.list_remotes(cancel).unwrap_or_default();
+                for remote in remotes {
+                    let Some(remote_name) = remote.name() else {
+                        continue;
+                    };
+                    let refs = inst
+                        .list_remote_refs_sync(remote_name.as_str(), cancel)
+                        .unwrap_or_default();
+                    for r in refs {
+                        if r.kind() == libflatpak::RefKind::App {
+                            if let Some(name) = r.name() {
+                                app_ids.insert(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(app_ids
+                .into_iter()
+                .map(|id| {
+                    // enrich with appstream metadata if we have it, otherwise
+                    // just return a bare package with the id as the name
+                    db.find_by_id(&id)
+                        .map(|e| entry_to_flatpak_package(e, false))
+                        .unwrap_or_else(|| Package {
+                            name: id.clone(),
+                            id: id.clone(),
+                            version: String::new(),
+                            description: String::new(),
+                            provider: libarc::Provider::Flatpak,
+                            installed: false,
+                        })
+                })
+                .collect())
+        })
+        .await
+        .map_err(|e| ArcError::ProviderError(e.to_string()))?
     }
 }
 
 #[async_trait]
 impl PackageProvider for FlatpakProvider {
     async fn search(&self, query: &str) -> Result<Vec<Package>, ArcError> {
-        let out = Command::new("flatpak")
-            .args([
-                "search",
-                "--columns=application,name,version,description",
-                query,
-            ])
-            .output()
-            .await
-            .map_err(|e| ArcError::ProviderError(format!("flatpak search: {}", e)))?;
-        Ok(parse_search_output(&String::from_utf8_lossy(&out.stdout)))
+        let query = query.to_string();
+        tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
+            Ok(AppStreamDb::load_flatpak()
+                .search_apps(&query)
+                .into_iter()
+                .map(|e| entry_to_flatpak_package(e, false))
+                .collect())
+        })
+        .await
+        .map_err(|e| ArcError::ProviderError(e.to_string()))?
     }
 
     async fn list_installed(&self) -> Result<Vec<Package>, ArcError> {
