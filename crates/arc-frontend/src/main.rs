@@ -378,10 +378,29 @@ fn main() -> Result<()> {
                     .filter_map(|a| a.icon.as_ref().map(|url| (a.app_id.clone(), url.clone())))
                     .collect();
 
-                let daemon_pkgs = dedup_by_preference(daemon_pkgs, &s);
+                // IDs already returned by daemon (knows installed status)
+                let daemon_ids: std::collections::HashSet<String> =
+                    daemon_pkgs.iter().map(|p| p.id.clone()).collect();
+
+                // Merge Flathub API results not already covered by daemon
+                let mut all_pkgs = daemon_pkgs;
+                for app in &flathub_apps {
+                    if !daemon_ids.contains(&app.app_id) {
+                        all_pkgs.push(libarc::Package {
+                            id: app.app_id.clone(),
+                            name: app.name.clone(),
+                            version: String::new(),
+                            description: app.summary.clone(),
+                            provider: Provider::Flatpak,
+                            installed: false,
+                        });
+                    }
+                }
+
+                let all_pkgs = dedup_by_preference(all_pkgs, &s);
 
                 let mut raw_pkgs: Vec<RawPackage> = Vec::new();
-                for pkg in daemon_pkgs {
+                for pkg in all_pkgs {
                     let icon = if let Some(url) = icon_map.get(&pkg.id) {
                         icons::load_icon(url).await
                     } else if pkg.provider == Provider::Flatpak {
