@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.blossomos.Arc</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Arc Software</name>
+  <summary>Discover and install apps from Flathub and local package files</summary>
+  <summary xml:lang="de">Apps aus Flathub entdecken und lokale Pakete installieren</summary>
+
+  <icon type="stock">org.blossomos.Arc</icon>
+
+  <developer id="org.blossomos">
+    <name>Blossom</name>
+  </developer>
+
+  <description>
+    <p>
+      Arc is a software center for Linux that lets you browse and install Flatpak
+      applications from Flathub and install local package files (.deb, .rpm, .pkg.tar.zst)
+      into isolated Distrobox containers with automatic desktop integration.
+    </p>
+    <p xml:lang="de">
+      Arc ist ein Software-Center für Linux, das das Durchsuchen und Installieren von
+      Flatpak-Apps aus Flathub sowie die Installation lokaler Pakete (.deb, .rpm, .pkg.tar.zst)
+      in isolierten Distrobox-Containern mit automatischer Desktop-Integration ermöglicht.
+    </p>
+    <ul>
+      <li>Browse popular and recently added apps from Flathub</li>
+      <li>Install Flatpak apps with one click</li>
+      <li>Open .deb, .rpm, or Arch packages and install them via Distrobox</li>
+      <li>Offers a Flathub alternative when opening a package file</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">org.blossomos.Arc.desktop</launchable>
+
+  <url type="homepage">https://github.com/blossom-os/arc</url>
+
+  <provides>
+    <binary>arc-frontend</binary>
+  </provides>
+
+  <mimetypes>
+    <mimetype>application/x-deb</mimetype>
+    <mimetype>application/x-rpm</mimetype>
+    <mimetype>application/vnd.archlinux.pkg</mimetype>
+  </mimetypes>
+
+  <categories>
+    <category>System</category>
+    <category>PackageManager</category>
+  </categories>
+
+  <keywords>
+    <keyword>packages</keyword>
+    <keyword>flatpak</keyword>
+    <keyword>distrobox</keyword>
+    <keyword>software center</keyword>
+    <keyword>flathub</keyword>
+  </keywords>
+
+  <releases>
+    <release version="0.1.0" date="2026-04-30">
+      <description>
+        <p>Initial release</p>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1"/>
+
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+</component>

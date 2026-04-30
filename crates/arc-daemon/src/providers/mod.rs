@@ -18,17 +18,17 @@ pub trait PackageProvider: Send + Sync {
     async fn update(&self, package_id: &str) -> Result<(), ArcError>;
 }
 
+pub mod distrobox;
 pub mod flatpak;
-pub mod packagekit;
 
 pub struct MultiProvider {
-    pub native: Arc<packagekit::PackageKitProvider>,
+    pub native: Arc<distrobox::DistroboxProvider>,
     pub flatpak: Arc<flatpak::FlatpakProvider>,
     package_cache: RwLock<Option<(Instant, Vec<Package>)>>,
 }
 
 impl MultiProvider {
-    pub fn new(native: packagekit::PackageKitProvider, flatpak: flatpak::FlatpakProvider) -> Self {
+    pub fn new(native: distrobox::DistroboxProvider, flatpak: flatpak::FlatpakProvider) -> Self {
         Self {
             native: Arc::new(native),
             flatpak: Arc::new(flatpak),
@@ -36,10 +36,13 @@ impl MultiProvider {
         }
     }
 
-    // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no semicolons... also why i hate this with flatpaks).
-    // packagekit ids look like "gimp;2.10;x86_64;fedora" (semicolons everywhere)
+    // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no semicolons).
+    // distrobox ids look like "distrobox:container:name:type" or are file paths.
     fn is_flatpak_id(id: &str) -> bool {
-        !id.contains(';') && id.matches('.').count() >= 2
+        !id.contains('/')
+            && !id.contains(';')
+            && !id.starts_with("distrobox:")
+            && id.matches('.').count() >= 2
     }
 
     async fn fetch_and_store(&self) -> Result<Vec<Package>, ArcError> {

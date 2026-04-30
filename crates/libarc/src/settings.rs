@@ -63,7 +63,7 @@ impl Settings {
         if !self.ignore_native_preference
             && native_preference_list().iter().any(|id| id == app_id)
         {
-            return Provider::Native;
+            return Provider::Distrobox;
         }
         self.preferred_provider.clone()
     }

@@ -9,6 +9,38 @@ use std::sync::{Arc, Mutex};
 
 slint::include_modules!();
 
+fn is_pkg_file(path: &str) -> bool {
+    path.ends_with(".deb")
+        || path.ends_with(".rpm")
+        || path.ends_with(".pkg.tar.xz")
+        || path.ends_with(".pkg.tar.zst")
+}
+
+fn pkg_name_from_filename(filename: &str) -> String {
+    if filename.ends_with(".deb") {
+        return filename.split('_').next().unwrap_or(filename).to_string();
+    }
+    if filename.ends_with(".rpm") {
+        let no_ext = filename.strip_suffix(".rpm").unwrap_or(filename);
+        if let Some(i) = no_ext.find('-') {
+            if no_ext[i + 1..].starts_with(|c: char| c.is_ascii_digit()) {
+                return no_ext[..i].to_string();
+            }
+        }
+        return no_ext.to_string();
+    }
+    let no_ext = filename
+        .strip_suffix(".pkg.tar.zst")
+        .or_else(|| filename.strip_suffix(".pkg.tar.xz"))
+        .unwrap_or(filename);
+    let parts: Vec<&str> = no_ext.split('-').collect();
+    let end = parts
+        .iter()
+        .position(|p| p.starts_with(|c: char| c.is_ascii_digit()))
+        .unwrap_or(parts.len());
+    parts[..end].join("-")
+}
+
 fn packages_to_slint(pkgs: &[Package]) -> Vec<PackageItem> {
     pkgs.iter()
         .map(|p| PackageItem {
@@ -37,7 +69,7 @@ fn dedup_by_preference(pkgs: Vec<libarc::Package>, settings: &Settings) -> Vec<l
     // let flatpak_names: HashSet<String> = flatpak_id_by_name.keys().cloned().collect();
     let native_names: HashSet<String> = pkgs
         .iter()
-        .filter(|p| p.provider == Provider::Native)
+        .filter(|p| p.provider == Provider::Distrobox)
         .map(|p| p.name.to_lowercase())
         .collect();
 
@@ -50,13 +82,13 @@ fn dedup_by_preference(pkgs: Vec<libarc::Package>, settings: &Settings) -> Vec<l
                     !native_names.contains(&name)
                         || settings.preferred_for(&p.id) == Provider::Flatpak
                 }
-                Provider::Native => {
+                Provider::Distrobox => {
                     // no flatpak counterpart (native-only app) → always show
                     let Some(flatpak_id) = flatpak_id_by_name.get(&name) else {
                         return true;
                     };
                     // use the flatpak id for the preference lookup since the list uses those ids
-                    settings.preferred_for(flatpak_id) == Provider::Native
+                    settings.preferred_for(flatpak_id) == Provider::Distrobox
                 }
             }
         })
@@ -302,7 +334,7 @@ fn main() -> Result<()> {
     {
         let s = settings.lock().unwrap();
         app.set_settings_preferred(match s.preferred_provider {
-            Provider::Native => "Native",
+            Provider::Distrobox => "Native",
             Provider::Flatpak => "Flatpak",
         }.into());
         app.set_settings_ignore_native_pref(s.ignore_native_preference);
@@ -607,7 +639,7 @@ fn main() -> Result<()> {
                 });
 
                 let native_pkg = all_pkgs.iter().copied().find(|p| {
-                    p.provider == Provider::Native
+                    p.provider == Provider::Distrobox
                         && (p.id.split(';').next().map(|n| n.to_lowercase()).as_deref() == Some(name_lower.as_str())
                             || p.name.to_lowercase() == name_lower)
                 });
@@ -622,7 +654,7 @@ fn main() -> Result<()> {
                 let native_installed = native_pkg.map(|p| p.installed).unwrap_or(false);
 
                 let preferred = s.preferred_for(&id);
-                let selected_provider = if preferred == Provider::Native && !native_id.is_empty() {
+                let selected_provider = if preferred == Provider::Distrobox && !native_id.is_empty() {
                     "native"
                 } else {
                     "flatpak"
@@ -684,7 +716,7 @@ fn main() -> Result<()> {
         let settings = settings.clone();
         app.on_save_settings(move |preferred, ignore_native_pref| {
             let mut s = settings.lock().unwrap();
-            s.preferred_provider = if preferred == "Native" { Provider::Native } else { Provider::Flatpak };
+            s.preferred_provider = if preferred == "Native" { Provider::Distrobox } else { Provider::Flatpak };
             s.ignore_native_preference = ignore_native_pref;
             let _ = s.save();
         });
@@ -703,6 +735,115 @@ fn main() -> Result<()> {
         if let Some(app_id) = initial_app {
             if let Some(app_ref) = app_weak.upgrade() {
                 app_ref.invoke_detail_requested(app_id.into());
+            }
+        }
+    }
+
+    // package file opened via file manager / MIME association
+    {
+        let app_weak = app.as_weak();
+        let rt_handle = rt.handle().clone();
+        let proxy_arc = proxy_opt.clone();
+
+        let pkg_file = std::env::args().skip(1).find(|a| is_pkg_file(a));
+
+        if let Some(file_path) = pkg_file {
+            let file_name = std::path::Path::new(&file_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&file_path)
+                .to_string();
+            let pkg_name = pkg_name_from_filename(&file_name);
+
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_install_file_path(file_path.clone().into());
+                app_ref.set_install_file_name(file_name.clone().into());
+                app_ref.set_install_file_has_flatpak(false);
+                app_ref.set_current_view("install-file".into());
+            }
+
+            // search Flathub in background for a matching app
+            let app_weak2 = app_weak.clone();
+            rt_handle.spawn(async move {
+                if let Ok(results) = libarc::flathub::search(&pkg_name).await {
+                    if let Some(first) = results.into_iter().next() {
+                        let id = first.app_id.clone();
+                        let name = first.name.clone();
+                        let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                            app.set_install_file_flatpak_id(id.into());
+                            app.set_install_file_flatpak_name(name.into());
+                            app.set_install_file_has_flatpak(true);
+                        });
+                    }
+                }
+            });
+
+            // "Install via Distrobox" — pass the file path as the package_id
+            {
+                let app_weak3 = app_weak.clone();
+                let proxy_arc2 = proxy_arc.clone();
+                let rt_handle2 = rt_handle.clone();
+                let fp = file_path.clone();
+                app.on_install_file_distrobox_requested(move || {
+                    let fp2 = fp.clone();
+                    let app_weak4 = app_weak3.clone();
+                    let proxy_arc3 = proxy_arc2.clone();
+                    rt_handle2.spawn(async move {
+                        let result = if let Some(p) = get_proxy(&proxy_arc3) {
+                            p.install_package(&fp2).await.ok()
+                        } else {
+                            None
+                        };
+                        match result {
+                            Some(tx_id) => {
+                                wait_for_transaction(
+                                    proxy_arc3,
+                                    tx_id,
+                                    app_weak4.clone(),
+                                    format!("Installed {}", fp2),
+                                    fp2.clone(),
+                                    true,
+                                )
+                                .await;
+                                let _ = app_weak4.upgrade_in_event_loop(|app| {
+                                    app.set_current_view("home".into());
+                                });
+                            }
+                            None => {
+                                let _ = app_weak4.upgrade_in_event_loop(|app| {
+                                    app.set_status_text(
+                                        "Failed to connect to Arc daemon.".into(),
+                                    );
+                                });
+                            }
+                        }
+                    });
+                    if let Some(app_ref) = app_weak3.upgrade() {
+                        app_ref.set_current_view("home".into());
+                        app_ref.set_status_text("Installing package...".into());
+                    }
+                });
+            }
+
+            // "Install from Flathub instead" — navigate to detail view
+            {
+                let app_weak3 = app_weak.clone();
+                app.on_install_file_flatpak_requested(move || {
+                    if let Some(app_ref) = app_weak3.upgrade() {
+                        let flatpak_id = app_ref.get_install_file_flatpak_id().to_string();
+                        app_ref.invoke_detail_requested(flatpak_id.into());
+                    }
+                });
+            }
+
+            // "Cancel"
+            {
+                let app_weak3 = app_weak.clone();
+                app.on_install_file_cancelled(move || {
+                    if let Some(app_ref) = app_weak3.upgrade() {
+                        app_ref.set_current_view("home".into());
+                    }
+                });
             }
         }
     }

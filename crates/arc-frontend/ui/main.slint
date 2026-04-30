@@ -118,6 +118,12 @@ export component AppWindow inherits Window {
     in-out property <string> settings-preferred: "Flatpak";
     in-out property <bool> settings-ignore-native-pref: false;
 
+    in-out property <string> install-file-path: "";
+    in-out property <string> install-file-name: "";
+    in-out property <string> install-file-flatpak-id: "";
+    in-out property <string> install-file-flatpak-name: "";
+    in-out property <bool> install-file-has-flatpak: false;
+
     callback detail-requested(string);
     callback search-requested(string);
     callback install-requested(string);
@@ -126,6 +132,9 @@ export component AppWindow inherits Window {
     callback category-selected(string);
     callback app-selected(string);
     callback save-settings(string, bool);
+    callback install-file-distrobox-requested();
+    callback install-file-flatpak-requested();
+    callback install-file-cancelled();
 
     VerticalBox {
         padding: 0px;
@@ -490,6 +499,54 @@ export component AppWindow inherits Window {
 
                         Text { text: root.detail-app.summary; font-size: 13px; wrap: word-wrap; }
                         Text { text: root.detail-app.description; font-size: 12px; wrap: word-wrap; }
+                    }
+                }
+            }
+
+            if root.current-view == "install-file": Rectangle {
+                width: parent.width;
+                height: parent.height;
+
+                VerticalBox {
+                    alignment: center;
+                    padding: 48px;
+                    spacing: 20px;
+
+                    Text {
+                        text: "Install Package";
+                        font-size: 22px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        text: root.install-file-name;
+                        font-size: 13px;
+                        color: #888;
+                        horizontal-alignment: center;
+                        overflow: elide;
+                    }
+
+                    Button {
+                        text: "Install via Distrobox";
+                        clicked => { root.install-file-distrobox-requested(); }
+                    }
+
+                    if root.install-file-has-flatpak: Button {
+                        text: "Install " + root.install-file-flatpak-name + " from Flathub instead";
+                        clicked => { root.install-file-flatpak-requested(); }
+                    }
+
+                    if !root.install-file-has-flatpak: Text {
+                        text: "Searching for Flathub alternative...";
+                        font-size: 11px;
+                        color: #888;
+                        horizontal-alignment: center;
+                    }
+
+                    Button {
+                        text: "Cancel";
+                        clicked => { root.install-file-cancelled(); }
                     }
                 }
             }

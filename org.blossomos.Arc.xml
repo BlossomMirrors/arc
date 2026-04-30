@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-deb">
+    <comment>Debian Package</comment>
+    <glob pattern="*.deb"/>
+  </mime-type>
+  <mime-type type="application/x-rpm">
+    <comment>RPM Package</comment>
+    <glob pattern="*.rpm"/>
+  </mime-type>
+  <mime-type type="application/vnd.archlinux.pkg">
+    <comment>Arch Linux Package</comment>
+    <glob pattern="*.pkg.tar.xz"/>
+    <glob pattern="*.pkg.tar.zst"/>
+  </mime-type>
+</mime-info>

@@ -1,6 +1,6 @@
 use crate::dbus_interface::ArcDaemonInterface;
+use crate::providers::distrobox::DistroboxProvider;
 use crate::providers::flatpak::FlatpakProvider;
-use crate::providers::packagekit::PackageKitProvider;
 use crate::providers::MultiProvider;
 use crate::transaction_manager::TransactionManager;
 use anyhow::Result;
@@ -15,9 +15,7 @@ pub struct Daemon {
 
 impl Daemon {
     pub async fn new() -> Result<Self> {
-        let native = PackageKitProvider::new()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to initialize PackageKit provider: {}", e))?;
+        let native = DistroboxProvider::new();
         let flatpak = FlatpakProvider::new();
 
         let provider = Arc::new(MultiProvider::new(native, flatpak));

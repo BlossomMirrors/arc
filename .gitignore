@@ -4,3 +4,6 @@
 *.swo
 *~
 .DS_Store
+repo
+rpmbuild
+.flatpak

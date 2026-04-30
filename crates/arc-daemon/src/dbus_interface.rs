@@ -3,16 +3,17 @@ use crate::providers::PackageProvider;
 use crate::transaction_manager::TransactionManager;
 use libarc::{Provider, TransactionType};
 
-// figures out which backend to use from the package id string alone.
-// flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no semicolons... also why i hate this with flatpaks).
-// packagekit ids look like "gimp;2.10;x86_64;fedora" (semicolons everywhere)
-fn provider_from_pk_id(package_id: &str) -> Provider {
-    let data = package_id.splitn(4, ';').nth(3).unwrap_or("");
-    let name = package_id.splitn(2, ';').next().unwrap_or("");
-    if data.contains("flatpak") || data.contains("flathub") || name.matches('.').count() >= 2 {
+// flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no slashes or semicolons).
+// distrobox ids look like "distrobox:container:name:type" or are file paths for installs.
+fn provider_from_id(package_id: &str) -> Provider {
+    let looks_like_flatpak = !package_id.contains('/')
+        && !package_id.contains(';')
+        && !package_id.starts_with("distrobox:")
+        && package_id.matches('.').count() >= 2;
+    if looks_like_flatpak {
         Provider::Flatpak
     } else {
-        Provider::Native
+        Provider::Distrobox
     }
 }
 use std::sync::Arc;
@@ -40,7 +41,7 @@ impl ArcDaemonInterface {
             .create(
                 TransactionType::Install,
                 package_id.clone(),
-                provider_from_pk_id(&package_id),
+                provider_from_id(&package_id),
             )
             .await;
         let tx_id = tx.id;
@@ -103,7 +104,7 @@ impl ArcDaemonInterface {
             .create(
                 TransactionType::Remove,
                 package_id.clone(),
-                provider_from_pk_id(&package_id),
+                provider_from_id(&package_id),
             )
             .await;
         let tx_id = tx.id;
@@ -160,7 +161,7 @@ impl ArcDaemonInterface {
             .create(
                 TransactionType::Update,
                 package_id.clone(),
-                provider_from_pk_id(&package_id),
+                provider_from_id(&package_id),
             )
             .await;
         let tx_id = tx.id;

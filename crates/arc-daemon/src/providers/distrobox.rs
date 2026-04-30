@@ -1,0 +1,567 @@
+use super::PackageProvider;
+use async_trait::async_trait;
+use libarc::{ArcError, Package, Provider};
+use std::path::{Path, PathBuf};
+use tokio::fs;
+use tokio::process::Command;
+use tracing::info;
+use uuid::Uuid;
+
+const CONTAINER_DEB: &str = "containerino-debian";
+const CONTAINER_RPM: &str = "containerino-fedora";
+const CONTAINER_ARCH: &str = "containerino-arch";
+
+const IMAGE_DEB: &str = "quay.io/toolbx-images/debian-toolbox:13";
+const IMAGE_RPM: &str = "registry.fedoraproject.org/fedora-toolbox:43";
+const IMAGE_ARCH: &str = "docker.io/archlinux:latest";
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PkgType {
+    Deb,
+    Rpm,
+    Pacman,
+}
+
+impl PkgType {
+    fn as_str(self) -> &'static str {
+        match self {
+            PkgType::Deb => "deb",
+            PkgType::Rpm => "rpm",
+            PkgType::Pacman => "pacman",
+        }
+    }
+
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "deb" => Some(PkgType::Deb),
+            "rpm" => Some(PkgType::Rpm),
+            "pacman" => Some(PkgType::Pacman),
+            _ => None,
+        }
+    }
+}
+
+fn classify_file(path: &Path) -> Option<(String, String, PkgType)> {
+    let name = path.file_name()?.to_str()?;
+    if name.ends_with(".deb") {
+        Some((CONTAINER_DEB.into(), IMAGE_DEB.into(), PkgType::Deb))
+    } else if name.ends_with(".rpm") {
+        Some((CONTAINER_RPM.into(), IMAGE_RPM.into(), PkgType::Rpm))
+    } else if name.ends_with(".pkg.tar.xz") || name.ends_with(".pkg.tar.zst") {
+        Some((CONTAINER_ARCH.into(), IMAGE_ARCH.into(), PkgType::Pacman))
+    } else {
+        None
+    }
+}
+
+fn guess_pkg_name(path: &Path, pkg_type: PkgType) -> String {
+    let base = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    match pkg_type {
+        PkgType::Deb => base.split('_').next().unwrap_or(base).to_string(),
+        PkgType::Rpm => {
+            let no_ext = base.strip_suffix(".rpm").unwrap_or(base);
+            strip_version_suffix(no_ext)
+        }
+        PkgType::Pacman => {
+            let no_ext = base
+                .strip_suffix(".pkg.tar.zst")
+                .or_else(|| base.strip_suffix(".pkg.tar.xz"))
+                .unwrap_or(base);
+            strip_version_suffix(no_ext)
+        }
+    }
+}
+
+fn strip_version_suffix(s: &str) -> String {
+    // "name-1.0-1.arch" → "name"
+    if let Some(i) = s.find('-') {
+        if s[i + 1..].starts_with(|c: char| c.is_ascii_digit()) {
+            return s[..i].to_string();
+        }
+    }
+    s.to_string()
+}
+
+pub struct DistroboxProvider {
+    packages_dir: PathBuf,
+    home: String,
+}
+
+impl DistroboxProvider {
+    pub fn new() -> Self {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        let data_dir = PathBuf::from(&home).join(".local/share/containerino");
+        let packages_dir = data_dir.join("packages");
+        Self {
+            packages_dir,
+            home,
+        }
+    }
+
+    fn info_file(&self, container: &str, pkg_name: &str) -> PathBuf {
+        self.packages_dir
+            .join(format!("{}___{}.info", container, pkg_name))
+    }
+
+    async fn container_exists(&self, name: &str) -> bool {
+        let Ok(out) = Command::new("distrobox")
+            .args(["list", "--no-color"])
+            .output()
+            .await
+        else {
+            return false;
+        };
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        stdout.lines().skip(1).any(|line| {
+            line.split('|')
+                .nth(1)
+                .map(|s| s.trim() == name)
+                .unwrap_or(false)
+        })
+    }
+
+    async fn ensure_container(&self, name: &str, image: &str) -> Result<(), ArcError> {
+        if self.container_exists(name).await {
+            return Ok(());
+        }
+        info!("Creating distrobox container {} ({})", name, image);
+        let status = Command::new("distrobox")
+            .args(["create", "--name", name, "--image", image, "--yes"])
+            .status()
+            .await
+            .map_err(|e| ArcError::ProviderError(format!("distrobox create: {}", e)))?;
+        if !status.success() {
+            return Err(ArcError::ProviderError(format!(
+                "Failed to create container '{}'",
+                name
+            )));
+        }
+        // initialise the container so it is ready for use
+        let _ = Command::new("distrobox")
+            .args(["enter", name, "--", "true"])
+            .status()
+            .await;
+        info!("Container {} ready", name);
+        Ok(())
+    }
+
+    async fn install_and_export(
+        &self,
+        container: &str,
+        pkg_file: &Path,
+        pkg_type: PkgType,
+        guessed_name: &str,
+    ) -> Result<(), ArcError> {
+        fs::create_dir_all(&self.packages_dir)
+            .await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+
+        let work_dir = PathBuf::from(&self.home)
+            .join(format!(".containerino-{}", Uuid::new_v4().simple()));
+        fs::create_dir_all(&work_dir)
+            .await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+
+        let helper_path = work_dir.join("install.sh");
+        let export_log = work_dir.join("exported.log");
+        let pkg_dest = work_dir.join(pkg_file.file_name().unwrap());
+
+        fs::write(&helper_path, INSTALL_HELPER)
+            .await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+        Command::new("chmod")
+            .args(["+x", helper_path.to_str().unwrap()])
+            .status()
+            .await
+            .ok();
+        fs::copy(pkg_file, &pkg_dest)
+            .await
+            .map_err(|e| ArcError::ProviderError(format!("copy package: {}", e)))?;
+
+        let status = Command::new("distrobox")
+            .args([
+                "enter",
+                container,
+                "--",
+                helper_path.to_str().unwrap(),
+                pkg_dest.to_str().unwrap(),
+                pkg_type.as_str(),
+                export_log.to_str().unwrap(),
+            ])
+            .status()
+            .await
+            .map_err(|e| ArcError::ProviderError(format!("distrobox enter: {}", e)))?;
+
+        let log_content = fs::read_to_string(&export_log).await.unwrap_or_default();
+        let _ = fs::remove_dir_all(&work_dir).await;
+
+        if !status.success() {
+            return Err(ArcError::ProviderError(format!(
+                "Installation of {} failed",
+                pkg_file.display()
+            )));
+        }
+
+        let mut real_name = guessed_name.to_string();
+        let mut apps: Vec<String> = Vec::new();
+        let mut bins: Vec<String> = Vec::new();
+
+        for line in log_content.lines() {
+            if let Some(v) = line.strip_prefix("pkgname:") {
+                real_name = v.to_string();
+            } else if let Some(v) = line.strip_prefix("app:") {
+                apps.push(v.to_string());
+            } else if let Some(v) = line.strip_prefix("bin:") {
+                bins.push(v.to_string());
+            }
+        }
+
+        let info = format!(
+            "GUESSED_NAME={}\nREAL_NAME={}\nPKG_TYPE={}\nCONTAINER={}\nEXPORTED_APPS={}\nEXPORTED_BINS={}\n",
+            guessed_name,
+            real_name,
+            pkg_type.as_str(),
+            container,
+            apps.join(" "),
+            bins.join(" "),
+        );
+        fs::write(self.info_file(container, guessed_name), info)
+            .await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn uninstall_package(
+        &self,
+        container: &str,
+        guessed_name: &str,
+        real_name: &str,
+        pkg_type: PkgType,
+        apps: &[String],
+        bins: &[String],
+    ) -> Result<(), ArcError> {
+        let work_dir = PathBuf::from(&self.home)
+            .join(format!(".containerino-{}", Uuid::new_v4().simple()));
+        fs::create_dir_all(&work_dir)
+            .await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+
+        let helper_path = work_dir.join("uninstall.sh");
+        fs::write(&helper_path, UNINSTALL_HELPER)
+            .await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+        Command::new("chmod")
+            .args(["+x", helper_path.to_str().unwrap()])
+            .status()
+            .await
+            .ok();
+
+        let status = Command::new("distrobox")
+            .args([
+                "enter",
+                container,
+                "--",
+                helper_path.to_str().unwrap(),
+                real_name,
+                pkg_type.as_str(),
+            ])
+            .status()
+            .await
+            .map_err(|e| ArcError::ProviderError(format!("distrobox enter: {}", e)))?;
+
+        let _ = fs::remove_dir_all(&work_dir).await;
+
+        if !status.success() {
+            return Err(ArcError::ProviderError(format!(
+                "Uninstall of {} failed",
+                real_name
+            )));
+        }
+
+        let home = PathBuf::from(&self.home);
+        for app in apps.iter().filter(|s| !s.is_empty()) {
+            let _ = fs::remove_file(
+                home.join(".local/share/applications")
+                    .join(format!("{}.desktop", app)),
+            )
+            .await;
+        }
+        for bin in bins.iter().filter(|s| !s.is_empty()) {
+            let _ = fs::remove_file(home.join(".local/bin").join(bin)).await;
+        }
+        let _ = fs::remove_file(self.info_file(container, guessed_name)).await;
+
+        Ok(())
+    }
+
+    async fn read_installed(&self) -> Result<Vec<Package>, ArcError> {
+        let mut entries = match fs::read_dir(&self.packages_dir).await {
+            Ok(e) => e,
+            Err(_) => return Ok(Vec::new()),
+        };
+        let mut packages = Vec::new();
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("info") {
+                continue;
+            }
+            if let Ok(content) = fs::read_to_string(&path).await {
+                if let Some(pkg) = parse_info(&content) {
+                    packages.push(pkg);
+                }
+            }
+        }
+        Ok(packages)
+    }
+
+    pub async fn fetch_all(&self) -> Result<Vec<Package>, ArcError> {
+        self.read_installed().await
+    }
+}
+
+fn parse_info(content: &str) -> Option<Package> {
+    let mut guessed_name = String::new();
+    let mut real_name = String::new();
+    let mut pkg_type = String::new();
+    let mut container = String::new();
+
+    for line in content.lines() {
+        if let Some(v) = line.strip_prefix("GUESSED_NAME=") {
+            guessed_name = v.to_string();
+        } else if let Some(v) = line.strip_prefix("REAL_NAME=") {
+            real_name = v.to_string();
+        } else if let Some(v) = line.strip_prefix("PKG_TYPE=") {
+            pkg_type = v.to_string();
+        } else if let Some(v) = line.strip_prefix("CONTAINER=") {
+            container = v.to_string();
+        }
+    }
+
+    if guessed_name.is_empty() || container.is_empty() {
+        return None;
+    }
+
+    let name = if real_name.is_empty() {
+        guessed_name.clone()
+    } else {
+        real_name
+    };
+
+    let description = match pkg_type.as_str() {
+        "deb" => format!("Installed in Debian container ({})", container),
+        "rpm" => format!("Installed in Fedora container ({})", container),
+        "pacman" => format!("Installed in Arch container ({})", container),
+        _ => format!("Installed in container ({})", container),
+    };
+
+    Some(Package {
+        id: format!("distrobox:{}:{}:{}", container, guessed_name, pkg_type),
+        name,
+        version: String::new(),
+        description,
+        provider: Provider::Distrobox,
+        installed: true,
+    })
+}
+
+#[async_trait]
+impl PackageProvider for DistroboxProvider {
+    async fn search(&self, query: &str) -> Result<Vec<Package>, ArcError> {
+        let q = query.to_lowercase();
+        let installed = self.read_installed().await?;
+        Ok(installed
+            .into_iter()
+            .filter(|p| p.name.to_lowercase().contains(&q))
+            .collect())
+    }
+
+    async fn list_installed(&self) -> Result<Vec<Package>, ArcError> {
+        self.read_installed().await
+    }
+
+    async fn list_updates(&self) -> Result<Vec<Package>, ArcError> {
+        Ok(Vec::new())
+    }
+
+    async fn install(&self, package_id: &str) -> Result<(), ArcError> {
+        let path = PathBuf::from(package_id);
+        let (container, image, pkg_type) = classify_file(&path).ok_or_else(|| {
+            ArcError::ProviderError(format!("Unsupported package format: {}", path.display()))
+        })?;
+        let guessed_name = guess_pkg_name(&path, pkg_type);
+        self.ensure_container(&container, &image).await?;
+        self.install_and_export(&container, &path, pkg_type, &guessed_name)
+            .await
+    }
+
+    async fn remove(&self, package_id: &str) -> Result<(), ArcError> {
+        // package_id format: "distrobox:CONTAINER:GUESSED_NAME:PKG_TYPE"
+        let parts: Vec<&str> = package_id.splitn(4, ':').collect();
+        if parts.len() < 4 || parts[0] != "distrobox" {
+            return Err(ArcError::ProviderError(format!(
+                "Invalid distrobox package id: {}",
+                package_id
+            )));
+        }
+        let (container, guessed_name, pkg_type_str) = (parts[1], parts[2], parts[3]);
+        let pkg_type = PkgType::from_str(pkg_type_str).ok_or_else(|| {
+            ArcError::ProviderError(format!("Unknown pkg type: {}", pkg_type_str))
+        })?;
+
+        let info_path = self.info_file(container, guessed_name);
+        let content = fs::read_to_string(&info_path)
+            .await
+            .map_err(|_| ArcError::PackageNotFound(guessed_name.to_string()))?;
+
+        let mut real_name = guessed_name.to_string();
+        let mut apps: Vec<String> = Vec::new();
+        let mut bins: Vec<String> = Vec::new();
+
+        for line in content.lines() {
+            if let Some(v) = line.strip_prefix("REAL_NAME=") {
+                real_name = v.to_string();
+            } else if let Some(v) = line.strip_prefix("EXPORTED_APPS=") {
+                apps = v.split_whitespace().map(|s| s.to_string()).collect();
+            } else if let Some(v) = line.strip_prefix("EXPORTED_BINS=") {
+                bins = v.split_whitespace().map(|s| s.to_string()).collect();
+            }
+        }
+
+        self.uninstall_package(container, guessed_name, &real_name, pkg_type, &apps, &bins)
+            .await
+    }
+
+    async fn update(&self, _package_id: &str) -> Result<(), ArcError> {
+        Err(ArcError::ProviderError(
+            "Package updates are not supported for distrobox packages".to_string(),
+        ))
+    }
+}
+
+const INSTALL_HELPER: &str = r#"#!/bin/bash
+set -euo pipefail
+
+DEST="$1"
+PKG_TYPE="$2"
+EXPORT_LOG="$3"
+
+CNAME="$(grep '^name=' /run/.containerenv 2>/dev/null | cut -d'"' -f2 || true)"
+ENTER_PREFIX="distrobox-enter${CNAME:+ -n $CNAME} --"
+
+export_desktop_file() {
+    local src="$1"
+    [ -f "$src" ] || return 0
+    local app_name dest_dir dest
+    app_name="$(basename "$src" .desktop)"
+    dest_dir="$HOME/.local/share/applications"
+    dest="$dest_dir/${app_name}.desktop"
+    mkdir -p "$dest_dir"
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^Exec= ]]; then
+            printf 'Exec=%s %s\n' "$ENTER_PREFIX" "${line#Exec=}"
+        elif [[ "$line" =~ ^TryExec= ]]; then
+            :
+        elif [[ "$line" =~ ^Icon=(/usr/share/(icons|pixmaps)/.+)$ ]]; then
+            printf 'Icon=%s/.local/share/%s\n' "$HOME" "${BASH_REMATCH[1]#/usr/share/}"
+        else
+            printf '%s\n' "$line"
+        fi
+    done < "$src" > "$dest"
+
+    printf 'app:%s\n' "$app_name" >> "$EXPORT_LOG"
+}
+
+export_binary() {
+    local bin="$1"
+    [ -f "$bin" ] && [ -x "$bin" ] || return 0
+    local name; name="$(basename "$bin")"
+    mkdir -p "$HOME/.local/bin"
+
+    if distrobox-export --bin "$bin" --export-path "$HOME/.local/bin" 2>/dev/null; then
+        printf 'bin:%s\n' "$name" >> "$EXPORT_LOG"
+        return
+    fi
+
+    local wrapper="$HOME/.local/bin/$name"
+    cat > "$wrapper" << WRAPPER
+#!/bin/sh
+exec $ENTER_PREFIX "$bin" "\$@"
+WRAPPER
+    chmod +x "$wrapper"
+    printf 'bin:%s\n' "$name" >> "$EXPORT_LOG"
+}
+
+copy_icons() {
+    local file_list="$1"
+    while IFS= read -r f; do
+        [[ "$f" == /usr/share/icons/* ]] || [[ "$f" == /usr/share/pixmaps/* ]] || continue
+        [ -f "$f" ] || continue
+        local rel="${f#/usr/share/}"
+        local dest="$HOME/.local/share/$rel"
+        mkdir -p "$(dirname "$dest")"
+        cp "$f" "$dest" 2>/dev/null || true
+    done <<< "$file_list"
+    gtk-update-icon-cache "$HOME/.local/share/icons/hicolor" -q 2>/dev/null || true
+}
+
+export_all() {
+    local file_list="$1"
+    [ -z "$file_list" ] && return 0
+
+    copy_icons "$file_list"
+
+    while IFS= read -r f; do
+        [[ "$f" == *.desktop ]] || continue
+        [[ "$f" == */applications/* ]] || continue
+        export_desktop_file "$f"
+    done <<< "$file_list"
+
+    while IFS= read -r f; do
+        [[ "$f" =~ ^(/usr(/local)?/bin|/bin)/[^/]+$ ]] || continue
+        export_binary "$f"
+    done <<< "$file_list"
+
+    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+}
+
+touch "$EXPORT_LOG"
+
+case "$PKG_TYPE" in
+    deb)
+        sudo apt-get update -qq
+        pkg_name="$(dpkg-deb --field "$DEST" Package)"
+        sudo apt-get install -y "$DEST" || (sudo dpkg -i "$DEST" && sudo apt-get install -f -y)
+        file_list="$(dpkg -L "$pkg_name" 2>/dev/null || true)"
+        ;;
+    rpm)
+        pkg_name="$(rpm -qp --queryformat '%{NAME}' "$DEST" 2>/dev/null)"
+        sudo dnf install -y "$DEST"
+        file_list="$(rpm -ql "$pkg_name" 2>/dev/null || true)"
+        ;;
+    pacman)
+        sudo pacman -Sy --noconfirm
+        pkg_name="$(pacman -Qip "$DEST" 2>/dev/null | awk '/^Name[[:space:]]/{print $3}')"
+        sudo pacman -U --noconfirm "$DEST"
+        file_list="$(pacman -Ql "$pkg_name" 2>/dev/null | awk '{print $2}' || true)"
+        ;;
+esac
+
+printf 'pkgname:%s\n' "$pkg_name" >> "$EXPORT_LOG"
+export_all "$file_list"
+"#;
+
+const UNINSTALL_HELPER: &str = r#"#!/bin/bash
+set -euo pipefail
+PKG_REAL="$1"
+PKG_TYPE="$2"
+case "$PKG_TYPE" in
+    deb)    sudo apt-get remove -y "$PKG_REAL" ;;
+    rpm)    sudo dnf remove -y "$PKG_REAL" ;;
+    pacman) sudo pacman -R --noconfirm "$PKG_REAL" ;;
+esac
+"#;
