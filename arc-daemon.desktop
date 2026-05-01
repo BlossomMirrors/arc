@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Arc Daemon
-Comment=Background service for Arc software center
-Exec=/usr/bin/arc-daemon
-Hidden=false
-NoDisplay=true
-X-GNOME-Autostart-enabled=true

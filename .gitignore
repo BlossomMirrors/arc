@@ -6,4 +6,6 @@
 .DS_Store
 repo
 rpmbuild
+build-dir
+arc-daemon.desktop
 .flatpak
