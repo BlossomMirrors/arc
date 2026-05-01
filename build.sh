@@ -58,7 +58,7 @@ Version:        $VERSION
 Release:        $RELEASE%{?dist}
 Summary:        Software center for Flatpak and local package file installation
 License:        MIT
-URL:            https://codeberg.org/BlossomOS/arc
+URL:            https://git.blossomos.org/Blossom/arc
 
 Source0:        $PACKAGE_NAME-$VERSION.tar.gz
 
