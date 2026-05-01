@@ -1,5 +1,6 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use colored::Colorize;
 use futures_util::StreamExt;
 use libarc::{connect, ArcDaemonProxy};
@@ -35,6 +36,8 @@ enum Commands {
     Search { query: String },
     List,
     RefreshCache,
+    /// Print shell completion script
+    Completions { shell: Shell },
 }
 
 // instead of polling are we done yet every 500ms we subscribe to the daemon's
@@ -81,6 +84,11 @@ async fn wait_for_transaction(proxy: &ArcDaemonProxy<'_>, tx_id: &str) -> Result
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    if let Commands::Completions { shell } = cli.command {
+        generate(shell, &mut Cli::command(), "arc", &mut std::io::stdout());
+        return Ok(());
+    }
+
     let proxy = connect().await.map_err(|e| {
         anyhow::anyhow!(
             "Failed to connect to Arc daemon. Is arc-daemon running?\nError: {}",
@@ -90,6 +98,13 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Install { app_id } => {
+            let app_id = if std::path::Path::new(&app_id).exists() {
+                std::fs::canonicalize(&app_id)
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or(app_id)
+            } else {
+                app_id
+            };
             println!("{} {}", "Installing".cyan(), app_id.bold());
             let tx_id = proxy.install_package(&app_id).await?;
             println!("Transaction ID: {}", tx_id.dimmed());
@@ -164,6 +179,8 @@ async fn main() -> Result<()> {
                 println!("{}", "Cache refresh failed.".red());
             }
         }
+
+        Commands::Completions { .. } => unreachable!(),
 
         Commands::List => {
             println!("{}", "Installed applications:".cyan());

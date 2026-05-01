@@ -9,3 +9,4 @@ rpmbuild
 build-dir
 arc-daemon.desktop
 .flatpak
+completions

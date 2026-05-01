@@ -11,6 +11,12 @@ SOURCES_DIR=$BUILDROOT/SOURCES
 echo "Building Arc..."
 cargo build --release
 
+echo "Generating shell completions..."
+mkdir -p completions
+target/release/arc completions bash > completions/arc.bash
+target/release/arc completions zsh  > completions/_arc
+target/release/arc completions fish > completions/arc.fish
+
 rm -rf $BUILDROOT
 mkdir -p $SPECS_DIR $SOURCES_DIR
 
@@ -37,7 +43,10 @@ tar -czf $SOURCES_DIR/$PACKAGE_NAME-$VERSION.tar.gz \
     org.blossomos.Arc.xml \
     arc-daemon.desktop \
     arc.svg \
-    LICENSE
+    LICENSE \
+    completions/arc.bash \
+    completions/_arc \
+    completions/arc.fish
 
 SPECFILE=$SPECS_DIR/$PACKAGE_NAME.spec
 
@@ -81,6 +90,9 @@ install -Dm 644 org.blossomos.Arc.xml         %{buildroot}/usr/share/mime/packag
 install -Dm 644 arc-daemon.desktop            %{buildroot}/etc/xdg/autostart/arc-daemon.desktop
 install -Dm 644 arc.svg                       %{buildroot}/usr/share/icons/hicolor/scalable/apps/org.blossomos.Arc.svg
 install -Dm 644 LICENSE                       %{buildroot}/usr/share/licenses/$PACKAGE_NAME/LICENSE
+install -Dm 644 completions/arc.bash          %{buildroot}/usr/share/bash-completion/completions/arc
+install -Dm 644 completions/_arc              %{buildroot}/usr/share/zsh/site-functions/_arc
+install -Dm 644 completions/arc.fish          %{buildroot}/usr/share/fish/vendor_completions.d/arc.fish
 
 %post
 update-mime-database /usr/share/mime &>/dev/null || :
@@ -102,6 +114,9 @@ gtk-update-icon-cache /usr/share/icons/hicolor &>/dev/null || :
 /etc/xdg/autostart/arc-daemon.desktop
 /usr/share/icons/hicolor/scalable/apps/org.blossomos.Arc.svg
 %license /usr/share/licenses/$PACKAGE_NAME/LICENSE
+/usr/share/bash-completion/completions/arc
+/usr/share/zsh/site-functions/_arc
+/usr/share/fish/vendor_completions.d/arc.fish
 
 %changelog
 * $(LANG=C date +"%a %b %d %Y") Leonie Ain <me@koyu.space> - $VERSION-$RELEASE
