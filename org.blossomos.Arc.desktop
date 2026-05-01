@@ -8,4 +8,11 @@ Icon=org.blossomos.Arc
 Terminal=false
 Categories=System;PackageManager;
 StartupNotify=true
-MimeType=application/x-deb;application/x-rpm;application/vnd.archlinux.pkg;
+MimeType=application/x-deb;application/x-rpm;application/vnd.archlinux.pkg;x-scheme-handler/appstream;
+Actions=ManageExtensions;
+X-KDE-Protocols=appstream
+
+[Desktop Action ManageExtensions]
+Name=Manage Extensions
+Name[de]=Erweiterungen verwalten
+Exec=arc-frontend --manage-extensions

@@ -98,11 +98,24 @@ install -Dm 644 completions/arc.fish          %{buildroot}/usr/share/fish/vendor
 update-mime-database /usr/share/mime &>/dev/null || :
 update-desktop-database /usr/share/applications &>/dev/null || :
 gtk-update-icon-cache /usr/share/icons/hicolor &>/dev/null || :
+MIMEAPPS=/usr/share/applications/mimeapps.list
+ENTRY="x-scheme-handler/appstream=org.blossomos.Arc.desktop"
+if [ -f "\$MIMEAPPS" ]; then
+    if ! grep -q "x-scheme-handler/appstream" "\$MIMEAPPS"; then
+        grep -q "^\[Default Applications\]" "\$MIMEAPPS" \
+            && sed -i "/^\[Default Applications\]/a \$ENTRY" "\$MIMEAPPS" \
+            || printf '\n[Default Applications]\n%s\n' "\$ENTRY" >> "\$MIMEAPPS"
+    fi
+else
+    printf '[Default Applications]\n%s\n' "\$ENTRY" > "\$MIMEAPPS"
+fi
 
 %postun
 update-mime-database /usr/share/mime &>/dev/null || :
 update-desktop-database /usr/share/applications &>/dev/null || :
 gtk-update-icon-cache /usr/share/icons/hicolor &>/dev/null || :
+sed -i '/x-scheme-handler\/appstream=org\.blossomos\.Arc\.desktop/d' \
+    /usr/share/applications/mimeapps.list 2>/dev/null || :
 
 %files
 /usr/bin/arc-frontend

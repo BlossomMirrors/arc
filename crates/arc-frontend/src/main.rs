@@ -755,6 +755,7 @@ fn main() -> Result<()> {
 
     {
         let app_weak = app.as_weak();
+        let manage_extensions = std::env::args().any(|a| a == "--manage-extensions");
         let initial_app = std::env::args()
             .find(|a| a.starts_with("appstream://") || a.starts_with("appstream:"))
             .map(|a| {
@@ -763,7 +764,13 @@ fn main() -> Result<()> {
                     .trim_start_matches("//")
                     .to_string()
             });
-        if let Some(app_id) = initial_app {
+
+        if manage_extensions || initial_app.as_deref() == Some("") {
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_current_view("installed".into());
+                app_ref.invoke_refresh_requested();
+            }
+        } else if let Some(app_id) = initial_app.filter(|s| !s.is_empty()) {
             if let Some(app_ref) = app_weak.upgrade() {
                 app_ref.invoke_detail_requested(app_id.into());
             }
