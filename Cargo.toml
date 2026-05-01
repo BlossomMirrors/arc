@@ -2,7 +2,7 @@
 members = [
     "crates/libarc",
     "crates/arc-daemon",
-    "crates/arc-cli",
+    "crates/arcli",
     "crates/arc-frontend",
 ]
 resolver = "2"

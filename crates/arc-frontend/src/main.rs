@@ -101,6 +101,20 @@ fn get_proxy(
     proxy_arc.lock().unwrap().clone()
 }
 
+async fn get_or_connect(
+    proxy_arc: &Arc<Mutex<Option<ArcDaemonProxy<'static>>>>,
+) -> Option<ArcDaemonProxy<'static>> {
+    if let Some(p) = get_proxy(proxy_arc) {
+        return Some(p);
+    }
+    if let Ok(proxy) = connect().await {
+        *proxy_arc.lock().unwrap() = Some(proxy.clone());
+        Some(proxy)
+    } else {
+        None
+    }
+}
+
 fn update_package_installed(app: &AppWindow, pkg_id: &str, installed: bool) {
     let model = app.get_packages();
     let count = model.row_count();
@@ -485,11 +499,10 @@ fn main() -> Result<()> {
         app.on_install_requested(move |pkg_id| {
             let pkg_id_str = pkg_id.to_string();
             let app_weak2 = app_weak.clone();
-            let proxy = get_proxy(&proxy_arc);
             let proxy_arc2 = proxy_arc.clone();
 
             rt_handle.spawn(async move {
-                let result = if let Some(p) = proxy {
+                let result = if let Some(p) = get_or_connect(&proxy_arc2).await {
                     p.install_package(&pkg_id_str).await.ok()
                 } else {
                     None
@@ -531,11 +544,10 @@ fn main() -> Result<()> {
         app.on_remove_requested(move |pkg_id| {
             let pkg_id_str = pkg_id.to_string();
             let app_weak2 = app_weak.clone();
-            let proxy = get_proxy(&proxy_arc);
             let proxy_arc2 = proxy_arc.clone();
 
             rt_handle.spawn(async move {
-                let result = if let Some(p) = proxy {
+                let result = if let Some(p) = get_or_connect(&proxy_arc2).await {
                     p.remove_package(&pkg_id_str).await.ok()
                 } else {
                     None

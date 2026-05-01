@@ -14,14 +14,28 @@ cargo build --release
 rm -rf $BUILDROOT
 mkdir -p $SPECS_DIR $SOURCES_DIR
 
+# Generate XDG autostart entry for the daemon
+cat > arc-daemon.desktop <<'AUTOSTART'
+[Desktop Entry]
+Type=Application
+Name=Arc Daemon
+Comment=Background service for Arc software center
+Exec=/usr/bin/arc-daemon
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+AUTOSTART
+
 # Bundle pre-built binaries + data files into source tarball
 tar -czf $SOURCES_DIR/$PACKAGE_NAME-$VERSION.tar.gz \
     --transform "s|^|$PACKAGE_NAME-$VERSION/|" \
     target/release/arc-frontend \
     target/release/arc-daemon \
+    target/release/arc \
     org.blossomos.Arc.desktop \
     org.blossomos.Arc.metainfo.xml \
     org.blossomos.Arc.xml \
+    arc-daemon.desktop \
     arc.svg \
     LICENSE
 
@@ -60,18 +74,11 @@ automatic desktop integration.
 %install
 install -Dm 755 target/release/arc-frontend %{buildroot}/usr/bin/arc-frontend
 install -Dm 755 target/release/arc-daemon   %{buildroot}/usr/bin/arc-daemon
-cat > arc-wrapper <<'WRAPPER'
-#!/bin/sh
-arc-daemon &
-DAEMON_PID=\$!
-trap "kill \$DAEMON_PID 2>/dev/null" EXIT
-sleep 0.5
-exec arc-frontend "\$@"
-WRAPPER
-install -Dm 755 arc-wrapper %{buildroot}/usr/bin/arc
+install -Dm 755 target/release/arc      %{buildroot}/usr/bin/arc
 install -Dm 644 org.blossomos.Arc.desktop     %{buildroot}/usr/share/applications/org.blossomos.Arc.desktop
 install -Dm 644 org.blossomos.Arc.metainfo.xml %{buildroot}/usr/share/metainfo/org.blossomos.Arc.metainfo.xml
 install -Dm 644 org.blossomos.Arc.xml         %{buildroot}/usr/share/mime/packages/org.blossomos.Arc.xml
+install -Dm 644 arc-daemon.desktop            %{buildroot}/etc/xdg/autostart/arc-daemon.desktop
 install -Dm 644 arc.svg                       %{buildroot}/usr/share/icons/hicolor/scalable/apps/org.blossomos.Arc.svg
 install -Dm 644 LICENSE                       %{buildroot}/usr/share/licenses/$PACKAGE_NAME/LICENSE
 
@@ -92,6 +99,7 @@ gtk-update-icon-cache /usr/share/icons/hicolor &>/dev/null || :
 /usr/share/applications/org.blossomos.Arc.desktop
 /usr/share/metainfo/org.blossomos.Arc.metainfo.xml
 /usr/share/mime/packages/org.blossomos.Arc.xml
+/etc/xdg/autostart/arc-daemon.desktop
 /usr/share/icons/hicolor/scalable/apps/org.blossomos.Arc.svg
 %license /usr/share/licenses/$PACKAGE_NAME/LICENSE
 

@@ -7,9 +7,9 @@ use tokio::process::Command;
 use tracing::info;
 use uuid::Uuid;
 
-const CONTAINER_DEB: &str = "containerino-debian";
-const CONTAINER_RPM: &str = "containerino-fedora";
-const CONTAINER_ARCH: &str = "containerino-arch";
+const CONTAINER_DEB: &str = "arc-debian";
+const CONTAINER_RPM: &str = "arc-fedora";
+const CONTAINER_ARCH: &str = "arc-arch";
 
 const IMAGE_DEB: &str = "quay.io/toolbx-images/debian-toolbox:13";
 const IMAGE_RPM: &str = "registry.fedoraproject.org/fedora-toolbox:43";
@@ -93,7 +93,7 @@ pub struct DistroboxProvider {
 impl DistroboxProvider {
     pub fn new() -> Self {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-        let data_dir = PathBuf::from(&home).join(".local/share/containerino");
+        let data_dir = PathBuf::from(&home).join(".local/share/arc");
         let packages_dir = data_dir.join("packages");
         Self {
             packages_dir,
@@ -160,7 +160,7 @@ impl DistroboxProvider {
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
 
         let work_dir = PathBuf::from(&self.home)
-            .join(format!(".containerino-{}", Uuid::new_v4().simple()));
+            .join(format!(".arc-distrobox-{}", Uuid::new_v4().simple()));
         fs::create_dir_all(&work_dir)
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
@@ -245,7 +245,7 @@ impl DistroboxProvider {
         bins: &[String],
     ) -> Result<(), ArcError> {
         let work_dir = PathBuf::from(&self.home)
-            .join(format!(".containerino-{}", Uuid::new_v4().simple()));
+            .join(format!(".arc-distrobox-{}", Uuid::new_v4().simple()));
         fs::create_dir_all(&work_dir)
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
