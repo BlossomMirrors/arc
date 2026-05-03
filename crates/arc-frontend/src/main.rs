@@ -90,6 +90,11 @@ fn dedup_by_preference(pkgs: Vec<libarc::Package>, settings: &Settings) -> Vec<l
                     // use the flatpak id for the preference lookup since the list uses those ids
                     settings.preferred_for(flatpak_id) == Provider::Distrobox
                 }
+                Provider::Bottles => {
+                    // no native counterpart → always show
+                    !native_names.contains(&name)
+                        || settings.preferred_for(&p.id) == Provider::Bottles
+                }
             }
         })
         .collect()
@@ -135,7 +140,9 @@ async fn wait_for_transaction(
     pkg_id: String,
     installed_after: bool,
 ) {
-    let Some(p) = get_proxy(&proxy_arc) else { return };
+    let Some(p) = get_proxy(&proxy_arc) else {
+        return;
+    };
 
     let (mut progress_stream, mut finished_stream) = match tokio::join!(
         p.receive_transaction_progress(),
@@ -230,7 +237,11 @@ impl RawPackage {
             version: slint::SharedString::from(self.pkg.version.as_str()),
             description: slint::SharedString::from(self.pkg.description.as_str()),
             installed: self.pkg.installed,
-            icon: self.icon.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+            icon: self
+                .icon
+                .as_ref()
+                .map(|r| r.to_slint_image())
+                .unwrap_or_default(),
         }
     }
 }
@@ -253,7 +264,11 @@ impl RawCard {
 async fn load_home(app_weak: slint::Weak<AppWindow>) {
     let (popular_raw, recent_raw) = tokio::join!(fetch_popular(), fetch_recently_added());
 
-    let popular: Vec<FlathubApp> = popular_raw.unwrap_or_default().into_iter().take(10).collect();
+    let popular: Vec<FlathubApp> = popular_raw
+        .unwrap_or_default()
+        .into_iter()
+        .take(10)
+        .collect();
     let recent: Vec<FlathubApp> = recent_raw.unwrap_or_default().into_iter().take(4).collect();
 
     let mut popular_cards: Vec<RawCard> = Vec::new();
@@ -291,7 +306,10 @@ async fn load_home(app_weak: slint::Weak<AppWindow>) {
         let name = icon_name.to_string();
         let data = tokio::task::spawn_blocking(move || icons::load_category_icon(&name))
             .await
-            .unwrap_or(icons::CategoryIconData { icon: None, color: (80, 80, 90) });
+            .unwrap_or(icons::CategoryIconData {
+                icon: None,
+                color: (80, 80, 90),
+            });
         raw_cats.push(RawCategoryData {
             id: id.to_string(),
             label: label.to_string(),
@@ -308,7 +326,11 @@ async fn load_home(app_weak: slint::Weak<AppWindow>) {
             .map(|c| CategoryItem {
                 id: SharedString::from(c.id.as_str()),
                 label: SharedString::from(c.label.as_str()),
-                icon: c.icon.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+                icon: c
+                    .icon
+                    .as_ref()
+                    .map(|r| r.to_slint_image())
+                    .unwrap_or_default(),
                 bg_color: slint::Color::from_rgb_u8(c.color.0, c.color.1, c.color.2),
             })
             .collect();
@@ -347,10 +369,14 @@ fn main() -> Result<()> {
     let settings: Arc<Mutex<Settings>> = Arc::new(Mutex::new(Settings::load()));
     {
         let s = settings.lock().unwrap();
-        app.set_settings_preferred(match s.preferred_provider {
-            Provider::Distrobox => "Native",
-            Provider::Flatpak => "Flatpak",
-        }.into());
+        app.set_settings_preferred(
+            match s.preferred_provider {
+                Provider::Distrobox => "Native",
+                Provider::Flatpak => "Flatpak",
+                Provider::Bottles => "Bottles",
+            }
+            .into(),
+        );
         app.set_settings_ignore_native_pref(s.ignore_native_preference);
     }
 
@@ -377,8 +403,12 @@ fn main() -> Result<()> {
             rt_handle.spawn(async move {
                 let daemon_future = async {
                     if let Some(p) = &proxy {
-                        p.search(&query_str).await.ok()
-                            .and_then(|json| serde_json::from_str::<Vec<libarc::Package>>(&json).ok())
+                        p.search(&query_str)
+                            .await
+                            .ok()
+                            .and_then(|json| {
+                                serde_json::from_str::<Vec<libarc::Package>>(&json).ok()
+                            })
                             .unwrap_or_default()
                     } else {
                         vec![]
@@ -455,7 +485,9 @@ fn main() -> Result<()> {
 
             rt_handle.spawn(async move {
                 let packages: Vec<libarc::Package> = if let Some(p) = proxy {
-                    p.list_installed().await.ok()
+                    p.list_installed()
+                        .await
+                        .ok()
                         .and_then(|json| serde_json::from_str(&json).ok())
                         .unwrap_or_default()
                 } else {
@@ -592,7 +624,9 @@ fn main() -> Result<()> {
             let _proxy = get_proxy(&proxy_arc);
 
             rt_handle.spawn(async move {
-                let result = libarc::flathub::fetch_category(&cat).await.unwrap_or_default();
+                let result = libarc::flathub::fetch_category(&cat)
+                    .await
+                    .unwrap_or_default();
                 let packages: Vec<Package> = result
                     .iter()
                     .map(|a| Package {
@@ -637,30 +671,37 @@ fn main() -> Result<()> {
             rt_handle.spawn(async move {
                 let flathub = libarc::flathub::fetch_app(&id).await.unwrap_or(None);
 
-                let app_name = flathub.as_ref()
+                let app_name = flathub
+                    .as_ref()
                     .map(|f| f.name.clone())
                     .unwrap_or_else(|| id.split(';').next().unwrap_or(&id).to_string());
 
                 // search + installed from daemon so we can find both providers
-                let (search_pkgs, installed_pkgs): (Vec<Package>, Vec<Package>) = if let Some(ref p) = proxy {
-                    tokio::join!(
-                        async {
-                            p.search(&app_name).await.ok()
-                                .and_then(|j| serde_json::from_str(&j).ok())
-                                .unwrap_or_default()
-                        },
-                        async {
-                            p.list_installed().await.ok()
-                                .and_then(|j| serde_json::from_str(&j).ok())
-                                .unwrap_or_default()
-                        }
-                    )
-                } else {
-                    (vec![], vec![])
-                };
+                let (search_pkgs, installed_pkgs): (Vec<Package>, Vec<Package>) =
+                    if let Some(ref p) = proxy {
+                        tokio::join!(
+                            async {
+                                p.search(&app_name)
+                                    .await
+                                    .ok()
+                                    .and_then(|j| serde_json::from_str(&j).ok())
+                                    .unwrap_or_default()
+                            },
+                            async {
+                                p.list_installed()
+                                    .await
+                                    .ok()
+                                    .and_then(|j| serde_json::from_str(&j).ok())
+                                    .unwrap_or_default()
+                            }
+                        )
+                    } else {
+                        (vec![], vec![])
+                    };
 
                 let name_lower = app_name.to_lowercase();
-                let all_pkgs: Vec<&Package> = search_pkgs.iter().chain(installed_pkgs.iter()).collect();
+                let all_pkgs: Vec<&Package> =
+                    search_pkgs.iter().chain(installed_pkgs.iter()).collect();
 
                 let flatpak_pkg = all_pkgs.iter().copied().find(|p| {
                     p.provider == Provider::Flatpak
@@ -671,43 +712,72 @@ fn main() -> Result<()> {
 
                 let native_pkg = all_pkgs.iter().copied().find(|p| {
                     p.provider == Provider::Distrobox
-                        && (p.id.split(';').next().map(|n| n.to_lowercase()).as_deref() == Some(name_lower.as_str())
+                        && (p.id.split(';').next().map(|n| n.to_lowercase()).as_deref()
+                            == Some(name_lower.as_str())
                             || p.name.to_lowercase() == name_lower)
                 });
 
-                let flatpak_id = flatpak_pkg
-                    .map(|p| p.id.clone())
-                    .unwrap_or_else(|| if id.contains('.') && !id.contains(';') { id.clone() } else { String::new() });
+                let flatpak_id = flatpak_pkg.map(|p| p.id.clone()).unwrap_or_else(|| {
+                    if id.contains('.') && !id.contains(';') {
+                        id.clone()
+                    } else {
+                        String::new()
+                    }
+                });
                 let native_id = native_pkg.map(|p| p.id.clone()).unwrap_or_default();
 
                 let flatpak_installed = flatpak_pkg.map(|p| p.installed).unwrap_or(false)
-                    || installed_pkgs.iter().any(|p| p.provider == Provider::Flatpak && p.id == flatpak_id);
+                    || installed_pkgs
+                        .iter()
+                        .any(|p| p.provider == Provider::Flatpak && p.id == flatpak_id);
                 let native_installed = native_pkg.map(|p| p.installed).unwrap_or(false);
 
                 let preferred = s.preferred_for(&id);
-                let selected_provider = if preferred == Provider::Distrobox && !native_id.is_empty() {
-                    "native"
-                } else {
-                    "flatpak"
-                }.to_string();
+                let selected_provider =
+                    if preferred == Provider::Distrobox && !native_id.is_empty() {
+                        "native"
+                    } else {
+                        "flatpak"
+                    }
+                    .to_string();
 
                 let icon = if let Some(ref info) = flathub {
-                    if let Some(url) = &info.icon { icons::load_icon(url).await } else { None }
+                    if let Some(url) = &info.icon {
+                        icons::load_icon(url).await
+                    } else {
+                        None
+                    }
                 } else if !flatpak_id.is_empty() {
                     let fid = flatpak_id.clone();
                     tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&fid))
-                        .await.unwrap_or(None)
+                        .await
+                        .unwrap_or(None)
                 } else {
                     None
                 };
 
-                let version = flatpak_pkg.or(native_pkg).map(|p| p.version.clone()).unwrap_or_default();
+                let version = flatpak_pkg
+                    .or(native_pkg)
+                    .map(|p| p.version.clone())
+                    .unwrap_or_default();
 
                 let raw = RawDetailData {
-                    name: flathub.as_ref().map(|f| f.name.clone()).unwrap_or_else(|| app_name.clone()),
-                    developer: flathub.as_ref().and_then(|f| f.developer_name.clone()).unwrap_or_default(),
-                    description: flathub.as_ref().and_then(|f| f.description.clone()).unwrap_or_default(),
-                    summary: flathub.as_ref().map(|f| f.summary.clone()).unwrap_or_default(),
+                    name: flathub
+                        .as_ref()
+                        .map(|f| f.name.clone())
+                        .unwrap_or_else(|| app_name.clone()),
+                    developer: flathub
+                        .as_ref()
+                        .and_then(|f| f.developer_name.clone())
+                        .unwrap_or_default(),
+                    description: flathub
+                        .as_ref()
+                        .and_then(|f| f.description.clone())
+                        .unwrap_or_default(),
+                    summary: flathub
+                        .as_ref()
+                        .map(|f| f.summary.clone())
+                        .unwrap_or_default(),
                     version,
                     icon,
                     flatpak_id,
@@ -725,7 +795,11 @@ fn main() -> Result<()> {
                         description: raw.description.into(),
                         summary: raw.summary.into(),
                         version: raw.version.into(),
-                        icon: raw.icon.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+                        icon: raw
+                            .icon
+                            .as_ref()
+                            .map(|r| r.to_slint_image())
+                            .unwrap_or_default(),
                         installed: raw.flatpak_installed || raw.native_installed,
                         flatpak_id: raw.flatpak_id.into(),
                         native_id: raw.native_id.into(),
@@ -747,7 +821,11 @@ fn main() -> Result<()> {
         let settings = settings.clone();
         app.on_save_settings(move |preferred, ignore_native_pref| {
             let mut s = settings.lock().unwrap();
-            s.preferred_provider = if preferred == "Native" { Provider::Distrobox } else { Provider::Flatpak };
+            s.preferred_provider = if preferred == "Native" {
+                Provider::Distrobox
+            } else {
+                Provider::Flatpak
+            };
             s.ignore_native_preference = ignore_native_pref;
             let _ = s.save();
         });
@@ -849,9 +927,7 @@ fn main() -> Result<()> {
                             }
                             None => {
                                 let _ = app_weak4.upgrade_in_event_loop(|app| {
-                                    app.set_status_text(
-                                        "Failed to connect to Arc daemon.".into(),
-                                    );
+                                    app.set_status_text("Failed to connect to Arc daemon.".into());
                                 });
                             }
                         }

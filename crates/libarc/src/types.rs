@@ -5,6 +5,7 @@ use uuid::Uuid;
 pub enum Provider {
     Flatpak,
     Distrobox,
+    Bottles,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

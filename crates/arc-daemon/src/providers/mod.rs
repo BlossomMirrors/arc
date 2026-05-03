@@ -18,22 +18,33 @@ pub trait PackageProvider: Send + Sync {
     async fn update(&self, package_id: &str) -> Result<(), ArcError>;
 }
 
+pub mod bottles;
 pub mod distrobox;
 pub mod flatpak;
 
 pub struct MultiProvider {
     pub native: Arc<distrobox::DistroboxProvider>,
     pub flatpak: Arc<flatpak::FlatpakProvider>,
+    pub bottles: Arc<bottles::BottlesProvider>,
     package_cache: RwLock<Option<(Instant, Vec<Package>)>>,
 }
 
 impl MultiProvider {
-    pub fn new(native: distrobox::DistroboxProvider, flatpak: flatpak::FlatpakProvider) -> Self {
+    pub fn new(
+        native: distrobox::DistroboxProvider,
+        flatpak: flatpak::FlatpakProvider,
+        bottles: bottles::BottlesProvider,
+    ) -> Self {
         Self {
             native: Arc::new(native),
             flatpak: Arc::new(flatpak),
+            bottles: Arc::new(bottles),
             package_cache: RwLock::new(None),
         }
+    }
+
+    fn is_bottles_id(id: &str) -> bool {
+        id.starts_with("bottles:")
     }
 
     // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no semicolons).
@@ -42,14 +53,19 @@ impl MultiProvider {
         !id.contains('/')
             && !id.contains(';')
             && !id.starts_with("distrobox:")
+            && !id.starts_with("bottles:")
             && id.matches('.').count() >= 2
     }
 
     async fn fetch_and_store(&self) -> Result<Vec<Package>, ArcError> {
-        // fetch from both providers at the same time instead of one after the other
-        let (flatpak, native) = tokio::join!(self.flatpak.fetch_all(), self.native.fetch_all());
+        let (flatpak, native, bottles) = tokio::join!(
+            self.flatpak.fetch_all(),
+            self.native.fetch_all(),
+            self.bottles.fetch_all()
+        );
         let mut packages = flatpak.unwrap_or_default();
         packages.extend(native.unwrap_or_default());
+        packages.extend(bottles.unwrap_or_default());
         {
             let mut cache = self.package_cache.write().await;
             *cache = Some((Instant::now(), packages.clone()));
@@ -90,10 +106,14 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn list_installed(&self) -> Result<Vec<Package>, ArcError> {
-        let (native, flatpak) =
-            tokio::join!(self.native.list_installed(), self.flatpak.list_installed());
+        let (native, flatpak, bottles) = tokio::join!(
+            self.native.list_installed(),
+            self.flatpak.list_installed(),
+            self.bottles.list_installed()
+        );
         let mut results = native.unwrap_or_default();
         results.extend(flatpak.unwrap_or_default());
+        results.extend(bottles.unwrap_or_default());
         Ok(results)
     }
 
@@ -106,7 +126,9 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn install(&self, package_id: &str) -> Result<(), ArcError> {
-        if Self::is_flatpak_id(package_id) {
+        if Self::is_bottles_id(package_id) {
+            self.bottles.install(package_id).await
+        } else if Self::is_flatpak_id(package_id) {
             self.flatpak.install(package_id).await
         } else {
             self.native.install(package_id).await
@@ -114,7 +136,9 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn remove(&self, package_id: &str) -> Result<(), ArcError> {
-        if Self::is_flatpak_id(package_id) {
+        if Self::is_bottles_id(package_id) {
+            self.bottles.remove(package_id).await
+        } else if Self::is_flatpak_id(package_id) {
             self.flatpak.remove(package_id).await
         } else {
             self.native.remove(package_id).await
@@ -122,7 +146,9 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn update(&self, package_id: &str) -> Result<(), ArcError> {
-        if Self::is_flatpak_id(package_id) {
+        if Self::is_bottles_id(package_id) {
+            self.bottles.update(package_id).await
+        } else if Self::is_flatpak_id(package_id) {
             self.flatpak.update(package_id).await
         } else {
             self.native.update(package_id).await

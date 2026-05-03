@@ -5,7 +5,11 @@ use libarc::{Provider, TransactionType};
 
 // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no slashes or semicolons).
 // distrobox ids look like "distrobox:container:name:type" or are file paths for installs.
+// bottles ids look like "bottles:<slug>".
 fn provider_from_id(package_id: &str) -> Provider {
+    if package_id.starts_with("bottles:") {
+        return Provider::Bottles;
+    }
     let looks_like_flatpak = !package_id.contains('/')
         && !package_id.contains(';')
         && !package_id.starts_with("distrobox:")
