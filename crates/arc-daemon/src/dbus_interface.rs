@@ -2,6 +2,7 @@ use crate::providers::MultiProvider;
 use crate::providers::PackageProvider;
 use crate::transaction_manager::TransactionManager;
 use libarc::{Provider, TransactionType};
+use std::sync::Arc;
 
 // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no slashes or semicolons).
 // distrobox ids look like "distrobox:container:name:type" or are file paths for installs.
@@ -20,7 +21,7 @@ fn provider_from_id(package_id: &str) -> Provider {
         Provider::Distrobox
     }
 }
-use std::sync::Arc;
+
 use tracing::{error, info};
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
@@ -28,7 +29,6 @@ use zbus::object_server::SignalEmitter;
 pub struct ArcDaemonInterface {
     pub provider: Arc<MultiProvider>,
     pub transaction_manager: Arc<TransactionManager>,
-    pub icon_cache: Arc<crate::icon_cache::IconCache>,
 }
 
 #[interface(name = "dev.arc.ArcDaemon1")]
@@ -223,60 +223,6 @@ impl ArcDaemonInterface {
         }
     }
 
-    /// Get icon data as raw bytes (width, height, rgba pixels)
-    async fn get_icon(&self, app_id: String) -> Vec<u8> {
-        match self.icon_cache.get_icon(&app_id).await {
-            Some(icon) => {
-                let mut data = Vec::new();
-                data.extend_from_slice(&icon.width.to_le_bytes());
-                data.extend_from_slice(&icon.height.to_le_bytes());
-                data.extend_from_slice(&icon.pixels);
-                data
-            }
-            None => Vec::new(),
-        }
-    }
-
-    /// Get native package icon data
-    async fn get_native_icon(&self, package_name: String) -> Vec<u8> {
-        match self.icon_cache.get_native_icon(&package_name).await {
-            Some(icon) => {
-                let mut data = Vec::new();
-                data.extend_from_slice(&icon.width.to_le_bytes());
-                data.extend_from_slice(&icon.height.to_le_bytes());
-                data.extend_from_slice(&icon.pixels);
-                data
-            }
-            None => Vec::new(),
-        }
-    }
-
-    /// Get popular app IDs for the home page
-    async fn get_popular_apps(&self, limit: u32) -> String {
-        let apps = self.icon_cache.get_popular_apps(limit as usize).await;
-        serde_json::to_string(&apps).unwrap_or_else(|_| "[]".to_string())
-    }
-
-    /// Get recent app IDs for the home page
-    async fn get_recent_apps(&self, limit: u32) -> String {
-        let apps = self.icon_cache.get_recent_apps(limit as usize).await;
-        serde_json::to_string(&apps).unwrap_or_else(|_| "[]".to_string())
-    }
-
-    /// Get app info from cached AppStream data
-    async fn get_cached_app_info(&self, app_id: String) -> String {
-        match self.icon_cache.get_app_info(&app_id).await {
-            Some(info) => serde_json::to_string(&info).unwrap_or_else(|_| "null".to_string()),
-            None => "null".to_string(),
-        }
-    }
-
-    /// Get apps by category from cached AppStream data
-    async fn get_apps_by_category(&self, category: String) -> String {
-        let apps = self.icon_cache.get_apps_by_category(&category).await;
-        serde_json::to_string(&apps).unwrap_or_else(|_| "[]".to_string())
-    }
-
     // returns json because dbus does not have a native list type that maps
     // cleanly to our structs, easier to serialize and let the client deserialize
     async fn search(&self, query: String) -> String {
@@ -303,26 +249,7 @@ impl ArcDaemonInterface {
 
     async fn get_app_info(&self, package_id: String) -> String {
         info!("GetAppInfo: {}", package_id);
-        // First try cached AppStream data (much faster)
-        if let Some(info) = self.icon_cache.get_app_info(&package_id).await {
-            // Convert cached AppInfo to Package for compatibility
-            let package = libarc::Package {
-                id: info.id,
-                name: info.name,
-                version: String::new(),
-                description: info.description,
-                provider: libarc::Provider::Flatpak,
-                installed: false,
-                icon_url: if info.icon_available {
-                    Some(String::new())
-                } else {
-                    None
-                },
-                remote: None,
-            };
-            return serde_json::to_string(&Some(package)).unwrap_or_else(|_| "null".to_string());
-        }
-        // Fall back to provider query if not in cache
+        // Go directly to provider for all app types
         match self.provider.get_app_info(&package_id).await {
             Ok(Some(package)) => {
                 serde_json::to_string(&Some(package)).unwrap_or_else(|_| "null".to_string())
@@ -385,13 +312,6 @@ impl ArcDaemonInterface {
                 serde_json::json!({ "success": false, "error": e.to_string() }).to_string()
             }
         }
-    }
-
-    /// Search apps in cached AppStream data (faster than full provider search)
-    async fn search_cached(&self, query: String) -> String {
-        info!("SearchCached: {}", query);
-        let apps = self.icon_cache.search_apps(&query).await;
-        serde_json::to_string(&apps).unwrap_or_else(|_| "[]".to_string())
     }
 
     // the next four are signal declarations, zbus generates the actual emit

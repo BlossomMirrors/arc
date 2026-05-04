@@ -219,8 +219,10 @@ struct RawDetailData {
     icon: Option<RawIcon>,
     flatpak_id: String,
     native_id: String,
+    lutris_id: String,
     flatpak_installed: bool,
     native_installed: bool,
+    lutris_installed: bool,
 }
 
 struct RawPackage {
@@ -260,227 +262,70 @@ impl RawCard {
     }
 }
 
-async fn load_home(app_weak: slint::Weak<AppWindow>, proxy: Option<ArcDaemonProxy<'static>>) {
-    // Load popular and recent apps from daemon's cache or fallback to local AppStream
-    let popular_app_ids: Vec<String> = if let Some(ref p) = proxy {
-        let result = p
-            .get_popular_apps(10)
-            .await
-            .unwrap_or_else(|_| "[]".to_string());
-        serde_json::from_str(&result).unwrap_or_default()
-    } else {
-        // Fallback to local AppStream if daemon unavailable
-        let db = appstream_db::appstream_db_for_home();
-        db.get_popular_apps(10)
-            .iter()
-            .map(|a| a.id.clone())
-            .collect()
-    };
+async fn load_home(app_weak: slint::Weak<AppWindow>, _proxy: Option<ArcDaemonProxy<'static>>) {
+    // Load popular and recent apps directly from local AppStream data
+    let db = appstream_db::appstream_db_for_home();
 
-    let recent_app_ids: Vec<String> = if let Some(ref p) = proxy {
-        let result = p
-            .get_recent_apps(4)
-            .await
-            .unwrap_or_else(|_| "[]".to_string());
-        serde_json::from_str(&result).unwrap_or_default()
-    } else {
-        // Fallback to local AppStream if daemon unavailable
-        let db = appstream_db::appstream_db_for_home();
-        db.get_recent_apps(4).iter().map(|a| a.id.clone()).collect()
-    };
+    let popular_apps: Vec<_> = db.get_popular_apps(10);
+    let recent_apps: Vec<_> = db.get_recent_apps(4);
 
-    // Load local AppStream data for fallback (wrapped in Arc for sharing between tasks)
-    let local_db = std::sync::Arc::new(appstream_db::appstream_db_for_home());
-
-    // Fetch app info and icons in parallel for popular apps
-    let popular_tasks: Vec<_> = popular_app_ids
-        .iter()
-        .map(|app_id| {
-            let app_id = app_id.clone();
-            let proxy_clone = proxy.clone();
-            let local_db = local_db.clone();
-            tokio::spawn(async move {
-                let info = if let Some(ref p) = proxy_clone {
-                    let result = p
-                        .get_cached_app_info(&app_id)
-                        .await
-                        .unwrap_or_else(|_| "null".to_string());
-                    serde_json::from_str::<CachedAppInfo>(&result).ok()
-                } else {
-                    local_db.find_by_id(&app_id).map(|e| CachedAppInfo {
-                        id: e.id,
-                        name: e.name,
-                        summary: e.summary,
-                        description: String::new(),
-                        icon_available: e.icon_url.is_some(),
-                    })
-                };
-
-                // Try daemon first, then fallback to local icon loading
-                let icon = if let Some(ref p) = proxy_clone {
-                    let icon_data = p.get_icon(&app_id).await.unwrap_or_default();
-                    if icon_data.len() >= 8 {
-                        let width = u32::from_le_bytes([
-                            icon_data[0],
-                            icon_data[1],
-                            icon_data[2],
-                            icon_data[3],
-                        ]);
-                        let height = u32::from_le_bytes([
-                            icon_data[4],
-                            icon_data[5],
-                            icon_data[6],
-                            icon_data[7],
-                        ]);
-                        let pixels = icon_data[8..].to_vec();
-                        Some(RawIcon {
-                            width,
-                            height,
-                            pixels,
-                        })
+    // Load icons in parallel for popular apps
+    let popular_tasks: Vec<_> = popular_apps
+        .into_iter()
+        .map(|app| {
+            tokio::task::spawn_blocking(move || {
+                let icon = app.icon_url.as_ref().and_then(|url| {
+                    if url.starts_with("local:") {
+                        icons::load_local_flatpak_icon(&app.id)
                     } else {
-                        // Fallback to local icon loading
-                        if let Some(entry) = local_db.find_by_id(&app_id) {
-                            if let Some(url) = &entry.icon_url {
-                                if url.starts_with("local:") {
-                                    icons::load_local_flatpak_icon(&app_id)
-                                } else {
-                                    icons::load_icon(url).await
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
+                        let rt = tokio::runtime::Handle::current();
+                        rt.block_on(icons::load_icon(url))
                     }
-                } else {
-                    // No daemon, load locally
-                    if let Some(entry) = local_db.find_by_id(&app_id) {
-                        if let Some(url) = &entry.icon_url {
-                            if url.starts_with("local:") {
-                                icons::load_local_flatpak_icon(&app_id)
-                            } else {
-                                icons::load_icon(url).await
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                };
-
-                (app_id, info, icon)
+                });
+                (app, icon)
             })
         })
         .collect();
 
-    let popular_results = join_all(popular_tasks).await;
+    let popular_results: Vec<_> = join_all(popular_tasks).await;
     let mut popular_cards: Vec<RawCard> = Vec::new();
     for result in popular_results {
-        if let Ok((app_id, info, icon)) = result {
+        if let Ok((app, icon)) = result {
             popular_cards.push(RawCard {
-                id: app_id.clone(),
-                name: info.as_ref().map(|i| i.name.clone()).unwrap_or_default(),
-                summary: info.as_ref().map(|i| i.summary.clone()).unwrap_or_default(),
+                id: app.id.clone(),
+                name: app.name.clone(),
+                summary: app.summary.clone(),
                 icon,
             });
         }
     }
 
-    // Fetch app info and icons in parallel for recent apps
-    let recent_tasks: Vec<_> = recent_app_ids
-        .iter()
-        .map(|app_id| {
-            let app_id = app_id.clone();
-            let proxy_clone = proxy.clone();
-            let local_db = local_db.clone();
-            tokio::spawn(async move {
-                let info = if let Some(ref p) = proxy_clone {
-                    let result = p
-                        .get_cached_app_info(&app_id)
-                        .await
-                        .unwrap_or_else(|_| "null".to_string());
-                    serde_json::from_str::<CachedAppInfo>(&result).ok()
-                } else {
-                    local_db.find_by_id(&app_id).map(|e| CachedAppInfo {
-                        id: e.id,
-                        name: e.name,
-                        summary: e.summary,
-                        description: String::new(),
-                        icon_available: e.icon_url.is_some(),
-                    })
-                };
-
-                // Try daemon first, then fallback to local icon loading
-                let icon = if let Some(ref p) = proxy_clone {
-                    let icon_data = p.get_icon(&app_id).await.unwrap_or_default();
-                    if icon_data.len() >= 8 {
-                        let width = u32::from_le_bytes([
-                            icon_data[0],
-                            icon_data[1],
-                            icon_data[2],
-                            icon_data[3],
-                        ]);
-                        let height = u32::from_le_bytes([
-                            icon_data[4],
-                            icon_data[5],
-                            icon_data[6],
-                            icon_data[7],
-                        ]);
-                        let pixels = icon_data[8..].to_vec();
-                        Some(RawIcon {
-                            width,
-                            height,
-                            pixels,
-                        })
+    // Load icons in parallel for recent apps
+    let recent_tasks: Vec<_> = recent_apps
+        .into_iter()
+        .map(|app| {
+            tokio::task::spawn_blocking(move || {
+                let icon = app.icon_url.as_ref().and_then(|url| {
+                    if url.starts_with("local:") {
+                        icons::load_local_flatpak_icon(&app.id)
                     } else {
-                        // Fallback to local icon loading
-                        if let Some(entry) = local_db.find_by_id(&app_id) {
-                            if let Some(url) = &entry.icon_url {
-                                if url.starts_with("local:") {
-                                    icons::load_local_flatpak_icon(&app_id)
-                                } else {
-                                    icons::load_icon(url).await
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
+                        let rt = tokio::runtime::Handle::current();
+                        rt.block_on(icons::load_icon(url))
                     }
-                } else {
-                    // No daemon, load locally
-                    if let Some(entry) = local_db.find_by_id(&app_id) {
-                        if let Some(url) = &entry.icon_url {
-                            if url.starts_with("local:") {
-                                icons::load_local_flatpak_icon(&app_id)
-                            } else {
-                                icons::load_icon(url).await
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                };
-
-                (app_id, info, icon)
+                });
+                (app, icon)
             })
         })
         .collect();
 
-    let recent_results = join_all(recent_tasks).await;
+    let recent_results: Vec<_> = join_all(recent_tasks).await;
     let mut recent_cards: Vec<RawCard> = Vec::new();
     for result in recent_results {
-        if let Ok((app_id, info, icon)) = result {
+        if let Ok((app, icon)) = result {
             recent_cards.push(RawCard {
-                id: app_id.clone(),
-                name: info.as_ref().map(|i| i.name.clone()).unwrap_or_default(),
-                summary: info.as_ref().map(|i| i.summary.clone()).unwrap_or_default(),
+                id: app.id.clone(),
+                name: app.name.clone(),
+                summary: app.summary.clone(),
                 icon,
             });
         }
@@ -678,14 +523,26 @@ fn main() -> Result<()> {
                                 .await
                                 .unwrap_or(None)
                             }
-                            Provider::Distrobox | Provider::Lutris => {
-                                // Use load_native_package_icon for native/Distrobox and Lutris packages
+                            Provider::Distrobox => {
+                                // Use load_native_package_icon for native/Distrobox packages
                                 let name = pkg.name.clone();
                                 tokio::task::spawn_blocking(move || {
                                     icons::load_native_package_icon(&name)
                                 })
                                 .await
                                 .unwrap_or(None)
+                            }
+                            Provider::Lutris => {
+                                // Load Lutris icon from remote URL provided by Lutris API
+                                if let Some(icon_url) = &pkg.icon_url {
+                                    let url = icon_url.clone();
+                                    tokio::spawn(async move { icons::load_lutris_icon(&url).await })
+                                        .await
+                                        .ok()
+                                        .flatten()
+                                } else {
+                                    None
+                                }
                             }
                         }
                     })
@@ -829,13 +686,35 @@ fn main() -> Result<()> {
                 let icon_futures: Vec<_> = packages
                     .iter()
                     .map(|pkg| async {
-                        if pkg.provider == Provider::Flatpak {
-                            let id = pkg.id.clone();
-                            tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
+                        match pkg.provider {
+                            Provider::Flatpak => {
+                                let id = pkg.id.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    icons::load_local_flatpak_icon(&id)
+                                })
                                 .await
                                 .unwrap_or(None)
-                        } else {
-                            None
+                            }
+                            Provider::Lutris => {
+                                // Load Lutris icon from remote URL
+                                if let Some(icon_url) = &pkg.icon_url {
+                                    let url = icon_url.clone();
+                                    tokio::spawn(async move { icons::load_lutris_icon(&url).await })
+                                        .await
+                                        .ok()
+                                        .flatten()
+                                } else {
+                                    None
+                                }
+                            }
+                            Provider::Distrobox => {
+                                let name = pkg.name.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    icons::load_native_package_icon(&name)
+                                })
+                                .await
+                                .unwrap_or(None)
+                            }
                         }
                     })
                     .collect();
@@ -937,6 +816,11 @@ fn main() -> Result<()> {
                             || p.name.to_lowercase() == name_lower)
                 });
 
+                let lutris_pkg = all_pkgs.iter().copied().find(|p| {
+                    p.provider == Provider::Lutris
+                        && (p.id == id || p.name.to_lowercase() == name_lower)
+                });
+
                 let flatpak_id = flatpak_pkg.map(|p| p.id.clone()).unwrap_or_else(|| {
                     if id.contains('.') && !id.contains(';') {
                         id.clone()
@@ -945,25 +829,40 @@ fn main() -> Result<()> {
                     }
                 });
                 let native_id = native_pkg.map(|p| p.id.clone()).unwrap_or_default();
+                let lutris_id = lutris_pkg.map(|p| p.id.clone()).unwrap_or_default();
 
                 let flatpak_installed = flatpak_pkg.map(|p| p.installed).unwrap_or(false)
                     || installed_pkgs
                         .iter()
                         .any(|p| p.provider == Provider::Flatpak && p.id == flatpak_id);
                 let native_installed = native_pkg.map(|p| p.installed).unwrap_or(false);
+                let lutris_installed = lutris_pkg.map(|p| p.installed).unwrap_or(false);
 
-                let preferred = s.preferred_for(&id);
-                let selected_provider =
-                    if preferred == Provider::Distrobox && !native_id.is_empty() {
-                        "native"
-                    } else {
-                        "flatpak"
-                    }
-                    .to_string();
+                let _preferred = s.preferred_for(&id);
 
                 let icon = if !flatpak_id.is_empty() {
                     let fid = flatpak_id.clone();
                     tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&fid))
+                        .await
+                        .unwrap_or(None)
+                } else if !lutris_id.is_empty() {
+                    // Load Lutris icon from remote URL
+                    if let Some(lutris) = &lutris_pkg {
+                        if let Some(icon_url) = &lutris.icon_url {
+                            let url = icon_url.clone();
+                            tokio::spawn(async move { icons::load_lutris_icon(&url).await })
+                                .await
+                                .ok()
+                                .flatten()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else if !native_id.is_empty() {
+                    let name = native_pkg.map(|p| p.name.clone()).unwrap_or_default();
+                    tokio::task::spawn_blocking(move || icons::load_native_package_icon(&name))
                         .await
                         .unwrap_or(None)
                 } else {
@@ -977,6 +876,8 @@ fn main() -> Result<()> {
 
                 let description = flatpak_pkg
                     .or(app_info.as_ref())
+                    .or(native_pkg)
+                    .or(lutris_pkg)
                     .map(|p| p.description.clone())
                     .unwrap_or_default();
 
@@ -984,10 +885,11 @@ fn main() -> Result<()> {
                     name: flatpak_pkg
                         .or(app_info.as_ref())
                         .or(native_pkg)
+                        .or(lutris_pkg)
                         .map(|p| p.name.clone())
                         .unwrap_or_else(|| app_name.clone()),
                     developer: String::new(), // AppStream data doesn't typically include developer name in Package
-                    description,
+                    description: description,
                     summary: flatpak_pkg
                         .or(app_info.as_ref())
                         .map(|p| p.description.clone())
@@ -996,12 +898,13 @@ fn main() -> Result<()> {
                     icon,
                     flatpak_id,
                     native_id,
+                    lutris_id,
                     flatpak_installed,
                     native_installed,
+                    lutris_installed,
                 };
 
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
-                    app.set_detail_selected_provider(selected_provider.into());
                     app.set_detail_app(AppDetailData {
                         id: Default::default(),
                         name: raw.name.into(),
@@ -1014,11 +917,15 @@ fn main() -> Result<()> {
                             .as_ref()
                             .map(|r| r.to_slint_image())
                             .unwrap_or_default(),
-                        installed: raw.flatpak_installed || raw.native_installed,
+                        installed: raw.flatpak_installed
+                            || raw.native_installed
+                            || raw.lutris_installed,
                         flatpak_id: raw.flatpak_id.into(),
                         native_id: raw.native_id.into(),
+                        lutris_id: raw.lutris_id.into(),
                         flatpak_installed: raw.flatpak_installed,
                         native_installed: raw.native_installed,
+                        lutris_installed: raw.lutris_installed,
                     });
                     app.set_detail_loading(false);
                 });

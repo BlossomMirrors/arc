@@ -337,6 +337,12 @@ fn darken((r, g, b): (u8, u8, u8), factor: f32) -> (u8, u8, u8) {
     )
 }
 
+/// Load icon for Lutris games from remote URL provided by Lutris API
+pub async fn load_lutris_icon(icon_url: &str) -> Option<RawIcon> {
+    // Lutris provides remote URLs for icons, download and render them
+    load_icon(icon_url).await
+}
+
 pub fn load_local_flatpak_icon(app_id: &str) -> Option<RawIcon> {
     // First try to find icon in Flatpak appstream icon directories
     if let Some(path) = find_flatpak_icon_path(app_id) {

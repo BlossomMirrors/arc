@@ -30,8 +30,10 @@ export struct AppDetailData {
     installed: bool,
     flatpak-id: string,
     native-id: string,
+    lutris-id: string,
     flatpak-installed: bool,
     native-installed: bool,
+    lutris-installed: bool,
 }
 
 export struct AppCardData {
@@ -112,9 +114,6 @@ export component AppWindow inherits Window {
     in-out property <string> prev-view: "home";
     in-out property <AppDetailData> detail-app;
     in-out property <bool> detail-loading: false;
-    // "flatpak" or "native" set by rust when detail loads, updated by the combobox
-    in-out property <string> detail-selected-provider: "flatpak";
-
     in-out property <string> settings-preferred: "Flatpak";
     in-out property <bool> settings-ignore-native-pref: false;
 
@@ -454,36 +453,15 @@ export component AppWindow inherits Window {
                                 Text { text: root.detail-app.developer; font-size: 13px; }
                                 Text { text: root.detail-app.version; font-size: 11px; }
 
-                                // provider selector only shown when both are available
-                                if root.detail-app.flatpak-id != "" && root.detail-app.native-id != "": HorizontalBox {
-                                    spacing: 8px;
-                                    alignment: start;
 
-                                    Text {
-                                        text: "Source:";
-                                        font-size: 12px;
-                                        vertical-alignment: center;
-                                    }
-
-                                    ComboBox {
-                                        model: ["Flatpak", "Native"];
-                                        current-value: root.detail-selected-provider == "native" ? "Native" : "Flatpak";
-                                        selected(value) => {
-                                            root.detail-selected-provider = value == "Native" ? "native" : "flatpak";
-                                        }
-                                    }
-                                }
                             }
 
                             Button {
-                                property <bool> is-installed:
-                                    root.detail-selected-provider == "native"
-                                    ? root.detail-app.native-installed
-                                    : root.detail-app.flatpak-installed;
-                                property <string> active-id:
-                                    root.detail-selected-provider == "native"
-                                    ? root.detail-app.native-id
-                                    : root.detail-app.flatpak-id;
+                                property <bool> is-lutris: root.detail-app.lutris-id != "" && root.settings-preferred == "Lutris";
+                                property <bool> is-native: root.detail-app.native-id != "" && root.settings-preferred == "Native";
+                                property <bool> is-flatpak: root.detail-app.flatpak-id != "" && (root.settings-preferred == "Flatpak" || (!self.is-lutris && !self.is-native));
+                                property <bool> is-installed: self.is-lutris ? root.detail-app.lutris-installed : (self.is-native ? root.detail-app.native-installed : root.detail-app.flatpak-installed);
+                                property <string> active-id: self.is-lutris ? root.detail-app.lutris-id : (self.is-native ? root.detail-app.native-id : root.detail-app.flatpak-id);
 
                                 text: self.is-installed ? "Remove" : "Install";
                                 enabled: self.active-id != "";

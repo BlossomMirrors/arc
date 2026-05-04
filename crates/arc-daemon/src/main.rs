@@ -1,7 +1,6 @@
 mod appstream_db;
 mod daemon;
 mod dbus_interface;
-mod icon_cache;
 mod providers;
 mod transaction_manager;
 
