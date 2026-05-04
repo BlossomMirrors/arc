@@ -34,6 +34,7 @@ export struct AppDetailData {
     flatpak-installed: bool,
     native-installed: bool,
     lutris-installed: bool,
+    verified: bool,
 }
 
 export struct AppCardData {
@@ -470,7 +471,18 @@ export component AppWindow inherits Window {
                                 horizontal-stretch: 1;
 
                                 Text { text: root.detail-app.name; font-size: 20px; font-weight: 700; overflow: elide; }
-                                Text { text: root.detail-app.developer; font-size: 13px; }
+                                HorizontalBox {
+                                    spacing: 4px;
+                                    alignment: center;
+                                    Text { text: root.detail-app.developer; font-size: 13px; }
+                                    if root.detail-app.verified: Image {
+                                        source: @image-url("../assets/verified.png");
+                                        width: 14px;
+                                        height: 14px;
+                                        vertical-alignment: center;
+                                        colorize: #0d6efd;
+                                    }
+                                }
                                 Text { text: root.detail-app.version; font-size: 11px; }
                             }
 

@@ -95,6 +95,20 @@ fn get_proxy(
     proxy_arc.lock().unwrap().clone()
 }
 
+async fn check_flathub_verification(app_id: &str) -> bool {
+    let url = format!("https://flathub.org/api/v2/appstream/{}", app_id);
+    let Ok(resp) = reqwest::get(&url).await else {
+        return false;
+    };
+    let Ok(json) = resp.json::<serde_json::Value>().await else {
+        return false;
+    };
+    json.get("metadata")
+        .and_then(|m| m.get("flathub::verification::verified"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
 async fn get_or_connect(
     proxy_arc: &Arc<Mutex<Option<ArcDaemonProxy<'static>>>>,
 ) -> Option<ArcDaemonProxy<'static>> {
@@ -230,6 +244,7 @@ struct RawDetailData {
     flatpak_installed: bool,
     native_installed: bool,
     lutris_installed: bool,
+    verified: bool,
 }
 
 struct RawPackage {
@@ -269,10 +284,7 @@ impl RawCard {
     }
 }
 
-async fn load_home(
-    app_weak: slint::Weak<AppWindow>,
-    _proxy: Option<ArcDaemonProxy<'static>>,
-) {
+async fn load_home(app_weak: slint::Weak<AppWindow>, _proxy: Option<ArcDaemonProxy<'static>>) {
     let appstream_db = AppStreamDb::get_static();
     // Load popular and recent apps from cached AppStream data
     let popular_apps: Vec<_> = appstream_db.get_popular_apps(10);
@@ -1020,6 +1032,33 @@ fn main() -> Result<()> {
                 // Use locally loaded AppStream DB for fast name/description/icon lookup
                 let appstream_info = appstream_db.find_by_id(&app_id);
 
+                // Determine verification status and developer name
+                let (developer, verified) = if let Some(fp_pkg) = &flatpak_pkg {
+                    let remote = fp_pkg.remote.as_deref().unwrap_or("");
+                    let dev_name = appstream_info
+                        .as_ref()
+                        .and_then(|a| a.id.split('.').last().map(|s| s.to_string()))
+                        .unwrap_or_else(|| fp_pkg.name.clone());
+
+                    if remote == "blossomos" {
+                        // Always verified for blossomos remote
+                        (dev_name, true)
+                    } else if remote == "flathub" {
+                        // Check Flathub API for verification status
+                        let app_id_for_api = fp_pkg.id.clone();
+                        let api_verified = check_flathub_verification(&app_id_for_api).await;
+                        (dev_name, api_verified)
+                    } else {
+                        (dev_name, false)
+                    }
+                } else {
+                    let dev_name = appstream_info
+                        .as_ref()
+                        .and_then(|a| a.id.split('.').last().map(|s| s.to_string()))
+                        .unwrap_or_else(|| app_name.clone());
+                    (dev_name, false)
+                };
+
                 let flatpak_id = flatpak_pkg.map(|p| p.id.clone()).unwrap_or_else(|| {
                     if app_id.contains('.') && !app_id.contains(';') {
                         app_id.to_string()
@@ -1112,7 +1151,7 @@ fn main() -> Result<()> {
 
                 let raw = RawDetailData {
                     name,
-                    developer: String::new(),
+                    developer,
                     description,
                     summary: appstream_info
                         .as_ref()
@@ -1126,6 +1165,7 @@ fn main() -> Result<()> {
                     flatpak_installed,
                     native_installed,
                     lutris_installed,
+                    verified,
                 };
 
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
@@ -1151,6 +1191,7 @@ fn main() -> Result<()> {
                         installed: raw.flatpak_installed
                             || raw.native_installed
                             || raw.lutris_installed,
+                        verified: raw.verified,
                     });
                     app.set_detail_loading(false);
                 });
