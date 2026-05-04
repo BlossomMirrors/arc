@@ -1,11 +1,12 @@
 use super::PackageProvider;
 use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider};
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashSet;
+use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use tokio::fs;
 use tokio::process::Command;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
@@ -38,16 +39,13 @@ type CatalogEntry = (String, LutrisGame, Vec<String>);
 
 pub struct LutrisProvider {
     catalog_cache: RwLock<Option<(Instant, Vec<CatalogEntry>)>>,
-    installs_dir: PathBuf,
     http_client: reqwest::Client,
 }
 
 impl LutrisProvider {
     pub fn new() -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
         Self {
             catalog_cache: RwLock::new(None),
-            installs_dir: PathBuf::from(&home).join(".local/share/arc/lutris-installs"),
             http_client: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(30))
                 .build()
@@ -55,12 +53,33 @@ impl LutrisProvider {
         }
     }
 
-    pub fn pkg_id(slug: &str) -> String {
-        format!("lutris:{}", slug)
+    fn find_lutris_db(&self) -> Option<PathBuf> {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+        let home_path = PathBuf::from(&home);
+
+        // Check Flatpak installation first (most common on modern systems)
+        let flatpak_db = home_path.join(".var/app/net.lutris.Lutris/data/lutris/pga.db");
+        if flatpak_db.exists() {
+            return Some(flatpak_db);
+        }
+
+        // Check native installation
+        let native_db = home_path.join(".config/lutris/pga.db");
+        if native_db.exists() {
+            return Some(native_db);
+        }
+
+        // Check legacy location
+        let legacy_db = home_path.join(".local/share/lutris/pga.db");
+        if legacy_db.exists() {
+            return Some(legacy_db);
+        }
+
+        None
     }
 
-    fn info_path(&self, slug: &str) -> PathBuf {
-        self.installs_dir.join(format!("{}.json", slug))
+    pub fn pkg_id(slug: &str) -> String {
+        format!("lutris:{}", slug)
     }
 
     // Each non-comment line is either "game_slug:installer_slug" or just "installer_slug"
@@ -185,19 +204,39 @@ impl LutrisProvider {
     }
 
     async fn installed_slugs(&self) -> HashSet<String> {
-        let mut out = HashSet::new();
-        let Ok(mut dir) = fs::read_dir(&self.installs_dir).await else {
-            return out;
-        };
-        while let Ok(Some(entry)) = dir.next_entry().await {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    out.insert(stem.to_string());
+        // Read installed state directly from Lutris's pga.db database
+        let db_path = self.find_lutris_db();
+        tokio::task::spawn_blocking(move || {
+            if let Some(path) = db_path {
+                let mut slugs = HashSet::new();
+                match Connection::open(&path) {
+                    Ok(conn) => {
+                        match conn.prepare("SELECT installer_slug FROM games WHERE installed = 1") {
+                            Ok(mut stmt) => {
+                                let rows = stmt.query_map([], |row| row.get::<_, String>(0));
+                                if let Ok(rows) = rows {
+                                    for row_result in rows.flatten() {
+                                        slugs.insert(row_result);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Failed to prepare query: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to open Lutris database: {}", e);
+                    }
                 }
+                slugs
+            } else {
+                warn!("Lutris database not found");
+                HashSet::new()
             }
-        }
-        out
+        })
+        .await
+        .unwrap_or_default()
     }
 
     async fn ensure_lutris_installed(&self) -> Result<(), ArcError> {
@@ -334,23 +373,7 @@ impl PackageProvider for LutrisProvider {
             warn!("lutris install exited non-zero: {}", stderr);
         }
 
-        fs::create_dir_all(&self.installs_dir)
-            .await
-            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
-
-        let entries = self.fetch_catalog().await?;
-        let name = entries
-            .iter()
-            .find(|(s, _, _)| s == slug)
-            .map(|(_, g, _)| g.name.clone())
-            .unwrap_or_else(|| slug.to_string());
-
-        fs::write(
-            self.info_path(slug),
-            serde_json::json!({ "name": name, "slug": slug }).to_string(),
-        )
-        .await
-        .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+        info!("Game installation initiated via Lutris. State will be updated in Lutris database.");
 
         Ok(())
     }
@@ -362,17 +385,69 @@ impl PackageProvider for LutrisProvider {
 
         info!("Removing Lutris game: {}", slug);
 
-        let out = self
-            .lutris_cmd(&["--uninstall-game", slug])
-            .await
-            .map_err(|e| ArcError::ProviderError(format!("lutris uninstall: {}", e)))?;
+        // Lutris does not provide a CLI command for game uninstallation.
+        // Instead, we remove the game files and database entry directly.
+        let db_path = self.find_lutris_db();
+        let db_path = db_path
+            .ok_or_else(|| ArcError::ProviderError("Lutris database not found".to_string()))?;
 
-        if !out.status.success() {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            warn!("lutris --uninstall-game exited non-zero: {}", stderr);
+        let slug = slug.to_string();
+        let db_path_query = db_path.clone();
+        let slug_query = slug.clone();
+        let game_directory: Option<String> = tokio::task::spawn_blocking(move || {
+            let conn = Connection::open(&db_path_query).map_err(|e| {
+                ArcError::ProviderError(format!("Failed to open Lutris database: {}", e))
+            })?;
+
+            // Query the game directory before deleting
+            let mut stmt = conn
+                .prepare("SELECT directory FROM games WHERE installer_slug = ?1")
+                .map_err(|e| ArcError::ProviderError(format!("Failed to query game: {}", e)))?;
+
+            let directory: Option<String> = stmt
+                .query_row([slug_query.as_str()], |row| row.get(0))
+                .optional()
+                .map_err(|e| {
+                    ArcError::ProviderError(format!("Failed to query game directory: {}", e))
+                })?;
+
+            Ok::<_, ArcError>(directory)
+        })
+        .await
+        .map_err(|e| ArcError::ProviderError(format!("Database operation failed: {}", e)))??;
+
+        // Delete game files if a directory was specified
+        if let Some(dir) = game_directory {
+            if !dir.is_empty() {
+                let dir_path = PathBuf::from(&dir);
+                if dir_path.exists() {
+                    info!("Removing game files: {}", dir);
+                    fs::remove_dir_all(&dir_path).map_err(|e| {
+                        ArcError::ProviderError(format!(
+                            "Failed to remove game directory {}: {}",
+                            dir, e
+                        ))
+                    })?;
+                }
+            }
         }
 
-        let _ = fs::remove_file(self.info_path(slug)).await;
+        // Remove the database entry
+        tokio::task::spawn_blocking(move || {
+            Connection::open(&db_path)
+                .map_err(|e| {
+                    ArcError::ProviderError(format!("Failed to open Lutris database: {}", e))
+                })?
+                .execute("DELETE FROM games WHERE installer_slug = ?1", [slug])
+                .map_err(|e| {
+                    ArcError::ProviderError(format!("Failed to remove game from database: {}", e))
+                })?;
+            Ok::<_, ArcError>(())
+        })
+        .await
+        .map_err(|e| ArcError::ProviderError(format!("Database operation failed: {}", e)))??;
+
+        info!("Game removed from Lutris database.");
 
         Ok(())
     }
@@ -388,7 +463,9 @@ impl PackageProvider for LutrisProvider {
             ArcError::ProviderError(format!("Invalid lutris package id: {}", package_id))
         })?;
 
-        if !self.info_path(slug).exists() {
+        // Check if the game is installed by querying the Lutris database
+        let installed_slugs = self.installed_slugs().await;
+        if !installed_slugs.contains(slug) {
             return Err(ArcError::PackageNotFound(format!(
                 "{} is not installed",
                 package_id
@@ -419,8 +496,14 @@ impl PackageProvider for LutrisProvider {
 
         let entries = self.fetch_catalog().await?;
         if let Some((_, game, screenshots)) = entries.iter().find(|(s, _, _)| s == slug) {
-            let installed = self.info_path(slug).exists();
-            Ok(Some(self.game_to_package(slug, game, screenshots, installed)))
+            let installed_slugs = self.installed_slugs().await;
+            let installed = installed_slugs.contains(slug);
+            Ok(Some(self.game_to_package(
+                slug,
+                game,
+                screenshots,
+                installed,
+            )))
         } else {
             Ok(None)
         }

@@ -3,6 +3,10 @@ name = "arc-daemon"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies.rusqlite]
+version = "0.31"
+features = ["bundled"]
+
 [[bin]]
 name = "arc-daemon"
 path = "src/main.rs"
