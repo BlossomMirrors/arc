@@ -813,6 +813,146 @@ fn main() -> Result<()> {
     {
         let app_weak = app.as_weak();
         let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+
+        app.on_refresh_updates_requested(move || {
+            let app_weak2 = app_weak.clone();
+            let proxy = get_proxy(&proxy_arc);
+
+            rt_handle.spawn(async move {
+                let updates: Vec<libarc::Package> = if let Some(p) = &proxy {
+                    p.list_updates()
+                        .await
+                        .ok()
+                        .and_then(|json| serde_json::from_str(&json).ok())
+                        .unwrap_or_default()
+                } else {
+                    vec![]
+                };
+
+                let count = updates.len();
+
+                let icon_futures: Vec<_> = updates
+                    .iter()
+                    .map(|pkg| async {
+                        match pkg.provider {
+                            Provider::Flatpak => {
+                                let id = pkg.id.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    icons::load_local_flatpak_icon(&id)
+                                })
+                                .await
+                                .unwrap_or(None)
+                            }
+                            Provider::Lutris => {
+                                if let Some(url) = &pkg.icon_url {
+                                    let url = url.clone();
+                                    tokio::spawn(async move { icons::load_lutris_icon(&url).await })
+                                        .await
+                                        .ok()
+                                        .flatten()
+                                } else {
+                                    None
+                                }
+                            }
+                            Provider::Distrobox => {
+                                let name = pkg.name.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    icons::load_native_package_icon(&name)
+                                })
+                                .await
+                                .unwrap_or(None)
+                            }
+                        }
+                    })
+                    .collect();
+                let icons_result: Vec<_> = join_all(icon_futures).await;
+                let raw_pkgs: Vec<RawPackage> = updates
+                    .into_iter()
+                    .zip(icons_result)
+                    .map(|(pkg, icon)| RawPackage { pkg, icon })
+                    .collect();
+
+                let status = if count > 0 {
+                    format!("{} update(s) available", count)
+                } else {
+                    "Everything is up to date.".to_string()
+                };
+
+                let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                    let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
+                    app.set_packages(pkgs.as_slice().into());
+                    app.set_update_count(count as i32);
+                    app.set_status_text(status.into());
+                    app.set_is_loading(false);
+                });
+            });
+
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_is_loading(true);
+                app_ref.set_status_text("Checking for updates...".into());
+            }
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+
+        app.on_update_requested(move |pkg_id| {
+            let pkg_id_str = pkg_id.to_string();
+            let app_weak2 = app_weak.clone();
+            let proxy_arc2 = proxy_arc.clone();
+
+            let in_detail = app_weak
+                .upgrade()
+                .map(|a| a.get_current_view() == "detail")
+                .unwrap_or(false);
+
+            rt_handle.spawn(async move {
+                let result = if let Some(p) = get_or_connect(&proxy_arc2).await {
+                    p.update_package(&pkg_id_str).await.ok()
+                } else {
+                    None
+                };
+
+                match result {
+                    Some(tx_id) => {
+                        wait_for_transaction(
+                            proxy_arc2,
+                            tx_id,
+                            app_weak2,
+                            format!("Updated {}", pkg_id_str),
+                            pkg_id_str.clone(),
+                            true,
+                            in_detail,
+                        )
+                        .await;
+                    }
+                    None => {
+                        let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                            app.set_detail_busy(false);
+                            app.set_status_text(
+                                format!("Failed to start update for {}", pkg_id_str).into(),
+                            );
+                        });
+                    }
+                }
+            });
+
+            if let Some(app_ref) = app_weak.upgrade() {
+                if in_detail {
+                    app_ref.set_detail_busy(true);
+                }
+                app_ref.set_status_text(format!("Updating {}...", pkg_id).into());
+            }
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
         let settings = settings.clone();
         let rt_handle = rt.handle().clone();
 
