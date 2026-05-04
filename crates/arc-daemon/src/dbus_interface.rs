@@ -303,6 +303,26 @@ impl ArcDaemonInterface {
 
     async fn get_app_info(&self, package_id: String) -> String {
         info!("GetAppInfo: {}", package_id);
+        // First try cached AppStream data (much faster)
+        if let Some(info) = self.icon_cache.get_app_info(&package_id).await {
+            // Convert cached AppInfo to Package for compatibility
+            let package = libarc::Package {
+                id: info.id,
+                name: info.name,
+                version: String::new(),
+                description: info.description,
+                provider: libarc::Provider::Flatpak,
+                installed: false,
+                icon_url: if info.icon_available {
+                    Some(String::new())
+                } else {
+                    None
+                },
+                remote: None,
+            };
+            return serde_json::to_string(&Some(package)).unwrap_or_else(|_| "null".to_string());
+        }
+        // Fall back to provider query if not in cache
         match self.provider.get_app_info(&package_id).await {
             Ok(Some(package)) => {
                 serde_json::to_string(&Some(package)).unwrap_or_else(|_| "null".to_string())

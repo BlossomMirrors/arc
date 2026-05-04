@@ -115,7 +115,84 @@ fn load_png_icon(path: &Path, size: u32) -> Option<RawIcon> {
 }
 
 fn home_dir() -> PathBuf {
-    std::env::var("HOME").map(PathBuf::from).unwrap_or_default()
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
+}
+
+/// Find Flatpak icon path by searching icon directories
+fn find_flatpak_icon_path(icon_name: &str) -> Option<PathBuf> {
+    // Search system Flatpak installation
+    if let Some(path) = search_flatpak_icon_dir("/var/lib/flatpak/appstream", icon_name) {
+        return Some(path);
+    }
+
+    // Search user Flatpak installation
+    if let Some(home) = std::env::var_os("HOME") {
+        let user_path = PathBuf::from(home).join(".local/share/flatpak/appstream");
+        if let Some(found) = search_flatpak_icon_dir(&user_path, icon_name) {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
+/// Search for an icon in Flatpak icon directories
+fn search_flatpak_icon_dir(base: impl AsRef<Path>, icon_name: &str) -> Option<PathBuf> {
+    let base = base.as_ref();
+    let Ok(remotes) = std::fs::read_dir(base) else {
+        return None;
+    };
+
+    for remote_dir in remotes.flatten() {
+        let Ok(arches) = std::fs::read_dir(remote_dir.path()) else {
+            continue;
+        };
+        for arch in arches.flatten() {
+            let icons_dir = arch.path().join("active").join("icons");
+            if !icons_dir.exists() {
+                continue;
+            }
+
+            // Icons are stored directly in the size directory
+            for size in ["128x128", "96x96", "64x64", "48x48", "scalable"] {
+                let size_dir = icons_dir.join(size);
+                if !size_dir.exists() {
+                    continue;
+                }
+
+                // Icon name may already include extension (e.g., "app.id.png")
+                // Try the icon name as-is first
+                let direct_path = size_dir.join(icon_name);
+                if direct_path.exists() {
+                    return Some(direct_path);
+                }
+
+                // If icon name doesn't have an extension, try adding common extensions
+                if !icon_name.ends_with(".png")
+                    && !icon_name.ends_with(".svg")
+                    && !icon_name.ends_with(".svgz")
+                {
+                    let png_path = size_dir.join(format!("{}.png", icon_name));
+                    if png_path.exists() {
+                        return Some(png_path);
+                    }
+
+                    let svg_path = size_dir.join(format!("{}.svg", icon_name));
+                    if svg_path.exists() {
+                        return Some(svg_path);
+                    }
+
+                    let svgz_path = size_dir.join(format!("{}.svgz", icon_name));
+                    if svgz_path.exists() {
+                        return Some(svgz_path);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn xdg_data_dirs() -> Vec<PathBuf> {
@@ -261,16 +338,25 @@ fn darken((r, g, b): (u8, u8, u8), factor: f32) -> (u8, u8, u8) {
 }
 
 pub fn load_local_flatpak_icon(app_id: &str) -> Option<RawIcon> {
+    // First try to find icon in Flatpak appstream icon directories
+    if let Some(path) = find_flatpak_icon_path(app_id) {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext == "png" {
+            return load_png_icon(&path, 64);
+        } else {
+            return read_svg_bytes(&path).and_then(|bytes| render_svg(&bytes, 64));
+        }
+    }
+
+    // Fall back to app export directories
     let home = home_dir();
     let bases = [
         home.join(".local/share/flatpak"),
         std::path::PathBuf::from("/var/lib/flatpak"),
     ];
 
-    // Try app export directories first
     for base in &bases {
         for size in &["128x128", "256x256", "96x96", "64x64", "48x48", "32x32"] {
-            // Try PNG first
             for ext in &["png", "svg", "svgz"] {
                 let p = base
                     .join("app")
@@ -281,12 +367,12 @@ pub fn load_local_flatpak_icon(app_id: &str) -> Option<RawIcon> {
                     .join(format!("{}.{}", app_id, ext));
                 if p.exists() {
                     if ext == &"png" {
-                        if let Some(icon) = load_png_icon(&p, 48) {
+                        if let Some(icon) = load_png_icon(&p, 64) {
                             return Some(icon);
                         }
                     } else {
                         if let Some(icon) =
-                            read_svg_bytes(&p).and_then(|bytes| render_svg(&bytes, 48))
+                            read_svg_bytes(&p).and_then(|bytes| render_svg(&bytes, 64))
                         {
                             return Some(icon);
                         }
@@ -294,90 +380,6 @@ pub fn load_local_flatpak_icon(app_id: &str) -> Option<RawIcon> {
                 }
             }
         }
-
-        // Also try runtime directory (some flatpaks store icons here)
-        for size in &["128x128", "256x256", "96x96", "64x64", "48x48"] {
-            for ext in &["png", "svg", "svgz"] {
-                let p = base
-                    .join("app")
-                    .join(app_id)
-                    .join("current/active/files/share/icons/hicolor")
-                    .join(size)
-                    .join("apps")
-                    .join(format!("{}.{}", app_id, ext));
-                if p.exists() {
-                    if ext == &"png" {
-                        if let Some(icon) = load_png_icon(&p, 48) {
-                            return Some(icon);
-                        }
-                    } else {
-                        if let Some(icon) =
-                            read_svg_bytes(&p).and_then(|bytes| render_svg(&bytes, 48))
-                        {
-                            return Some(icon);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Try user's local icon theme directories
-    let local_icons = home.join(".local/share/icons");
-    for size in &["128x128", "96x96", "64x64", "48x48"] {
-        for ext in &["png", "svg", "svgz"] {
-            let p = local_icons
-                .join(size)
-                .join("apps")
-                .join(format!("{}.{}", app_id, ext));
-            if p.exists() {
-                if ext == &"png" {
-                    if let Some(icon) = load_png_icon(&p, 48) {
-                        return Some(icon);
-                    }
-                } else {
-                    if let Some(icon) = read_svg_bytes(&p).and_then(|bytes| render_svg(&bytes, 48))
-                    {
-                        return Some(icon);
-                    }
-                }
-            }
-        }
-    }
-
-    // Try system icon themes
-    let system_icon_dirs = [
-        PathBuf::from("/usr/share/icons"),
-        PathBuf::from("/usr/local/share/icons"),
-    ];
-    for icon_dir in &system_icon_dirs {
-        for size in &["128x128", "96x96", "64x64", "48x48"] {
-            for ext in &["png", "svg", "svgz"] {
-                let p = icon_dir
-                    .join("hicolor")
-                    .join(size)
-                    .join("apps")
-                    .join(format!("{}.{}", app_id, ext));
-                if p.exists() {
-                    if ext == &"png" {
-                        if let Some(icon) = load_png_icon(&p, 48) {
-                            return Some(icon);
-                        }
-                    } else {
-                        if let Some(icon) =
-                            read_svg_bytes(&p).and_then(|bytes| render_svg(&bytes, 48))
-                        {
-                            return Some(icon);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Fallback: try to find icon from .desktop file
-    if let Some(icon) = load_icon_from_desktop(app_id) {
-        return Some(icon);
     }
 
     // Last resort: try variations of the app_id as icon name

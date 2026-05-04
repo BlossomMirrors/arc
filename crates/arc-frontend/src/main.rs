@@ -260,11 +260,8 @@ impl RawCard {
     }
 }
 
-async fn load_home(app_weak: slint::Weak<AppWindow>) {
-    // Get daemon proxy to fetch cached data
-    let proxy = get_or_connect(&Arc::new(Mutex::new(None))).await;
-
-    // Load popular and recent apps from daemon's cache
+async fn load_home(app_weak: slint::Weak<AppWindow>, proxy: Option<ArcDaemonProxy<'static>>) {
+    // Load popular and recent apps from daemon's cache or fallback to local AppStream
     let popular_app_ids: Vec<String> = if let Some(ref p) = proxy {
         let result = p
             .get_popular_apps(10)
@@ -292,12 +289,16 @@ async fn load_home(app_weak: slint::Weak<AppWindow>) {
         db.get_recent_apps(4).iter().map(|a| a.id.clone()).collect()
     };
 
+    // Load local AppStream data for fallback (wrapped in Arc for sharing between tasks)
+    let local_db = std::sync::Arc::new(appstream_db::appstream_db_for_home());
+
     // Fetch app info and icons in parallel for popular apps
     let popular_tasks: Vec<_> = popular_app_ids
         .iter()
         .map(|app_id| {
             let app_id = app_id.clone();
             let proxy_clone = proxy.clone();
+            let local_db = local_db.clone();
             tokio::spawn(async move {
                 let info = if let Some(ref p) = proxy_clone {
                     let result = p
@@ -306,9 +307,16 @@ async fn load_home(app_weak: slint::Weak<AppWindow>) {
                         .unwrap_or_else(|_| "null".to_string());
                     serde_json::from_str::<CachedAppInfo>(&result).ok()
                 } else {
-                    None
+                    local_db.find_by_id(&app_id).map(|e| CachedAppInfo {
+                        id: e.id,
+                        name: e.name,
+                        summary: e.summary,
+                        description: String::new(),
+                        icon_available: e.icon_url.is_some(),
+                    })
                 };
 
+                // Try daemon first, then fallback to local icon loading
                 let icon = if let Some(ref p) = proxy_clone {
                     let icon_data = p.get_icon(&app_id).await.unwrap_or_default();
                     if icon_data.len() >= 8 {
@@ -331,10 +339,36 @@ async fn load_home(app_weak: slint::Weak<AppWindow>) {
                             pixels,
                         })
                     } else {
-                        None
+                        // Fallback to local icon loading
+                        if let Some(entry) = local_db.find_by_id(&app_id) {
+                            if let Some(url) = &entry.icon_url {
+                                if url.starts_with("local:") {
+                                    icons::load_local_flatpak_icon(&app_id)
+                                } else {
+                                    icons::load_icon(url).await
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
                     }
                 } else {
-                    None
+                    // No daemon, load locally
+                    if let Some(entry) = local_db.find_by_id(&app_id) {
+                        if let Some(url) = &entry.icon_url {
+                            if url.starts_with("local:") {
+                                icons::load_local_flatpak_icon(&app_id)
+                            } else {
+                                icons::load_icon(url).await
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
                 };
 
                 (app_id, info, icon)
@@ -361,6 +395,7 @@ async fn load_home(app_weak: slint::Weak<AppWindow>) {
         .map(|app_id| {
             let app_id = app_id.clone();
             let proxy_clone = proxy.clone();
+            let local_db = local_db.clone();
             tokio::spawn(async move {
                 let info = if let Some(ref p) = proxy_clone {
                     let result = p
@@ -369,9 +404,16 @@ async fn load_home(app_weak: slint::Weak<AppWindow>) {
                         .unwrap_or_else(|_| "null".to_string());
                     serde_json::from_str::<CachedAppInfo>(&result).ok()
                 } else {
-                    None
+                    local_db.find_by_id(&app_id).map(|e| CachedAppInfo {
+                        id: e.id,
+                        name: e.name,
+                        summary: e.summary,
+                        description: String::new(),
+                        icon_available: e.icon_url.is_some(),
+                    })
                 };
 
+                // Try daemon first, then fallback to local icon loading
                 let icon = if let Some(ref p) = proxy_clone {
                     let icon_data = p.get_icon(&app_id).await.unwrap_or_default();
                     if icon_data.len() >= 8 {
@@ -394,10 +436,36 @@ async fn load_home(app_weak: slint::Weak<AppWindow>) {
                             pixels,
                         })
                     } else {
-                        None
+                        // Fallback to local icon loading
+                        if let Some(entry) = local_db.find_by_id(&app_id) {
+                            if let Some(url) = &entry.icon_url {
+                                if url.starts_with("local:") {
+                                    icons::load_local_flatpak_icon(&app_id)
+                                } else {
+                                    icons::load_icon(url).await
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
                     }
                 } else {
-                    None
+                    // No daemon, load locally
+                    if let Some(entry) = local_db.find_by_id(&app_id) {
+                        if let Some(url) = &entry.icon_url {
+                            if url.starts_with("local:") {
+                                icons::load_local_flatpak_icon(&app_id)
+                            } else {
+                                icons::load_icon(url).await
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
                 };
 
                 (app_id, info, icon)
@@ -512,9 +580,10 @@ fn main() -> Result<()> {
 
     {
         let app_weak = app.as_weak();
+        let proxy = proxy_opt.lock().unwrap().clone();
         app.set_home_loading(true);
         rt.handle().spawn(async move {
-            load_home(app_weak).await;
+            load_home(app_weak, proxy).await;
         });
     }
 

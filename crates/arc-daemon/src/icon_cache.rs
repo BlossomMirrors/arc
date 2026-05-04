@@ -43,8 +43,10 @@ impl IconCache {
 
         // Load Flatpak AppStream data
         let components = self.load_flatpak_appstream();
+        info!("Loaded {} components from AppStream data", components.len());
 
         // Store components in appstream cache for later lookup
+        // Also store the base icon path for each component
         {
             let mut appstream_cache = self.appstream_cache.write().await;
             for component in &components {
@@ -56,31 +58,47 @@ impl IconCache {
             }
         }
 
-        // Pre-render icons for popular apps (first 50 components)
+        // Pre-render icons for popular apps (first 500 components for fast home page)
         let mut icons_to_cache = Vec::new();
-        for component in components.iter().take(50) {
+        let mut icons_extracted = 0;
+        let mut icons_no_data = 0;
+        for component in components.iter().take(500) {
             if let Some(icon_data) = self.extract_icon_data(component) {
                 icons_to_cache.push((component.id.to_string(), icon_data));
+                icons_extracted += 1;
+            } else {
+                icons_no_data += 1;
+                info!("No icon data for component: {}", component.id);
             }
         }
+        info!(
+            "Extracted {} icons from first 500 components, {} had no icon data",
+            icons_extracted, icons_no_data
+        );
 
-        // Render icons in parallel
+        // Store count before moving icons_to_cache into tasks
+        let _icons_to_cache_count = icons_to_cache.len();
+
+        // Render icons in parallel using tokio tasks for async downloads
         let icon_size = self.icon_size;
-        let results: Vec<_> = icons_to_cache
+        let tasks: Vec<_> = icons_to_cache
             .into_iter()
             .map(|(id, data)| {
                 let icon_size = icon_size;
-                std::thread::spawn(move || {
-                    let rendered = render_icon_data(&data, icon_size);
+                tokio::spawn(async move {
+                    let rendered = render_icon_data(&data, icon_size).await;
                     (id, rendered)
                 })
             })
             .collect();
 
-        // Collect results
+        // Collect results from async tasks
+        let results: Vec<_> = futures_util::future::join_all(tasks).await;
+
         let mut cache = self.cache.write().await;
-        for handle in results {
-            if let Ok((id, Some(rendered))) = handle.join() {
+        let mut render_failures = 0;
+        for result in results {
+            if let Ok((id, Some(rendered))) = result {
                 info!("Cached icon for {}", id);
                 cache.insert(
                     id,
@@ -91,12 +109,15 @@ impl IconCache {
                         cached_at: std::time::Instant::now(),
                     },
                 );
+            } else {
+                render_failures += 1;
             }
         }
 
         info!(
-            "Icon cache pre-warming complete ({} icons cached)",
-            cache.len()
+            "Icon cache pre-warming complete ({} icons cached, {} failed to render)",
+            cache.len(),
+            render_failures
         );
     }
 
@@ -116,14 +137,41 @@ impl IconCache {
         components
     }
 
-    /// Extract icon data from a component
+    /// Extract icon data from a component, resolving local paths
     fn extract_icon_data(&self, component: &Component) -> Option<IconData> {
-        component.icons.first().map(|icon| match icon {
-            Icon::Remote { url, .. } => IconData::Remote(url.to_string()),
-            Icon::Local { path, .. } => IconData::Local(path.clone()),
-            Icon::Cached { path, .. } => IconData::Local(path.clone()),
-            Icon::Stock(name) => IconData::Stock(name.clone()),
+        component.icons.first().and_then(|icon| {
+            match icon {
+                Icon::Remote { url, .. } => Some(IconData::Remote(url.to_string())),
+                Icon::Local { path, .. } | Icon::Cached { path, .. } => {
+                    // Try to find the actual icon file in Flatpak icon directories
+                    if let Some(full_path) = self.find_flatpak_icon_path(&path.to_string_lossy()) {
+                        Some(IconData::Local(full_path))
+                    } else {
+                        // Fall back to stock icon lookup
+                        Some(IconData::Stock(path.to_string_lossy().to_string()))
+                    }
+                }
+                Icon::Stock(name) => Some(IconData::Stock(name.clone())),
+            }
         })
+    }
+
+    /// Find the full path to a Flatpak icon by searching icon directories
+    fn find_flatpak_icon_path(&self, icon_name: &str) -> Option<PathBuf> {
+        // Search system Flatpak installation
+        if let Some(path) = search_flatpak_icon_dir("/var/lib/flatpak/appstream", icon_name) {
+            return Some(path);
+        }
+
+        // Search user Flatpak installation
+        if let Some(home) = std::env::var_os("HOME") {
+            let user_path = PathBuf::from(home).join(".local/share/flatpak/appstream");
+            if let Some(found) = search_flatpak_icon_dir(&user_path, icon_name) {
+                return Some(found);
+            }
+        }
+
+        None
     }
 
     /// Get a cached icon, rendering it if necessary
@@ -143,7 +191,7 @@ impl IconCache {
         if let Some(components) = appstream_cache.get(app_id) {
             if let Some(component) = components.first() {
                 if let Some(icon_data) = self.extract_icon_data(component) {
-                    if let Some(rendered) = render_icon_data(&icon_data, self.icon_size) {
+                    if let Some(rendered) = render_icon_data(&icon_data, self.icon_size).await {
                         let cached_icon = CachedIcon {
                             width: rendered.width,
                             height: rendered.height,
@@ -381,29 +429,57 @@ pub enum IconData {
     Stock(String),
 }
 
-/// Render icon data to raw pixels
-fn render_icon_data(icon_data: &IconData, size: u32) -> Option<RawIcon> {
+/// Render icon data to raw pixels (async for remote URLs)
+async fn render_icon_data(icon_data: &IconData, size: u32) -> Option<RawIcon> {
     match icon_data {
-        IconData::Remote(_url) => {
-            // For remote URLs, we can't render them in the daemon
-            // The frontend will need to handle these
-            None
+        IconData::Remote(url) => {
+            // Download remote icon and render it
+            let resp = reqwest::get(url).await;
+            if let Err(e) = &resp {
+                tracing::warn!("Failed to download remote icon {}: {}", url, e);
+            }
+            let bytes = resp.ok()?.bytes().await.ok()?;
+            let img = image::load_from_memory(&bytes);
+            if let Err(e) = &img {
+                tracing::warn!("Failed to decode remote icon {}: {}", url, e);
+            }
+            let img = img.ok()?;
+            let img = img.resize(size, size, image::imageops::FilterType::Lanczos3);
+            let (w, h) = img.dimensions();
+            let pixels = img.to_rgba8().into_raw();
+            Some(RawIcon {
+                width: w,
+                height: h,
+                pixels,
+            })
         }
         IconData::Local(path) => {
+            if !path.exists() {
+                tracing::warn!("Local icon path does not exist: {:?}", path);
+                return None;
+            }
             if path
                 .extension()
                 .map(|e| e == "svg" || e == "svgz")
                 .unwrap_or(false)
             {
-                read_svg_bytes(path).and_then(|bytes| render_svg(&bytes, size))
+                let result = read_svg_bytes(path).and_then(|bytes| render_svg(&bytes, size));
+                if result.is_none() {
+                    tracing::warn!("Failed to render SVG icon: {:?}", path);
+                }
+                result
             } else {
-                load_png_icon(path, size)
+                let result = load_png_icon(path, size);
+                if result.is_none() {
+                    tracing::warn!("Failed to load PNG icon: {:?}", path);
+                }
+                result
             }
         }
         IconData::Stock(name) => {
             // Try to find stock icon in system icon theme
             if let Some(path) = find_system_icon_path(name) {
-                if path
+                let result = if path
                     .extension()
                     .map(|e| e == "svg" || e == "svgz")
                     .unwrap_or(false)
@@ -411,8 +487,13 @@ fn render_icon_data(icon_data: &IconData, size: u32) -> Option<RawIcon> {
                     read_svg_bytes(&path).and_then(|bytes| render_svg(&bytes, size))
                 } else {
                     load_png_icon(&path, size)
+                };
+                if result.is_none() {
+                    tracing::warn!("Failed to render stock icon {} from {:?}", name, path);
                 }
+                result
             } else {
+                tracing::debug!("Stock icon not found in system theme: {}", name);
                 None
             }
         }
@@ -441,7 +522,13 @@ fn read_svg_bytes(path: &Path) -> Option<Vec<u8>> {
 
 fn render_svg(svg_bytes: &[u8], size: u32) -> Option<RawIcon> {
     let opt = usvg::Options::default();
-    let tree = usvg::Tree::from_data(svg_bytes, &opt).ok()?;
+    let tree = match usvg::Tree::from_data(svg_bytes, &opt) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("Failed to parse SVG: {}", e);
+            return None;
+        }
+    };
     let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
     let sx = size as f32 / tree.size().width();
     let sy = size as f32 / tree.size().height();
@@ -465,7 +552,13 @@ fn render_svg(svg_bytes: &[u8], size: u32) -> Option<RawIcon> {
 }
 
 fn load_png_icon(path: &Path, size: u32) -> Option<RawIcon> {
-    let img = image::open(path).ok()?;
+    let img = match image::open(path) {
+        Ok(i) => i,
+        Err(e) => {
+            tracing::warn!("Failed to open PNG icon {:?}: {}", path, e);
+            return None;
+        }
+    };
     let img = img.resize(size, size, image::imageops::FilterType::Lanczos3);
     let (w, h) = img.dimensions();
     let pixels = img.to_rgba8().into_raw();
@@ -499,6 +592,67 @@ fn load_flatpak_root(root: impl AsRef<Path>, out: &mut Vec<Component>) {
             }
         }
     }
+}
+
+/// Search for an icon in Flatpak icon directories
+fn search_flatpak_icon_dir(base: impl AsRef<Path>, icon_name: &str) -> Option<PathBuf> {
+    let base = base.as_ref();
+    let Ok(remotes) = std::fs::read_dir(base) else {
+        return None;
+    };
+
+    for remote_dir in remotes.flatten() {
+        let Ok(arches) = std::fs::read_dir(remote_dir.path()) else {
+            continue;
+        };
+        for arch in arches.flatten() {
+            let icons_dir = arch.path().join("active").join("icons");
+            if !icons_dir.exists() {
+                continue;
+            }
+
+            // Search in different icon sizes
+            // Icons are stored directly in the size directory, not in an apps subdirectory
+            for size in ["128x128", "96x96", "64x64", "48x48", "scalable"] {
+                let size_dir = icons_dir.join(size);
+                if !size_dir.exists() {
+                    continue;
+                }
+
+                // Icon name may already include extension (e.g., "app.id.png")
+                // Try the icon name as-is first
+                let direct_path = size_dir.join(icon_name);
+                if direct_path.exists() {
+                    return Some(direct_path);
+                }
+
+                // If icon name doesn't have an extension, try adding common extensions
+                if !icon_name.ends_with(".png")
+                    && !icon_name.ends_with(".svg")
+                    && !icon_name.ends_with(".svgz")
+                {
+                    // Try with .png extension
+                    let png_path = size_dir.join(format!("{}.png", icon_name));
+                    if png_path.exists() {
+                        return Some(png_path);
+                    }
+
+                    // Try with .svg extension
+                    let svg_path = size_dir.join(format!("{}.svg", icon_name));
+                    if svg_path.exists() {
+                        return Some(svg_path);
+                    }
+
+                    // Try with .svgz extension
+                    let svgz_path = size_dir.join(format!("{}.svgz", icon_name));
+                    if svgz_path.exists() {
+                        return Some(svgz_path);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn find_system_icon_path(icon_name: &str) -> Option<PathBuf> {
