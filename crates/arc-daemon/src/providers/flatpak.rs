@@ -91,7 +91,7 @@ impl FlatpakProvider {
         // calls to it have to go through spawn_blocking or they'll block the runtime
         tokio::task::spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
-            let db = AppStreamDb::load_flatpak();
+            let db = AppStreamDb::get_static();
 
             // collect unique app ids from all remotes across all installations
             let mut app_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -141,7 +141,7 @@ impl FlatpakProvider {
     pub async fn search_category(&self, category: &str) -> Result<Vec<Package>, ArcError> {
         let category = category.to_string();
         tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
-            Ok(AppStreamDb::load_flatpak()
+            Ok(AppStreamDb::get_static()
                 .get_apps_by_category(&category)
                 .into_iter()
                 .map(|e| entry_to_flatpak_package(e, false))
@@ -154,7 +154,7 @@ impl FlatpakProvider {
     pub async fn get_app_info(&self, app_id: &str) -> Result<Option<Package>, ArcError> {
         let app_id = app_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<Option<Package>, ArcError> {
-            Ok(AppStreamDb::load_flatpak()
+            Ok(AppStreamDb::get_static()
                 .find_by_id(&app_id)
                 .map(|e| entry_to_flatpak_package(e, false)))
         })
@@ -168,7 +168,7 @@ impl PackageProvider for FlatpakProvider {
     async fn search(&self, query: &str) -> Result<Vec<Package>, ArcError> {
         let query = query.to_string();
         tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
-            Ok(AppStreamDb::load_flatpak()
+            Ok(AppStreamDb::get_static()
                 .search_apps(&query)
                 .into_iter()
                 .map(|e| entry_to_flatpak_package(e, false))
@@ -228,7 +228,7 @@ impl PackageProvider for FlatpakProvider {
             let cancel = libflatpak::gio::Cancellable::NONE;
 
             // Get the package info to determine which remote it comes from
-            let db = AppStreamDb::load_flatpak();
+            let db = AppStreamDb::get_static();
             let remote_name = db
                 .find_by_id(&package_id)
                 .and_then(|e| e.remote)

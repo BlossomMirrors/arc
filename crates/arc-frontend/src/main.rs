@@ -3,6 +3,7 @@ mod icons;
 
 use crate::icons::RawIcon;
 use anyhow::Result;
+use appstream_db::AppStreamDb;
 use futures_util::{future::join_all, StreamExt};
 use libarc::{connect, ArcDaemonProxy, Package, Provider, Settings};
 use slint::{Model, SharedString};
@@ -262,12 +263,14 @@ impl RawCard {
     }
 }
 
-async fn load_home(app_weak: slint::Weak<AppWindow>, _proxy: Option<ArcDaemonProxy<'static>>) {
-    // Load popular and recent apps directly from local AppStream data
-    let db = appstream_db::appstream_db_for_home();
-
-    let popular_apps: Vec<_> = db.get_popular_apps(10);
-    let recent_apps: Vec<_> = db.get_recent_apps(4);
+async fn load_home(
+    app_weak: slint::Weak<AppWindow>,
+    _proxy: Option<ArcDaemonProxy<'static>>,
+) {
+    let appstream_db = AppStreamDb::get_static();
+    // Load popular and recent apps from cached AppStream data
+    let popular_apps: Vec<_> = appstream_db.get_popular_apps(10);
+    let recent_apps: Vec<_> = appstream_db.get_recent_apps(4);
 
     // Load icons in parallel for popular apps
     let popular_tasks: Vec<_> = popular_apps
@@ -410,6 +413,7 @@ fn main() -> Result<()> {
     }
 
     let settings: Arc<Mutex<Settings>> = Arc::new(Mutex::new(Settings::load()));
+
     {
         let s = settings.lock().unwrap();
         app.set_settings_preferred(
@@ -423,11 +427,16 @@ fn main() -> Result<()> {
         app.set_settings_ignore_native_pref(s.ignore_native_preference);
     }
 
+    // Load AppStream DB in background while showing home page
     {
         let app_weak = app.as_weak();
         let proxy = proxy_opt.lock().unwrap().clone();
         app.set_home_loading(true);
         rt.handle().spawn(async move {
+            // Warm the static AppStream DB cache, then load the home page using it
+            tokio::task::spawn_blocking(AppStreamDb::get_static)
+                .await
+                .unwrap();
             load_home(app_weak, proxy).await;
         });
     }
@@ -499,7 +508,8 @@ fn main() -> Result<()> {
             let proxy = get_proxy(&proxy_arc);
 
             rt_handle.spawn(async move {
-                let packages: Vec<libarc::Package> = if let Some(p) = proxy {
+                // Query daemon for installed packages
+                let search_pkgs: Vec<libarc::Package> = if let Some(p) = &proxy {
                     p.list_installed()
                         .await
                         .ok()
@@ -509,8 +519,10 @@ fn main() -> Result<()> {
                     vec![]
                 };
 
+                // Use cached AppStream DB (loaded once at startup)
+
                 // Load icons for each package in parallel
-                let icon_futures: Vec<_> = packages
+                let icon_futures: Vec<_> = search_pkgs
                     .iter()
                     .map(|pkg| async {
                         match pkg.provider {
@@ -548,7 +560,7 @@ fn main() -> Result<()> {
                     })
                     .collect();
                 let icons_result: Vec<_> = join_all(icon_futures).await;
-                let raw_pkgs: Vec<RawPackage> = packages
+                let raw_pkgs: Vec<RawPackage> = search_pkgs
                     .into_iter()
                     .zip(icons_result)
                     .map(|(pkg, icon)| RawPackage { pkg, icon })
@@ -750,29 +762,19 @@ fn main() -> Result<()> {
         let settings = settings.clone();
         let rt_handle = rt.handle().clone();
 
-        app.on_detail_requested(move |app_id| {
-            let id = app_id.to_string();
+        app.on_detail_requested(move |id| {
+            let app_id = id.to_string();
             let app_weak2 = app_weak.clone();
             let proxy = get_proxy(&proxy_arc);
-            let s = settings.lock().unwrap().clone();
+            let _s = settings.lock().unwrap().clone();
 
             rt_handle.spawn(async move {
-                // Get app info from daemon (AppStream data)
-                let app_info = if let Some(ref p) = proxy {
-                    p.get_app_info(&id)
-                        .await
-                        .ok()
-                        .and_then(|json| {
-                            serde_json::from_str::<Option<libarc::Package>>(&json).ok()
-                        })
-                        .flatten()
-                } else {
-                    None
-                };
+                let appstream_db = AppStreamDb::get_static();
 
-                let app_name = app_info
-                    .as_ref()
-                    .map(|p| p.name.clone())
+                // Get app name from AppStream immediately (fast local lookup)
+                let app_name = appstream_db
+                    .find_by_id(&id)
+                    .map(|a| a.name.clone())
                     .unwrap_or_else(|| id.split(';').next().unwrap_or(&id).to_string());
 
                 // search + installed from daemon so we can find both providers
@@ -804,8 +806,8 @@ fn main() -> Result<()> {
 
                 let flatpak_pkg = all_pkgs.iter().copied().find(|p| {
                     p.provider == Provider::Flatpak
-                        && (p.id == id
-                            || p.id.to_lowercase() == id.to_lowercase()
+                        && (p.id == app_id.as_str()
+                            || p.id.to_lowercase() == app_id.to_string().to_lowercase()
                             || p.name.to_lowercase() == name_lower)
                 });
 
@@ -818,12 +820,15 @@ fn main() -> Result<()> {
 
                 let lutris_pkg = all_pkgs.iter().copied().find(|p| {
                     p.provider == Provider::Lutris
-                        && (p.id == id || p.name.to_lowercase() == name_lower)
+                        && (p.id == app_id.as_str() || p.name.to_lowercase() == name_lower)
                 });
 
+                // Use locally loaded AppStream DB for fast name/description/icon lookup
+                let appstream_info = appstream_db.find_by_id(&app_id);
+
                 let flatpak_id = flatpak_pkg.map(|p| p.id.clone()).unwrap_or_else(|| {
-                    if id.contains('.') && !id.contains(';') {
-                        id.clone()
+                    if app_id.contains('.') && !app_id.contains(';') {
+                        app_id.to_string()
                     } else {
                         String::new()
                     }
@@ -838,15 +843,13 @@ fn main() -> Result<()> {
                 let native_installed = native_pkg.map(|p| p.installed).unwrap_or(false);
                 let lutris_installed = lutris_pkg.map(|p| p.installed).unwrap_or(false);
 
-                let _preferred = s.preferred_for(&id);
-
+                // Load icon in parallel with UI display
                 let icon = if !flatpak_id.is_empty() {
                     let fid = flatpak_id.clone();
                     tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&fid))
                         .await
                         .unwrap_or(None)
                 } else if !lutris_id.is_empty() {
-                    // Load Lutris icon from remote URL
                     if let Some(lutris) = &lutris_pkg {
                         if let Some(icon_url) = &lutris.icon_url {
                             let url = icon_url.clone();
@@ -869,30 +872,50 @@ fn main() -> Result<()> {
                     None
                 };
 
-                let version = flatpak_pkg
-                    .or(native_pkg)
-                    .map(|p| p.version.clone())
-                    .unwrap_or_default();
+                // Load icon from AppStream data if no package icon found
+                let icon = icon.or_else(|| {
+                    appstream_info.as_ref().and_then(|info| {
+                        info.icon_url.as_ref().and_then(|url| {
+                            if url.starts_with("local:") {
+                                icons::load_local_flatpak_icon(&info.id)
+                            } else {
+                                let url = url.clone();
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(icons::load_icon(&url))
+                            }
+                        })
+                    })
+                });
 
+                // Get name from packages or AppStream
+                let name = flatpak_pkg
+                    .or(native_pkg)
+                    .or(lutris_pkg)
+                    .map(|p| p.name.clone())
+                    .or_else(|| appstream_info.as_ref().map(|a| a.name.clone()))
+                    .unwrap_or_else(|| app_name.clone());
+
+                // Get description from packages or AppStream
                 let description = flatpak_pkg
-                    .or(app_info.as_ref())
                     .or(native_pkg)
                     .or(lutris_pkg)
                     .map(|p| p.description.clone())
+                    .or_else(|| appstream_info.as_ref().map(|a| a.summary.clone()))
+                    .unwrap_or_default();
+
+                let version = flatpak_pkg
+                    .or(native_pkg)
+                    .or(lutris_pkg)
+                    .map(|p| p.version.clone())
                     .unwrap_or_default();
 
                 let raw = RawDetailData {
-                    name: flatpak_pkg
-                        .or(app_info.as_ref())
-                        .or(native_pkg)
-                        .or(lutris_pkg)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_else(|| app_name.clone()),
-                    developer: String::new(), // AppStream data doesn't typically include developer name in Package
-                    description: description,
-                    summary: flatpak_pkg
-                        .or(app_info.as_ref())
-                        .map(|p| p.description.clone())
+                    name,
+                    developer: String::new(),
+                    description,
+                    summary: appstream_info
+                        .as_ref()
+                        .map(|a| a.summary.clone())
                         .unwrap_or_default(),
                     version,
                     icon,
@@ -917,15 +940,15 @@ fn main() -> Result<()> {
                             .as_ref()
                             .map(|r| r.to_slint_image())
                             .unwrap_or_default(),
-                        installed: raw.flatpak_installed
-                            || raw.native_installed
-                            || raw.lutris_installed,
                         flatpak_id: raw.flatpak_id.into(),
                         native_id: raw.native_id.into(),
                         lutris_id: raw.lutris_id.into(),
                         flatpak_installed: raw.flatpak_installed,
                         native_installed: raw.native_installed,
                         lutris_installed: raw.lutris_installed,
+                        installed: raw.flatpak_installed
+                            || raw.native_installed
+                            || raw.lutris_installed,
                     });
                     app.set_detail_loading(false);
                 });

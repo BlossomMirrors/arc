@@ -1,5 +1,8 @@
 use appstream::{Collection, Component};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+static FLATPAK_DB: OnceLock<AppStreamDb> = OnceLock::new();
 
 // AppStream database for loading app metadata from Flatpak remotes
 pub struct AppStreamDb {
@@ -16,6 +19,10 @@ pub struct AppStreamEntry {
 }
 
 impl AppStreamDb {
+    pub fn get_static() -> &'static AppStreamDb {
+        FLATPAK_DB.get_or_init(Self::load_flatpak)
+    }
+
     pub fn load_flatpak() -> Self {
         let mut components = Vec::new();
         load_flatpak_root("/var/lib/flatpak/appstream", &mut components);
@@ -176,8 +183,4 @@ fn load_flatpak_root(root: impl AsRef<Path>, out: &mut Vec<(Component, Option<St
             }
         }
     }
-}
-
-pub fn appstream_db_for_home() -> AppStreamDb {
-    AppStreamDb::load_flatpak()
 }
