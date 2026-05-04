@@ -128,6 +128,7 @@ async fn wait_for_transaction(
     success_msg: String,
     pkg_id: String,
     installed_after: bool,
+    refresh_detail: bool,
 ) {
     let Some(p) = get_proxy(&proxy_arc) else {
         return;
@@ -167,12 +168,17 @@ async fn wait_for_transaction(
                                         update_package_installed(&app, &pid, installed_after);
                                         app.set_status_text(msg.into());
                                         app.set_progress(0.0);
+                                        app.set_detail_busy(false);
+                                        if refresh_detail {
+                                            app.invoke_detail_requested(pid.into());
+                                        }
                                     });
                                 } else {
                                     let msg = format!("Failed: {}", args.message());
                                     let _ = app_weak.upgrade_in_event_loop(move |app| {
                                         app.set_status_text(msg.into());
                                         app.set_progress(0.0);
+                                        app.set_detail_busy(false);
                                     });
                                 }
                                 break;
@@ -592,6 +598,11 @@ fn main() -> Result<()> {
             let app_weak2 = app_weak.clone();
             let proxy_arc2 = proxy_arc.clone();
 
+            let in_detail = app_weak
+                .upgrade()
+                .map(|a| a.get_current_view() == "detail")
+                .unwrap_or(false);
+
             rt_handle.spawn(async move {
                 let result = if let Some(p) = get_or_connect(&proxy_arc2).await {
                     p.install_package(&pkg_id_str).await.ok()
@@ -608,11 +619,13 @@ fn main() -> Result<()> {
                             format!("Installed {}", pkg_id_str),
                             pkg_id_str.clone(),
                             true,
+                            in_detail,
                         )
                         .await;
                     }
                     None => {
                         let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                            app.set_detail_busy(false);
                             app.set_status_text(
                                 format!("Failed to start install for {}", pkg_id_str).into(),
                             );
@@ -622,6 +635,9 @@ fn main() -> Result<()> {
             });
 
             if let Some(app_ref) = app_weak.upgrade() {
+                if in_detail {
+                    app_ref.set_detail_busy(true);
+                }
                 app_ref.set_status_text(format!("Installing {}...", pkg_id).into());
             }
         });
@@ -636,6 +652,11 @@ fn main() -> Result<()> {
             let pkg_id_str = pkg_id.to_string();
             let app_weak2 = app_weak.clone();
             let proxy_arc2 = proxy_arc.clone();
+
+            let in_detail = app_weak
+                .upgrade()
+                .map(|a| a.get_current_view() == "detail")
+                .unwrap_or(false);
 
             rt_handle.spawn(async move {
                 let result = if let Some(p) = get_or_connect(&proxy_arc2).await {
@@ -653,11 +674,13 @@ fn main() -> Result<()> {
                             format!("Removed {}", pkg_id_str),
                             pkg_id_str.clone(),
                             false,
+                            in_detail,
                         )
                         .await;
                     }
                     None => {
                         let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                            app.set_detail_busy(false);
                             app.set_status_text(
                                 format!("Failed to start removal of {}", pkg_id_str).into(),
                             );
@@ -667,6 +690,9 @@ fn main() -> Result<()> {
             });
 
             if let Some(app_ref) = app_weak.upgrade() {
+                if in_detail {
+                    app_ref.set_detail_busy(true);
+                }
                 app_ref.set_status_text(format!("Removing {}...", pkg_id).into());
             }
         });
@@ -1106,6 +1132,7 @@ fn main() -> Result<()> {
                                     format!("Installed {}", fp2),
                                     fp2.clone(),
                                     true,
+                                    false,
                                 )
                                 .await;
                                 let _ = app_weak4.upgrade_in_event_loop(|app| {

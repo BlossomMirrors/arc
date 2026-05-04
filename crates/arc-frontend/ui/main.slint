@@ -118,6 +118,7 @@ export component AppWindow inherits Window {
     in-out property <bool> settings-ignore-native-pref: false;
 
     in-out property <[image]> detail-screenshots: [];
+    in-out property <bool> detail-busy: false;
 
     in-out property <string> install-file-path: "";
     in-out property <string> install-file-name: "";
@@ -466,8 +467,8 @@ export component AppWindow inherits Window {
                                 property <bool> is-installed: self.is-lutris ? root.detail-app.lutris-installed : (self.is-native ? root.detail-app.native-installed : root.detail-app.flatpak-installed);
                                 property <string> active-id: self.is-lutris ? root.detail-app.lutris-id : (self.is-native ? root.detail-app.native-id : root.detail-app.flatpak-id);
 
-                                text: self.is-installed ? "Remove" : "Install";
-                                enabled: self.active-id != "";
+                                text: root.detail-busy ? "Working..." : (self.is-installed ? "Remove" : "Install");
+                                enabled: self.active-id != "" && !root.detail-busy;
                                 clicked => {
                                     if self.is-installed {
                                         root.remove-requested(self.active-id);
