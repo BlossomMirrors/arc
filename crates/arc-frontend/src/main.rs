@@ -1130,11 +1130,16 @@ fn main() -> Result<()> {
 
                 // Get description from packages or AppStream
                 // Skip description for Flatpaks since it duplicates the summary
-                let description = native_pkg
-                    .or(lutris_pkg)
-                    .map(|p| p.description.clone())
-                    .or_else(|| appstream_info.as_ref().map(|a| a.summary.clone()))
-                    .unwrap_or_default();
+                let description = if flatpak_pkg.is_some() {
+                    // For Flatpaks, don't show description (it duplicates summary)
+                    String::new()
+                } else {
+                    native_pkg
+                        .or(lutris_pkg)
+                        .map(|p| p.description.clone())
+                        .or_else(|| appstream_info.as_ref().map(|a| a.summary.clone()))
+                        .unwrap_or_default()
+                };
 
                 let version = flatpak_pkg
                     .or(native_pkg)
