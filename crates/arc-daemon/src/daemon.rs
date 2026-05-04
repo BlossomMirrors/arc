@@ -1,7 +1,7 @@
 use crate::dbus_interface::ArcDaemonInterface;
-use crate::providers::bottles::BottlesProvider;
 use crate::providers::distrobox::DistroboxProvider;
 use crate::providers::flatpak::FlatpakProvider;
+use crate::providers::lutris::LutrisProvider;
 use crate::providers::MultiProvider;
 use crate::transaction_manager::TransactionManager;
 use anyhow::Result;
@@ -18,9 +18,9 @@ impl Daemon {
     pub async fn new() -> Result<Self> {
         let native = DistroboxProvider::new();
         let flatpak = FlatpakProvider::new();
-        let bottles = BottlesProvider::new();
+        let lutris = LutrisProvider::new();
 
-        let provider = Arc::new(MultiProvider::new(native, flatpak, bottles));
+        let provider = Arc::new(MultiProvider::new(native, flatpak, lutris));
 
         // load both flatpak and system packages into memory right away so the
         // first search request is fast instead of blocking on a cold provider

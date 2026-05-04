@@ -1,5 +1,5 @@
-use crate::appstream_db::{entry_to_flatpak_package, AppStreamDb};
 use super::PackageProvider;
+use crate::appstream_db::{entry_to_flatpak_package, AppStreamDb};
 use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider};
 use libflatpak::glib;
@@ -80,6 +80,8 @@ fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
             .unwrap_or_default(),
         provider: Provider::Flatpak,
         installed: true,
+        icon_url: None,
+        remote: r.origin().map(|s| s.to_string()),
     }
 }
 
@@ -92,8 +94,7 @@ impl FlatpakProvider {
             let db = AppStreamDb::load_flatpak();
 
             // collect unique app ids from all remotes across all installations
-            let mut app_ids: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
+            let mut app_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             for inst in all_installations() {
                 let remotes = inst.list_remotes(cancel).unwrap_or_default();
                 for remote in remotes {
@@ -127,9 +128,35 @@ impl FlatpakProvider {
                             description: String::new(),
                             provider: libarc::Provider::Flatpak,
                             installed: false,
+                            icon_url: None,
+                            remote: None,
                         })
                 })
                 .collect())
+        })
+        .await
+        .map_err(|e| ArcError::ProviderError(e.to_string()))?
+    }
+
+    pub async fn search_category(&self, category: &str) -> Result<Vec<Package>, ArcError> {
+        let category = category.to_string();
+        tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
+            Ok(AppStreamDb::load_flatpak()
+                .get_apps_by_category(&category)
+                .into_iter()
+                .map(|e| entry_to_flatpak_package(e, false))
+                .collect())
+        })
+        .await
+        .map_err(|e| ArcError::ProviderError(e.to_string()))?
+    }
+
+    pub async fn get_app_info(&self, app_id: &str) -> Result<Option<Package>, ArcError> {
+        let app_id = app_id.to_string();
+        tokio::task::spawn_blocking(move || -> Result<Option<Package>, ArcError> {
+            Ok(AppStreamDb::load_flatpak()
+                .find_by_id(&app_id)
+                .map(|e| entry_to_flatpak_package(e, false)))
         })
         .await
         .map_err(|e| ArcError::ProviderError(e.to_string()))?
@@ -149,6 +176,14 @@ impl PackageProvider for FlatpakProvider {
         })
         .await
         .map_err(|e| ArcError::ProviderError(e.to_string()))?
+    }
+
+    async fn search_category(&self, category: &str) -> Result<Vec<Package>, ArcError> {
+        self.search_category(category).await
+    }
+
+    async fn get_app_info(&self, app_id: &str) -> Result<Option<Package>, ArcError> {
+        self.get_app_info(app_id).await
     }
 
     async fn list_installed(&self) -> Result<Vec<Package>, ArcError> {
@@ -191,9 +226,17 @@ impl PackageProvider for FlatpakProvider {
         let package_id = package_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
-            let inst = installation_with_remote("flathub")?;
+
+            // Get the package info to determine which remote it comes from
+            let db = AppStreamDb::load_flatpak();
+            let remote_name = db
+                .find_by_id(&package_id)
+                .and_then(|e| e.remote)
+                .unwrap_or_else(|| "flathub".to_string());
+
+            let inst = installation_with_remote(&remote_name)?;
             let remote = inst
-                .remote_by_name("flathub", cancel)
+                .remote_by_name(&remote_name, cancel)
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
             let branch = remote
                 .default_branch()
@@ -201,7 +244,7 @@ impl PackageProvider for FlatpakProvider {
                 .unwrap_or_else(|| "stable".into());
             let remote_ref = inst
                 .fetch_remote_ref_sync(
-                    "flathub",
+                    &remote_name,
                     libflatpak::RefKind::App,
                     &package_id,
                     None,
@@ -215,7 +258,7 @@ impl PackageProvider for FlatpakProvider {
             let tx = libflatpak::Transaction::for_installation(&inst, cancel)
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
             tx.set_no_interaction(true);
-            tx.add_install("flathub", &full_ref, &[])
+            tx.add_install(&remote_name, &full_ref, &[])
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
             tx.run(cancel)
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))
@@ -259,6 +302,30 @@ impl PackageProvider for FlatpakProvider {
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
             tx.run(cancel)
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))
+        })
+        .await
+        .map_err(|e| ArcError::TransactionFailed(e.to_string()))?
+    }
+
+    async fn run(&self, package_id: &str) -> Result<(), ArcError> {
+        let package_id = package_id.to_string();
+        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+            let cancel = libflatpak::gio::Cancellable::NONE;
+            let (inst, _installed) = installation_with_app(&package_id)?;
+
+            // Use flatpak run to launch the application
+            let status = std::process::Command::new("flatpak")
+                .args(["run", &package_id])
+                .status()
+                .map_err(|e| ArcError::TransactionFailed(e.to_string()))?;
+
+            if !status.success() {
+                return Err(ArcError::TransactionFailed(format!(
+                    "Failed to run {}",
+                    package_id
+                )));
+            }
+            Ok(())
         })
         .await
         .map_err(|e| ArcError::TransactionFailed(e.to_string()))?

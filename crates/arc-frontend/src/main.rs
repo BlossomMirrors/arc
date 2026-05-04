@@ -1,8 +1,8 @@
+mod appstream_db;
 mod icons;
 
 use anyhow::Result;
-use futures_util::StreamExt;
-use libarc::flathub::{fetch_popular, fetch_recently_added, FlathubApp, CATEGORIES};
+use futures_util::{future::join_all, StreamExt};
 use libarc::{connect, ArcDaemonProxy, Package, Provider, Settings};
 use slint::{Model, SharedString};
 use std::sync::{Arc, Mutex};
@@ -41,19 +41,6 @@ fn pkg_name_from_filename(filename: &str) -> String {
     parts[..end].join("-")
 }
 
-fn packages_to_slint(pkgs: &[Package]) -> Vec<PackageItem> {
-    pkgs.iter()
-        .map(|p| PackageItem {
-            id: SharedString::from(p.id.as_str()),
-            name: SharedString::from(p.name.as_str()),
-            version: SharedString::from(p.version.as_str()),
-            description: SharedString::from(p.description.as_str()),
-            installed: p.installed,
-            icon: Default::default(),
-        })
-        .collect()
-}
-
 // When Flatpak is preferred, both a Flatpak and a native package can match the same
 // app name. This collapses those duplicates by keeping only the preferred provider's
 // entry. Apps that only exist in one provider always pass through unchanged.
@@ -90,10 +77,10 @@ fn dedup_by_preference(pkgs: Vec<libarc::Package>, settings: &Settings) -> Vec<l
                     // use the flatpak id for the preference lookup since the list uses those ids
                     settings.preferred_for(flatpak_id) == Provider::Distrobox
                 }
-                Provider::Bottles => {
+                Provider::Lutris => {
                     // no native counterpart → always show
                     !native_names.contains(&name)
-                        || settings.preferred_for(&p.id) == Provider::Bottles
+                        || settings.preferred_for(&p.id) == Provider::Lutris
                 }
             }
         })
@@ -262,24 +249,33 @@ impl RawCard {
 }
 
 async fn load_home(app_weak: slint::Weak<AppWindow>) {
-    let (popular_raw, recent_raw) = tokio::join!(fetch_popular(), fetch_recently_added());
+    // Load popular and recent apps from AppStream data via daemon
+    let app_weak2 = app_weak.clone();
+    let popular_apps = tokio::task::spawn_blocking(move || {
+        // Load Flatpak AppStream data and extract popular apps (by install count if available, or just first entries)
+        let db = appstream_db::appstream_db_for_home();
+        db.get_popular_apps(10)
+    })
+    .await
+    .unwrap_or_default();
 
-    let popular: Vec<FlathubApp> = popular_raw
-        .unwrap_or_default()
-        .into_iter()
-        .take(10)
-        .collect();
-    let recent: Vec<FlathubApp> = recent_raw.unwrap_or_default().into_iter().take(4).collect();
+    let app_weak3 = app_weak.clone();
+    let recent_apps = tokio::task::spawn_blocking(move || {
+        let db = appstream_db::appstream_db_for_home();
+        db.get_recent_apps(4)
+    })
+    .await
+    .unwrap_or_default();
 
     let mut popular_cards: Vec<RawCard> = Vec::new();
-    for app in &popular {
-        let icon = if let Some(url) = &app.icon {
+    for app in &popular_apps {
+        let icon = if let Some(url) = &app.icon_url {
             icons::load_icon(url).await
         } else {
             None
         };
         popular_cards.push(RawCard {
-            id: app.app_id.clone(),
+            id: app.id.clone(),
             name: app.name.clone(),
             summary: app.summary.clone(),
             icon,
@@ -287,22 +283,35 @@ async fn load_home(app_weak: slint::Weak<AppWindow>) {
     }
 
     let mut recent_cards: Vec<RawCard> = Vec::new();
-    for app in &recent {
-        let icon = if let Some(url) = &app.icon {
+    for app in &recent_apps {
+        let icon = if let Some(url) = &app.icon_url {
             icons::load_icon(url).await
         } else {
             None
         };
         recent_cards.push(RawCard {
-            id: app.app_id.clone(),
+            id: app.id.clone(),
             name: app.name.clone(),
             summary: app.summary.clone(),
             icon,
         });
     }
 
+    // Use standard AppStream categories
+    let categories = [
+        ("AudioVideo", "Multimedia", "applications-multimedia"),
+        ("Development", "Developer Tools", "applications-development"),
+        ("Education", "Education", "applications-education"),
+        ("Graphics", "Graphics", "applications-graphics"),
+        ("Network", "Internet", "applications-internet"),
+        ("Office", "Office", "applications-office"),
+        ("Science", "Science", "applications-science"),
+        ("System", "System", "applications-system"),
+        ("Utility", "Utilities", "applications-utilities"),
+    ];
+
     let mut raw_cats: Vec<RawCategoryData> = Vec::new();
-    for (id, label, icon_name) in CATEGORIES {
+    for (id, label, icon_name) in &categories {
         let name = icon_name.to_string();
         let data = tokio::task::spawn_blocking(move || icons::load_category_icon(&name))
             .await
@@ -373,7 +382,7 @@ fn main() -> Result<()> {
             match s.preferred_provider {
                 Provider::Distrobox => "Native",
                 Provider::Flatpak => "Flatpak",
-                Provider::Bottles => "Bottles",
+                Provider::Lutris => "Lutris",
             }
             .into(),
         );
@@ -401,53 +410,24 @@ fn main() -> Result<()> {
             let s = settings.lock().unwrap().clone();
 
             rt_handle.spawn(async move {
-                let daemon_future = async {
-                    if let Some(p) = &proxy {
-                        p.search(&query_str)
-                            .await
-                            .ok()
-                            .and_then(|json| {
-                                serde_json::from_str::<Vec<libarc::Package>>(&json).ok()
-                            })
-                            .unwrap_or_default()
-                    } else {
-                        vec![]
-                    }
+                let daemon_pkgs = if let Some(p) = &proxy {
+                    p.search(&query_str)
+                        .await
+                        .ok()
+                        .and_then(|json| serde_json::from_str::<Vec<libarc::Package>>(&json).ok())
+                        .unwrap_or_default()
+                } else {
+                    vec![]
                 };
-                let flathub_future = libarc::flathub::search(&query_str);
-                let (daemon_pkgs, flathub_result) = tokio::join!(daemon_future, flathub_future);
-                let flathub_apps = flathub_result.unwrap_or_default();
-                let icon_map: std::collections::HashMap<String, String> = flathub_apps
-                    .iter()
-                    .filter_map(|a| a.icon.as_ref().map(|url| (a.app_id.clone(), url.clone())))
-                    .collect();
 
-                // IDs already returned by daemon (knows installed status)
-                let daemon_ids: std::collections::HashSet<String> =
-                    daemon_pkgs.iter().map(|p| p.id.clone()).collect();
-
-                // Merge Flathub API results not already covered by daemon
-                let mut all_pkgs = daemon_pkgs;
-                for app in &flathub_apps {
-                    if !daemon_ids.contains(&app.app_id) {
-                        all_pkgs.push(libarc::Package {
-                            id: app.app_id.clone(),
-                            name: app.name.clone(),
-                            version: String::new(),
-                            description: app.summary.clone(),
-                            provider: Provider::Flatpak,
-                            installed: false,
-                        });
-                    }
-                }
+                // Use only daemon results which include AppStream data from Flatpak remotes
+                let all_pkgs = daemon_pkgs;
 
                 let all_pkgs = dedup_by_preference(all_pkgs, &s);
 
                 let mut raw_pkgs: Vec<RawPackage> = Vec::new();
                 for pkg in all_pkgs {
-                    let icon = if let Some(url) = icon_map.get(&pkg.id) {
-                        icons::load_icon(url).await
-                    } else if pkg.provider == Provider::Flatpak {
+                    let icon = if pkg.provider == Provider::Flatpak {
                         let id = pkg.id.clone();
                         tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
                             .await
@@ -494,18 +474,38 @@ fn main() -> Result<()> {
                     vec![]
                 };
 
-                let mut raw_pkgs: Vec<RawPackage> = Vec::new();
-                for pkg in packages {
-                    let icon = if pkg.provider == Provider::Flatpak {
-                        let id = pkg.id.clone();
-                        tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
-                            .await
-                            .unwrap_or(None)
-                    } else {
-                        None
-                    };
-                    raw_pkgs.push(RawPackage { pkg, icon });
-                }
+                // Load icons for each package in parallel
+                let icon_futures: Vec<_> = packages
+                    .iter()
+                    .map(|pkg| async {
+                        match pkg.provider {
+                            Provider::Flatpak => {
+                                // Use local AppStream icon
+                                let id = pkg.id.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    icons::load_local_flatpak_icon(&id)
+                                })
+                                .await
+                                .unwrap_or(None)
+                            }
+                            Provider::Distrobox | Provider::Lutris => {
+                                // Use load_native_package_icon for native/Distrobox and Lutris packages
+                                let name = pkg.name.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    icons::load_native_package_icon(&name)
+                                })
+                                .await
+                                .unwrap_or(None)
+                            }
+                        }
+                    })
+                    .collect();
+                let icons_result: Vec<_> = join_all(icon_futures).await;
+                let raw_pkgs: Vec<RawPackage> = packages
+                    .into_iter()
+                    .zip(icons_result)
+                    .map(|(pkg, icon)| RawPackage { pkg, icon })
+                    .collect();
 
                 let status = format!("{} application(s) installed", raw_pkgs.len());
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
@@ -621,26 +621,45 @@ fn main() -> Result<()> {
         app.on_category_selected(move |category_id| {
             let cat = category_id.to_string();
             let app_weak2 = app_weak.clone();
-            let _proxy = get_proxy(&proxy_arc);
+            let proxy = get_proxy(&proxy_arc);
 
             rt_handle.spawn(async move {
-                let result = libarc::flathub::fetch_category(&cat)
-                    .await
-                    .unwrap_or_default();
-                let packages: Vec<Package> = result
+                // Query daemon for category apps from AppStream data
+                let packages: Vec<libarc::Package> = if let Some(p) = &proxy {
+                    p.search_category(&cat)
+                        .await
+                        .ok()
+                        .and_then(|json| serde_json::from_str(&json).ok())
+                        .unwrap_or_default()
+                } else {
+                    vec![]
+                };
+
+                // Load icons for each package in parallel
+                let icon_futures: Vec<_> = packages
                     .iter()
-                    .map(|a| Package {
-                        id: a.app_id.clone(),
-                        name: a.name.clone(),
-                        version: String::new(),
-                        description: a.summary.clone(),
-                        provider: libarc::Provider::Flatpak,
-                        installed: false,
+                    .map(|pkg| async {
+                        if pkg.provider == Provider::Flatpak {
+                            let id = pkg.id.clone();
+                            tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
+                                .await
+                                .unwrap_or(None)
+                        } else {
+                            None
+                        }
                     })
                     .collect();
-                let status = format!("Category: {} ({} apps)", cat, packages.len());
+                let icons_result: Vec<_> = join_all(icon_futures).await;
+                let raw_pkgs: Vec<RawPackage> = packages
+                    .into_iter()
+                    .zip(icons_result)
+                    .map(|(pkg, icon)| RawPackage { pkg, icon })
+                    .collect();
+
+                let status = format!("Category: {} ({} apps)", cat, raw_pkgs.len());
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
-                    let slint_pkgs = packages_to_slint(&packages);
+                    let slint_pkgs: Vec<PackageItem> =
+                        raw_pkgs.iter().map(|r| r.to_slint()).collect();
                     app.set_current_view("search".into());
                     app.set_packages(slint_pkgs.as_slice().into());
                     app.set_status_text(status.into());
@@ -669,11 +688,22 @@ fn main() -> Result<()> {
             let s = settings.lock().unwrap().clone();
 
             rt_handle.spawn(async move {
-                let flathub = libarc::flathub::fetch_app(&id).await.unwrap_or(None);
+                // Get app info from daemon (AppStream data)
+                let app_info = if let Some(ref p) = proxy {
+                    p.get_app_info(&id)
+                        .await
+                        .ok()
+                        .and_then(|json| {
+                            serde_json::from_str::<Option<libarc::Package>>(&json).ok()
+                        })
+                        .flatten()
+                } else {
+                    None
+                };
 
-                let app_name = flathub
+                let app_name = app_info
                     .as_ref()
-                    .map(|f| f.name.clone())
+                    .map(|p| p.name.clone())
                     .unwrap_or_else(|| id.split(';').next().unwrap_or(&id).to_string());
 
                 // search + installed from daemon so we can find both providers
@@ -741,13 +771,7 @@ fn main() -> Result<()> {
                     }
                     .to_string();
 
-                let icon = if let Some(ref info) = flathub {
-                    if let Some(url) = &info.icon {
-                        icons::load_icon(url).await
-                    } else {
-                        None
-                    }
-                } else if !flatpak_id.is_empty() {
+                let icon = if !flatpak_id.is_empty() {
                     let fid = flatpak_id.clone();
                     tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&fid))
                         .await
@@ -761,22 +785,22 @@ fn main() -> Result<()> {
                     .map(|p| p.version.clone())
                     .unwrap_or_default();
 
+                let description = flatpak_pkg
+                    .or(app_info.as_ref())
+                    .map(|p| p.description.clone())
+                    .unwrap_or_default();
+
                 let raw = RawDetailData {
-                    name: flathub
-                        .as_ref()
-                        .map(|f| f.name.clone())
+                    name: flatpak_pkg
+                        .or(app_info.as_ref())
+                        .or(native_pkg)
+                        .map(|p| p.name.clone())
                         .unwrap_or_else(|| app_name.clone()),
-                    developer: flathub
-                        .as_ref()
-                        .and_then(|f| f.developer_name.clone())
-                        .unwrap_or_default(),
-                    description: flathub
-                        .as_ref()
-                        .and_then(|f| f.description.clone())
-                        .unwrap_or_default(),
-                    summary: flathub
-                        .as_ref()
-                        .map(|f| f.summary.clone())
+                    developer: String::new(), // AppStream data doesn't typically include developer name in Package
+                    description,
+                    summary: flatpak_pkg
+                        .or(app_info.as_ref())
+                        .map(|p| p.description.clone())
                         .unwrap_or_default(),
                     version,
                     icon,
@@ -878,18 +902,25 @@ fn main() -> Result<()> {
                 app_ref.set_current_view("install-file".into());
             }
 
-            // search Flathub in background for a matching app
+            // search daemon in background for a matching Flatpak app
             let app_weak2 = app_weak.clone();
+            let proxy_search = get_proxy(&proxy_arc);
             rt_handle.spawn(async move {
-                if let Ok(results) = libarc::flathub::search(&pkg_name).await {
-                    if let Some(first) = results.into_iter().next() {
-                        let id = first.app_id.clone();
-                        let name = first.name.clone();
-                        let _ = app_weak2.upgrade_in_event_loop(move |app| {
-                            app.set_install_file_flatpak_id(id.into());
-                            app.set_install_file_flatpak_name(name.into());
-                            app.set_install_file_has_flatpak(true);
-                        });
+                if let Some(p) = proxy_search {
+                    if let Ok(results) = p.search(&pkg_name).await {
+                        if let Ok(pkgs) = serde_json::from_str::<Vec<libarc::Package>>(&results) {
+                            if let Some(first) =
+                                pkgs.iter().find(|p| p.provider == Provider::Flatpak)
+                            {
+                                let id = first.id.clone();
+                                let name = first.name.clone();
+                                let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                                    app.set_install_file_flatpak_id(id.into());
+                                    app.set_install_file_flatpak_name(name.into());
+                                    app.set_install_file_has_flatpak(true);
+                                });
+                            }
+                        }
                     }
                 }
             });

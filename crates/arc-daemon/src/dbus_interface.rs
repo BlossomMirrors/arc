@@ -5,10 +5,10 @@ use libarc::{Provider, TransactionType};
 
 // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no slashes or semicolons).
 // distrobox ids look like "distrobox:container:name:type" or are file paths for installs.
-// bottles ids look like "bottles:<slug>".
+// lutris ids look like "lutris:<slug>".
 fn provider_from_id(package_id: &str) -> Provider {
-    if package_id.starts_with("bottles:") {
-        return Provider::Bottles;
+    if package_id.starts_with("lutris:") {
+        return Provider::Lutris;
     }
     let looks_like_flatpak = !package_id.contains('/')
         && !package_id.contains(';')
@@ -235,6 +235,31 @@ impl ArcDaemonInterface {
         }
     }
 
+    async fn search_category(&self, category: String) -> String {
+        info!("SearchCategory: {}", category);
+        match self.provider.search_category(&category).await {
+            Ok(packages) => serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => {
+                error!("SearchCategory failed: {}", e);
+                "[]".to_string()
+            }
+        }
+    }
+
+    async fn get_app_info(&self, package_id: String) -> String {
+        info!("GetAppInfo: {}", package_id);
+        match self.provider.get_app_info(&package_id).await {
+            Ok(Some(package)) => {
+                serde_json::to_string(&Some(package)).unwrap_or_else(|_| "null".to_string())
+            }
+            Ok(None) => "null".to_string(),
+            Err(e) => {
+                error!("GetAppInfo failed: {}", e);
+                "null".to_string()
+            }
+        }
+    }
+
     async fn list_installed(&self) -> String {
         info!("ListInstalled");
         match self.provider.list_installed().await {
@@ -273,6 +298,17 @@ impl ArcDaemonInterface {
                 None => "null".to_string(),
             },
             Err(_) => "null".to_string(),
+        }
+    }
+
+    async fn run_package(&self, package_id: String) -> String {
+        info!("RunPackage: {}", package_id);
+        match self.provider.run(&package_id).await {
+            Ok(()) => serde_json::json!({ "success": true }).to_string(),
+            Err(e) => {
+                error!("RunPackage failed: {}", e);
+                serde_json::json!({ "success": false, "error": e.to_string() }).to_string()
+            }
         }
     }
 

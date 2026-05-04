@@ -19,6 +19,7 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 resvg = "0.44"
 flate2 = "1"
+appstream = { version = "0.2", features = ["gzip"] }
 
 [build-dependencies]
 slint-build = "1"

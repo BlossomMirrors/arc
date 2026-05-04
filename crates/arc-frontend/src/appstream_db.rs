@@ -1,10 +1,7 @@
-use appstream::enums::ComponentKind;
 use appstream::{Collection, Component};
-use libarc::{Package, Provider};
 use std::path::{Path, PathBuf};
 
-// appstream is a big xml catalog of apps that distros ship alongside their packages
-// so you get descriptions, icons and categories without hitting the network
+// AppStream database for loading app metadata from Flatpak remotes
 pub struct AppStreamDb {
     components: Vec<(Component, Option<String>)>,
 }
@@ -29,16 +26,69 @@ impl AppStreamDb {
         Self { components }
     }
 
+    pub fn get_popular_apps(&self, limit: usize) -> Vec<AppStreamEntry> {
+        // For now, just return the first N desktop applications
+        // In the future, we could sort by some metric if available in AppStream data
+        self.components
+            .iter()
+            .filter(|(c, _)| {
+                matches!(
+                    c.kind,
+                    appstream::enums::ComponentKind::DesktopApplication
+                        | appstream::enums::ComponentKind::ConsoleApplication
+                )
+            })
+            .take(limit)
+            .map(|(c, remote)| component_to_entry(c, remote.clone()))
+            .collect()
+    }
+
+    pub fn get_recent_apps(&self, limit: usize) -> Vec<AppStreamEntry> {
+        // For now, just return apps from the end of the list
+        // AppStream doesn't have a "recently added" concept, so this is a placeholder
+        self.components
+            .iter()
+            .filter(|(c, _)| {
+                matches!(
+                    c.kind,
+                    appstream::enums::ComponentKind::DesktopApplication
+                        | appstream::enums::ComponentKind::ConsoleApplication
+                )
+            })
+            .rev()
+            .take(limit)
+            .map(|(c, remote)| component_to_entry(c, remote.clone()))
+            .collect()
+    }
+
+    pub fn get_apps_by_category(&self, category: &str) -> Vec<AppStreamEntry> {
+        self.components
+            .iter()
+            .filter(|(c, _)| {
+                matches!(
+                    c.kind,
+                    appstream::enums::ComponentKind::DesktopApplication
+                        | appstream::enums::ComponentKind::ConsoleApplication
+                )
+            })
+            .filter(|(c, _)| {
+                c.categories
+                    .iter()
+                    .any(|cat| format!("{:?}", cat).to_lowercase() == category.to_lowercase())
+            })
+            .map(|(c, remote)| component_to_entry(c, remote.clone()))
+            .collect()
+    }
+
     pub fn search_apps(&self, query: &str) -> Vec<AppStreamEntry> {
         let q = query.to_lowercase();
         self.components
             .iter()
-            // skip runtimes, codecs, fonts etc, we only want things users
-            // would actually think of as an app
             .filter(|(c, _)| {
                 matches!(
                     c.kind,
-                    ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication
+                    appstream::enums::ComponentKind::DesktopApplication
+                        | appstream::enums::ComponentKind::ConsoleApplication
                 )
             })
             .filter(|(c, _)| {
@@ -66,46 +116,18 @@ impl AppStreamDb {
             .find(|(c, _)| c.id.to_string() == id)
             .map(|(c, remote)| component_to_entry(c, remote.clone()))
     }
-
-    pub fn get_apps_by_category(&self, category: &str) -> Vec<AppStreamEntry> {
-        self.components
-            .iter()
-            // skip runtimes, codecs, fonts etc, we only want things users
-            // would actually think of as an app
-            .filter(|(c, _)| {
-                matches!(
-                    c.kind,
-                    ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication
-                )
-            })
-            .filter(|(c, _)| {
-                c.categories
-                    .iter()
-                    .any(|cat| format!("{:?}", cat).to_lowercase() == category.to_lowercase())
-            })
-            .map(|(c, remote)| component_to_entry(c, remote.clone()))
-            .collect()
-    }
 }
 
 fn component_to_entry(c: &Component, remote: Option<String>) -> AppStreamEntry {
-    // Extract icon URL from the first available icon
-    // AppStream icons can be local (name only) or remote (full URL)
-    let icon_url = c.icons.first().and_then(|icon| {
-        // Prefer remote URLs, fall back to local icon names
-        match icon {
-            appstream::enums::Icon::Remote { url, .. } => Some(url.to_string()),
-            appstream::enums::Icon::Local { path, .. } => Some(format!("local:{}", path.display())),
-            appstream::enums::Icon::Cached { path, .. } => {
-                Some(format!("local:{}", path.display()))
-            }
-            appstream::enums::Icon::Stock(name) => Some(format!("local:{}", name)),
-        }
+    let icon_url = c.icons.first().and_then(|icon| match icon {
+        appstream::enums::Icon::Remote { url, .. } => Some(url.to_string()),
+        appstream::enums::Icon::Local { path, .. } => Some(format!("local:{}", path.display())),
+        appstream::enums::Icon::Cached { path, .. } => Some(format!("local:{}", path.display())),
+        appstream::enums::Icon::Stock(name) => Some(format!("local:{}", name)),
     });
 
     AppStreamEntry {
         id: c.id.to_string(),
-        // get_default() returns the untranslated string, good enough for search
         name: c.name.get_default().cloned().unwrap_or_default(),
         summary: c
             .summary
@@ -118,8 +140,6 @@ fn component_to_entry(c: &Component, remote: Option<String>) -> AppStreamEntry {
     }
 }
 
-// flatpak lays out appstream data as <root>/<remote>/<arch>/active/appstream.xml.gz
-// the "active" symlink points to the current generation, older ones sit next to it
 fn load_flatpak_root(root: impl AsRef<Path>, out: &mut Vec<(Component, Option<String>)>) {
     let Ok(remotes) = std::fs::read_dir(root.as_ref()) else {
         return;
@@ -154,20 +174,6 @@ fn load_flatpak_root(root: impl AsRef<Path>, out: &mut Vec<(Component, Option<St
     }
 }
 
-pub fn entry_to_flatpak_package(entry: AppStreamEntry, installed: bool) -> Package {
-    let name = if entry.name.is_empty() {
-        entry.id.clone()
-    } else {
-        entry.name
-    };
-    Package {
-        id: entry.id,
-        name,
-        version: String::new(),
-        description: entry.summary,
-        provider: Provider::Flatpak,
-        installed,
-        icon_url: entry.icon_url,
-        remote: entry.remote,
-    }
+pub fn appstream_db_for_home() -> AppStreamDb {
+    AppStreamDb::load_flatpak()
 }

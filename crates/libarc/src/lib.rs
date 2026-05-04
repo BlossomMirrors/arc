@@ -1,6 +1,5 @@
 pub mod errors;
 pub mod events;
-pub mod flathub;
 pub mod settings;
 pub mod types;
 
@@ -23,11 +22,14 @@ pub trait ArcDaemon {
     async fn install_package(&self, package_id: &str) -> zbus::Result<String>;
     async fn remove_package(&self, package_id: &str) -> zbus::Result<String>;
     async fn search(&self, query: &str) -> zbus::Result<String>;
+    async fn search_category(&self, category: &str) -> zbus::Result<String>;
+    async fn get_app_info(&self, package_id: &str) -> zbus::Result<String>;
     async fn list_installed(&self) -> zbus::Result<String>;
     async fn list_updates(&self) -> zbus::Result<String>;
     async fn update_package(&self, package_id: &str) -> zbus::Result<String>;
     async fn get_transaction(&self, transaction_id: &str) -> zbus::Result<String>;
     async fn refresh_cache(&self) -> zbus::Result<bool>;
+    async fn run_package(&self, package_id: &str) -> zbus::Result<String>;
 
     // signals are one way messages the daemon sends to all connected clients
     // without them having to ask, fire and forget from the daemon side

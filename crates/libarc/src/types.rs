@@ -5,7 +5,7 @@ use uuid::Uuid;
 pub enum Provider {
     Flatpak,
     Distrobox,
-    Bottles,
+    Lutris,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,6 +16,8 @@ pub struct Package {
     pub description: String,
     pub provider: Provider,
     pub installed: bool,
+    pub icon_url: Option<String>,
+    pub remote: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

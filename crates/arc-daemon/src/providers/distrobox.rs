@@ -95,10 +95,7 @@ impl DistroboxProvider {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
         let data_dir = PathBuf::from(&home).join(".local/share/arc");
         let packages_dir = data_dir.join("packages");
-        Self {
-            packages_dir,
-            home,
-        }
+        Self { packages_dir, home }
     }
 
     fn info_file(&self, container: &str, pkg_name: &str) -> PathBuf {
@@ -159,8 +156,8 @@ impl DistroboxProvider {
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
 
-        let work_dir = PathBuf::from(&self.home)
-            .join(format!(".arc-distrobox-{}", Uuid::new_v4().simple()));
+        let work_dir =
+            PathBuf::from(&self.home).join(format!(".arc-distrobox-{}", Uuid::new_v4().simple()));
         fs::create_dir_all(&work_dir)
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
@@ -244,8 +241,8 @@ impl DistroboxProvider {
         apps: &[String],
         bins: &[String],
     ) -> Result<(), ArcError> {
-        let work_dir = PathBuf::from(&self.home)
-            .join(format!(".arc-distrobox-{}", Uuid::new_v4().simple()));
+        let work_dir =
+            PathBuf::from(&self.home).join(format!(".arc-distrobox-{}", Uuid::new_v4().simple()));
         fs::create_dir_all(&work_dir)
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
@@ -365,6 +362,8 @@ fn parse_info(content: &str) -> Option<Package> {
         description,
         provider: Provider::Distrobox,
         installed: true,
+        icon_url: None,
+        remote: None,
     })
 }
 
@@ -437,8 +436,26 @@ impl PackageProvider for DistroboxProvider {
 
     async fn update(&self, _package_id: &str) -> Result<(), ArcError> {
         Err(ArcError::ProviderError(
-            "Package updates are not supported for distrobox packages".to_string(),
+            "Updates are managed through distrobox directly".to_string(),
         ))
+    }
+
+    async fn run(&self, _package_id: &str) -> Result<(), ArcError> {
+        Err(ArcError::ProviderError(
+            "Running distrobox applications is not supported. Use distrobox-enter directly."
+                .to_string(),
+        ))
+    }
+
+    async fn search_category(&self, _category: &str) -> Result<Vec<Package>, ArcError> {
+        // Distrobox doesn't have categories, return empty
+        Ok(Vec::new())
+    }
+
+    async fn get_app_info(&self, package_id: &str) -> Result<Option<Package>, ArcError> {
+        // Look up the package from installed packages
+        let installed = self.read_installed().await?;
+        Ok(installed.into_iter().find(|p| p.id == package_id))
     }
 }
 
