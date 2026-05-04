@@ -15,6 +15,7 @@ const LUTRIS_API_BASE: &str = "https://lutris.net/api/installers";
 const CATALOG_CACHE_TTL: Duration = Duration::from_secs(3600);
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 struct LutrisInstallerResponse {
     count: u32,
     results: Vec<LutrisInstaller>,
@@ -37,6 +38,7 @@ struct LutrisScript {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 struct LutrisInstaller {
     #[serde(default)]
     slug: String,

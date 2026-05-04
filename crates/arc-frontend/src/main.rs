@@ -1,6 +1,7 @@
 mod appstream_db;
 mod icons;
 
+use crate::icons::RawIcon;
 use anyhow::Result;
 use futures_util::{future::join_all, StreamExt};
 use libarc::{connect, ArcDaemonProxy, Package, Provider, Settings};
@@ -188,13 +189,23 @@ struct RawCard {
     id: String,
     name: String,
     summary: String,
-    icon: Option<icons::RawIcon>,
+    icon: Option<RawIcon>,
+}
+
+// CachedAppInfo matches the daemon's icon_cache::AppInfo struct
+#[derive(serde::Deserialize, Clone)]
+struct CachedAppInfo {
+    id: String,
+    name: String,
+    summary: String,
+    description: String,
+    icon_available: bool,
 }
 
 struct RawCategoryData {
     id: String,
     label: String,
-    icon: Option<icons::RawIcon>,
+    icon: Option<RawIcon>,
     color: (u8, u8, u8),
 }
 
@@ -204,7 +215,7 @@ struct RawDetailData {
     description: String,
     summary: String,
     version: String,
-    icon: Option<icons::RawIcon>,
+    icon: Option<RawIcon>,
     flatpak_id: String,
     native_id: String,
     flatpak_installed: bool,
@@ -213,7 +224,7 @@ struct RawDetailData {
 
 struct RawPackage {
     pkg: libarc::Package,
-    icon: Option<icons::RawIcon>,
+    icon: Option<RawIcon>,
 }
 
 impl RawPackage {
@@ -249,52 +260,161 @@ impl RawCard {
 }
 
 async fn load_home(app_weak: slint::Weak<AppWindow>) {
-    // Load popular and recent apps from AppStream data via daemon
-    let app_weak2 = app_weak.clone();
-    let popular_apps = tokio::task::spawn_blocking(move || {
-        // Load Flatpak AppStream data and extract popular apps (by install count if available, or just first entries)
+    // Get daemon proxy to fetch cached data
+    let proxy = get_or_connect(&Arc::new(Mutex::new(None))).await;
+
+    // Load popular and recent apps from daemon's cache
+    let popular_app_ids: Vec<String> = if let Some(ref p) = proxy {
+        let result = p
+            .get_popular_apps(10)
+            .await
+            .unwrap_or_else(|_| "[]".to_string());
+        serde_json::from_str(&result).unwrap_or_default()
+    } else {
+        // Fallback to local AppStream if daemon unavailable
         let db = appstream_db::appstream_db_for_home();
         db.get_popular_apps(10)
-    })
-    .await
-    .unwrap_or_default();
+            .iter()
+            .map(|a| a.id.clone())
+            .collect()
+    };
 
-    let app_weak3 = app_weak.clone();
-    let recent_apps = tokio::task::spawn_blocking(move || {
+    let recent_app_ids: Vec<String> = if let Some(ref p) = proxy {
+        let result = p
+            .get_recent_apps(4)
+            .await
+            .unwrap_or_else(|_| "[]".to_string());
+        serde_json::from_str(&result).unwrap_or_default()
+    } else {
+        // Fallback to local AppStream if daemon unavailable
         let db = appstream_db::appstream_db_for_home();
-        db.get_recent_apps(4)
-    })
-    .await
-    .unwrap_or_default();
+        db.get_recent_apps(4).iter().map(|a| a.id.clone()).collect()
+    };
 
+    // Fetch app info and icons in parallel for popular apps
+    let popular_tasks: Vec<_> = popular_app_ids
+        .iter()
+        .map(|app_id| {
+            let app_id = app_id.clone();
+            let proxy_clone = proxy.clone();
+            tokio::spawn(async move {
+                let info = if let Some(ref p) = proxy_clone {
+                    let result = p
+                        .get_cached_app_info(&app_id)
+                        .await
+                        .unwrap_or_else(|_| "null".to_string());
+                    serde_json::from_str::<CachedAppInfo>(&result).ok()
+                } else {
+                    None
+                };
+
+                let icon = if let Some(ref p) = proxy_clone {
+                    let icon_data = p.get_icon(&app_id).await.unwrap_or_default();
+                    if icon_data.len() >= 8 {
+                        let width = u32::from_le_bytes([
+                            icon_data[0],
+                            icon_data[1],
+                            icon_data[2],
+                            icon_data[3],
+                        ]);
+                        let height = u32::from_le_bytes([
+                            icon_data[4],
+                            icon_data[5],
+                            icon_data[6],
+                            icon_data[7],
+                        ]);
+                        let pixels = icon_data[8..].to_vec();
+                        Some(RawIcon {
+                            width,
+                            height,
+                            pixels,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                (app_id, info, icon)
+            })
+        })
+        .collect();
+
+    let popular_results = join_all(popular_tasks).await;
     let mut popular_cards: Vec<RawCard> = Vec::new();
-    for app in &popular_apps {
-        let icon = if let Some(url) = &app.icon_url {
-            icons::load_icon(url).await
-        } else {
-            None
-        };
-        popular_cards.push(RawCard {
-            id: app.id.clone(),
-            name: app.name.clone(),
-            summary: app.summary.clone(),
-            icon,
-        });
+    for result in popular_results {
+        if let Ok((app_id, info, icon)) = result {
+            popular_cards.push(RawCard {
+                id: app_id.clone(),
+                name: info.as_ref().map(|i| i.name.clone()).unwrap_or_default(),
+                summary: info.as_ref().map(|i| i.summary.clone()).unwrap_or_default(),
+                icon,
+            });
+        }
     }
 
+    // Fetch app info and icons in parallel for recent apps
+    let recent_tasks: Vec<_> = recent_app_ids
+        .iter()
+        .map(|app_id| {
+            let app_id = app_id.clone();
+            let proxy_clone = proxy.clone();
+            tokio::spawn(async move {
+                let info = if let Some(ref p) = proxy_clone {
+                    let result = p
+                        .get_cached_app_info(&app_id)
+                        .await
+                        .unwrap_or_else(|_| "null".to_string());
+                    serde_json::from_str::<CachedAppInfo>(&result).ok()
+                } else {
+                    None
+                };
+
+                let icon = if let Some(ref p) = proxy_clone {
+                    let icon_data = p.get_icon(&app_id).await.unwrap_or_default();
+                    if icon_data.len() >= 8 {
+                        let width = u32::from_le_bytes([
+                            icon_data[0],
+                            icon_data[1],
+                            icon_data[2],
+                            icon_data[3],
+                        ]);
+                        let height = u32::from_le_bytes([
+                            icon_data[4],
+                            icon_data[5],
+                            icon_data[6],
+                            icon_data[7],
+                        ]);
+                        let pixels = icon_data[8..].to_vec();
+                        Some(RawIcon {
+                            width,
+                            height,
+                            pixels,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                (app_id, info, icon)
+            })
+        })
+        .collect();
+
+    let recent_results = join_all(recent_tasks).await;
     let mut recent_cards: Vec<RawCard> = Vec::new();
-    for app in &recent_apps {
-        let icon = if let Some(url) = &app.icon_url {
-            icons::load_icon(url).await
-        } else {
-            None
-        };
-        recent_cards.push(RawCard {
-            id: app.id.clone(),
-            name: app.name.clone(),
-            summary: app.summary.clone(),
-            icon,
-        });
+    for result in recent_results {
+        if let Ok((app_id, info, icon)) = result {
+            recent_cards.push(RawCard {
+                id: app_id.clone(),
+                name: info.as_ref().map(|i| i.name.clone()).unwrap_or_default(),
+                summary: info.as_ref().map(|i| i.summary.clone()).unwrap_or_default(),
+                icon,
+            });
+        }
     }
 
     // Use standard AppStream categories

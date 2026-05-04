@@ -310,8 +310,8 @@ impl PackageProvider for FlatpakProvider {
     async fn run(&self, package_id: &str) -> Result<(), ArcError> {
         let package_id = package_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
-            let cancel = libflatpak::gio::Cancellable::NONE;
-            let (inst, _installed) = installation_with_app(&package_id)?;
+            let _cancel = libflatpak::gio::Cancellable::NONE;
+            let (_inst, _installed) = installation_with_app(&package_id)?;
 
             // Use flatpak run to launch the application
             let status = std::process::Command::new("flatpak")

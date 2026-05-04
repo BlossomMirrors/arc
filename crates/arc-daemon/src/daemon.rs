@@ -1,4 +1,5 @@
 use crate::dbus_interface::ArcDaemonInterface;
+use crate::icon_cache::IconCache;
 use crate::providers::distrobox::DistroboxProvider;
 use crate::providers::flatpak::FlatpakProvider;
 use crate::providers::lutris::LutrisProvider;
@@ -12,6 +13,7 @@ use zbus::connection::Builder as ConnectionBuilder;
 pub struct Daemon {
     provider: Arc<MultiProvider>,
     transaction_manager: Arc<TransactionManager>,
+    icon_cache: Arc<IconCache>,
 }
 
 impl Daemon {
@@ -31,6 +33,14 @@ impl Daemon {
             info!("Package cache ready");
         }
 
+        // create icon cache and pre-warm it with icons from appstream data
+        // this makes the frontend load much faster since icons are already rendered
+        let icon_cache = Arc::new(IconCache::new(64));
+        let icon_cache_clone = Arc::clone(&icon_cache);
+        tokio::spawn(async move {
+            icon_cache_clone.prewarm().await;
+        });
+
         // arc clone is a reference counted pointer so both the spawn and the
         // daemon struct share the same provider without copying it
         let bg_provider = Arc::clone(&provider);
@@ -48,6 +58,7 @@ impl Daemon {
         Ok(Self {
             provider,
             transaction_manager: Arc::new(TransactionManager::new()),
+            icon_cache,
         })
     }
 
@@ -57,6 +68,7 @@ impl Daemon {
         let interface = ArcDaemonInterface {
             provider: self.provider,
             transaction_manager: self.transaction_manager,
+            icon_cache: self.icon_cache,
         };
 
         // register on the session dbus under our name so clients

@@ -30,6 +30,14 @@ pub trait ArcDaemon {
     async fn get_transaction(&self, transaction_id: &str) -> zbus::Result<String>;
     async fn refresh_cache(&self) -> zbus::Result<bool>;
     async fn run_package(&self, package_id: &str) -> zbus::Result<String>;
+    // Icon cache methods for fast home page loading
+    async fn get_icon(&self, app_id: &str) -> zbus::Result<Vec<u8>>;
+    async fn get_native_icon(&self, package_name: &str) -> zbus::Result<Vec<u8>>;
+    async fn get_popular_apps(&self, limit: u32) -> zbus::Result<String>;
+    async fn get_recent_apps(&self, limit: u32) -> zbus::Result<String>;
+    async fn get_cached_app_info(&self, app_id: &str) -> zbus::Result<String>;
+    async fn get_apps_by_category(&self, category: &str) -> zbus::Result<String>;
+    async fn search_cached(&self, query: &str) -> zbus::Result<String>;
 
     // signals are one way messages the daemon sends to all connected clients
     // without them having to ask, fire and forget from the daemon side
