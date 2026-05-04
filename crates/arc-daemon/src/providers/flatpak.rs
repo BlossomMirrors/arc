@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider};
 use libflatpak::glib;
 use libflatpak::prelude::*;
+use tokio::sync::mpsc::UnboundedSender;
 
 pub struct FlatpakProvider;
 
@@ -82,6 +83,7 @@ fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
         installed: true,
         icon_url: None,
         remote: r.origin().map(|s| s.to_string()),
+        screenshots: vec![],
     }
 }
 
@@ -130,6 +132,7 @@ impl FlatpakProvider {
                             installed: false,
                             icon_url: None,
                             remote: None,
+                            screenshots: vec![],
                         })
                 })
                 .collect())
@@ -160,6 +163,90 @@ impl FlatpakProvider {
         })
         .await
         .map_err(|e| ArcError::ProviderError(e.to_string()))?
+    }
+
+    pub async fn install_with_progress(
+        &self,
+        app_id: &str,
+        progress_tx: UnboundedSender<u8>,
+    ) -> Result<(), ArcError> {
+        let app_id = app_id.to_string();
+        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+            let cancel = libflatpak::gio::Cancellable::NONE;
+            let db = AppStreamDb::get_static();
+            let remote_name = db
+                .find_by_id(&app_id)
+                .and_then(|e| e.remote)
+                .unwrap_or_else(|| "flathub".to_string());
+            let inst = installation_with_remote(&remote_name)?;
+            let remote = inst
+                .remote_by_name(&remote_name, cancel)
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+            let branch = remote
+                .default_branch()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "stable".into());
+            let remote_ref = inst
+                .fetch_remote_ref_sync(
+                    &remote_name,
+                    libflatpak::RefKind::App,
+                    &app_id,
+                    None,
+                    Some(branch.as_str()),
+                    cancel,
+                )
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+            let full_ref = remote_ref
+                .format_ref()
+                .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?;
+            let tx = libflatpak::Transaction::for_installation(&inst, cancel)
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+            tx.set_no_interaction(true);
+            tx.add_install(&remote_name, &full_ref, &[])
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+            tx.connect_new_operation(move |_, _op, progress| {
+                progress.set_update_frequency(1500);
+                let sender = progress_tx.clone();
+                progress.connect_changed(move |p| {
+                    let _ = sender.send(p.progress().clamp(0, 100) as u8);
+                });
+            });
+            tx.run(cancel)
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))
+        })
+        .await
+        .map_err(|e| ArcError::TransactionFailed(e.to_string()))?
+    }
+
+    pub async fn update_with_progress(
+        &self,
+        app_id: &str,
+        progress_tx: UnboundedSender<u8>,
+    ) -> Result<(), ArcError> {
+        let app_id = app_id.to_string();
+        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+            let cancel = libflatpak::gio::Cancellable::NONE;
+            let (inst, installed) = installation_with_app(&app_id)?;
+            let full_ref = installed
+                .format_ref()
+                .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?;
+            let tx = libflatpak::Transaction::for_installation(&inst, cancel)
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+            tx.set_no_interaction(true);
+            tx.add_update(&full_ref, &[], None)
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+            tx.connect_new_operation(move |_, _op, progress| {
+                progress.set_update_frequency(1500);
+                let sender = progress_tx.clone();
+                progress.connect_changed(move |p| {
+                    let _ = sender.send(p.progress().clamp(0, 100) as u8);
+                });
+            });
+            tx.run(cancel)
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))
+        })
+        .await
+        .map_err(|e| ArcError::TransactionFailed(e.to_string()))?
     }
 }
 

@@ -18,6 +18,8 @@ pub struct Package {
     pub installed: bool,
     pub icon_url: Option<String>,
     pub remote: Option<String>,
+    #[serde(default)]
+    pub screenshots: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

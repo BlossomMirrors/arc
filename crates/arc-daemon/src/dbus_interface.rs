@@ -63,12 +63,20 @@ impl ArcDaemonInterface {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
 
-            // bump to 10% right away so the ui does not look frozen while the
-            // real provider is still initialising the download
-            tm.update_progress(tx_id, 10).await;
-            let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 10).await;
+            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
 
-            match provider.install(&package_id).await {
+            // Forward GLib progress signals to DBus as they arrive
+            let emitter_fwd = emitter.clone();
+            let tm_fwd = tm.clone();
+            tokio::spawn(async move {
+                while let Some(pct) = progress_rx.recv().await {
+                    tm_fwd.update_progress(tx_id, pct).await;
+                    let _ =
+                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                }
+            });
+
+            match provider.install_with_progress(&package_id, progress_tx).await {
                 Ok(()) => {
                     tm.complete(tx_id, true, "Installation successful".to_string())
                         .await;
@@ -179,10 +187,19 @@ impl ArcDaemonInterface {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
 
-            tm.update_progress(tx_id, 10).await;
-            let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 10).await;
+            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
 
-            match provider.update(&package_id).await {
+            let emitter_fwd = emitter.clone();
+            let tm_fwd = tm.clone();
+            tokio::spawn(async move {
+                while let Some(pct) = progress_rx.recv().await {
+                    tm_fwd.update_progress(tx_id, pct).await;
+                    let _ =
+                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                }
+            });
+
+            match provider.update_with_progress(&package_id, progress_tx).await {
                 Ok(()) => {
                     tm.complete(tx_id, true, "Update successful".to_string())
                         .await;

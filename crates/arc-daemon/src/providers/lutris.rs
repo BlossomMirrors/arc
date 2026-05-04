@@ -275,6 +275,21 @@ impl LutrisProvider {
                         }
                     });
 
+                let screenshots: Vec<String> = installer
+                    .script
+                    .as_ref()
+                    .and_then(|s| s.metadata.as_ref())
+                    .and_then(|m| {
+                        if !m.banner_url.is_empty() {
+                            Some(vec![m.banner_url.clone()])
+                        } else if !m.cover_url.is_empty() {
+                            Some(vec![m.cover_url.clone()])
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+
                 Package {
                     id: Self::pkg_id(slug),
                     name,
@@ -284,6 +299,7 @@ impl LutrisProvider {
                     installed: installed.contains(slug),
                     icon_url,
                     remote: None,
+                    screenshots,
                 }
             })
             .collect())
@@ -412,31 +428,32 @@ impl PackageProvider for LutrisProvider {
             ArcError::ProviderError(format!("Invalid lutris package id: {}", package_id))
         })?;
 
-        // Check if we have metadata for this slug
-        let info_path = self.info_path(slug);
-        if !std::path::Path::new(&info_path).exists() {
-            return Ok(None);
-        }
-
-        // Try to get info from catalog
         let entries = self.fetch_catalog().await?;
         if let Some((_, installer)) = entries.iter().find(|(s, _)| s == slug) {
             let installed = std::path::Path::new(&self.info_path(slug)).exists();
-            let icon_url = installer
-                .script
-                .as_ref()
-                .and_then(|s| s.metadata.as_ref())
+            let meta = installer.script.as_ref().and_then(|s| s.metadata.as_ref());
+            let icon_url = meta.and_then(|m| {
+                if !m.icon_url.is_empty() {
+                    Some(m.icon_url.clone())
+                } else if !m.cover_url.is_empty() {
+                    Some(m.cover_url.clone())
+                } else if !m.banner_url.is_empty() {
+                    Some(m.banner_url.clone())
+                } else {
+                    None
+                }
+            });
+            let screenshots = meta
                 .and_then(|m| {
-                    if !m.icon_url.is_empty() {
-                        Some(m.icon_url.clone())
+                    if !m.banner_url.is_empty() {
+                        Some(vec![m.banner_url.clone()])
                     } else if !m.cover_url.is_empty() {
-                        Some(m.cover_url.clone())
-                    } else if !m.banner_url.is_empty() {
-                        Some(m.banner_url.clone())
+                        Some(vec![m.cover_url.clone()])
                     } else {
                         None
                     }
-                });
+                })
+                .unwrap_or_default();
             Ok(Some(Package {
                 id: Self::pkg_id(slug),
                 name: installer.name.clone(),
@@ -446,6 +463,7 @@ impl PackageProvider for LutrisProvider {
                 installed,
                 icon_url,
                 remote: None,
+                screenshots,
             }))
         } else {
             Ok(None)

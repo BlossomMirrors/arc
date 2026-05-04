@@ -24,12 +24,15 @@ pub async fn load_icon(url: &str) -> Option<RawIcon> {
     let img = image::load_from_memory(&bytes).ok()?;
     let img = img.resize(64, 64, image::imageops::FilterType::Lanczos3);
     let (w, h) = img.dimensions();
-    let pixels = img.to_rgba8().into_raw();
-    Some(RawIcon {
-        width: w,
-        height: h,
-        pixels,
-    })
+    Some(RawIcon { width: w, height: h, pixels: img.to_rgba8().into_raw() })
+}
+
+pub async fn load_screenshot(url: &str) -> Option<RawIcon> {
+    let bytes = reqwest::get(url).await.ok()?.bytes().await.ok()?;
+    let img = image::load_from_memory(&bytes).ok()?;
+    let img = img.resize(624, 351, image::imageops::FilterType::Lanczos3);
+    let (w, h) = img.dimensions();
+    Some(RawIcon { width: w, height: h, pixels: img.to_rgba8().into_raw() })
 }
 
 fn read_svg_bytes(path: &Path) -> Option<Vec<u8>> {

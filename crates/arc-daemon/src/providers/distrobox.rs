@@ -364,6 +364,7 @@ fn parse_info(content: &str) -> Option<Package> {
         installed: true,
         icon_url: None,
         remote: None,
+        screenshots: vec![],
     })
 }
 

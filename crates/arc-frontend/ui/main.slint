@@ -117,6 +117,8 @@ export component AppWindow inherits Window {
     in-out property <string> settings-preferred: "Flatpak";
     in-out property <bool> settings-ignore-native-pref: false;
 
+    in-out property <[image]> detail-screenshots: [];
+
     in-out property <string> install-file-path: "";
     in-out property <string> install-file-name: "";
     in-out property <string> install-file-flatpak-id: "";
@@ -421,7 +423,7 @@ export component AppWindow inherits Window {
                     width: parent.width;
                     height: parent.height;
                     viewport-width: parent.width;
-                    viewport-height: 600px;
+                    viewport-height: 600px + (root.detail-screenshots.length > 0 ? 240px : 0px);
 
                     VerticalBox {
                         padding: 16px;
@@ -452,13 +454,14 @@ export component AppWindow inherits Window {
                                 Text { text: root.detail-app.name; font-size: 20px; font-weight: 700; overflow: elide; }
                                 Text { text: root.detail-app.developer; font-size: 13px; }
                                 Text { text: root.detail-app.version; font-size: 11px; }
-
-
                             }
 
                             Button {
-                                property <bool> is-lutris: root.detail-app.lutris-id != "" && root.settings-preferred == "Lutris";
-                                property <bool> is-native: root.detail-app.native-id != "" && root.settings-preferred == "Native";
+                                // Fall back to any available provider when the preferred one isn't present
+                                property <bool> only-lutris: root.detail-app.lutris-id != "" && root.detail-app.flatpak-id == "" && root.detail-app.native-id == "";
+                                property <bool> only-native: root.detail-app.native-id != "" && root.detail-app.flatpak-id == "" && root.detail-app.lutris-id == "";
+                                property <bool> is-lutris: root.detail-app.lutris-id != "" && (root.settings-preferred == "Lutris" || self.only-lutris);
+                                property <bool> is-native: root.detail-app.native-id != "" && (root.settings-preferred == "Native" || self.only-native);
                                 property <bool> is-flatpak: root.detail-app.flatpak-id != "" && (root.settings-preferred == "Flatpak" || (!self.is-lutris && !self.is-native));
                                 property <bool> is-installed: self.is-lutris ? root.detail-app.lutris-installed : (self.is-native ? root.detail-app.native-installed : root.detail-app.flatpak-installed);
                                 property <string> active-id: self.is-lutris ? root.detail-app.lutris-id : (self.is-native ? root.detail-app.native-id : root.detail-app.flatpak-id);
@@ -477,6 +480,24 @@ export component AppWindow inherits Window {
 
                         Text { text: root.detail-app.summary; font-size: 13px; wrap: word-wrap; }
                         Text { text: root.detail-app.description; font-size: 12px; wrap: word-wrap; }
+
+                        if root.detail-screenshots.length > 0: Flickable {
+                            width: parent.width;
+                            height: 220px;
+                            viewport-height: self.height;
+                            viewport-width: root.detail-screenshots.length * 330px;
+
+                            HorizontalBox {
+                                spacing: 10px;
+                                padding: 0px;
+                                for shot in root.detail-screenshots: Image {
+                                    source: shot;
+                                    width: 320px;
+                                    height: 200px;
+                                    image-fit: contain;
+                                }
+                            }
+                        }
                     }
                 }
             }

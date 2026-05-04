@@ -1,4 +1,4 @@
-use appstream::enums::ComponentKind;
+use appstream::enums::{ComponentKind, ImageKind};
 use appstream::{Collection, Component};
 use libarc::{Package, Provider};
 use std::path::{Path, PathBuf};
@@ -18,6 +18,7 @@ pub struct AppStreamEntry {
     pub summary: String,
     pub icon_url: Option<String>,
     pub remote: Option<String>,
+    pub screenshots: Vec<String>,
 }
 
 impl AppStreamDb {
@@ -110,6 +111,20 @@ fn component_to_entry(c: &Component, remote: Option<String>) -> AppStreamEntry {
         }
     });
 
+    // Pick the source image URL from each screenshot; fall back to first thumbnail
+    let screenshots: Vec<String> = c
+        .screenshots
+        .iter()
+        .filter_map(|s| {
+            s.images
+                .iter()
+                .find(|img| img.kind == ImageKind::Source)
+                .or_else(|| s.images.first())
+                .map(|img| img.url.to_string())
+        })
+        .take(5)
+        .collect();
+
     AppStreamEntry {
         id: c.id.to_string(),
         // get_default() returns the untranslated string, good enough for search
@@ -122,6 +137,7 @@ fn component_to_entry(c: &Component, remote: Option<String>) -> AppStreamEntry {
             .unwrap_or_default(),
         icon_url,
         remote,
+        screenshots,
     }
 }
 
@@ -176,5 +192,6 @@ pub fn entry_to_flatpak_package(entry: AppStreamEntry, installed: bool) -> Packa
         installed,
         icon_url: entry.icon_url,
         remote: entry.remote,
+        screenshots: entry.screenshots,
     }
 }

@@ -909,6 +909,13 @@ fn main() -> Result<()> {
                     .map(|p| p.version.clone())
                     .unwrap_or_default();
 
+                // Collect screenshot URLs from the best matching package
+                let screenshot_urls: Vec<String> = flatpak_pkg
+                    .or(lutris_pkg)
+                    .or(native_pkg)
+                    .map(|p| p.screenshots.clone())
+                    .unwrap_or_default();
+
                 let raw = RawDetailData {
                     name,
                     developer: String::new(),
@@ -928,6 +935,7 @@ fn main() -> Result<()> {
                 };
 
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                    app.set_detail_screenshots([].as_slice().into());
                     app.set_detail_app(AppDetailData {
                         id: Default::default(),
                         name: raw.name.into(),
@@ -952,9 +960,37 @@ fn main() -> Result<()> {
                     });
                     app.set_detail_loading(false);
                 });
+
+                // Load screenshots in background after the detail view is shown
+                if !screenshot_urls.is_empty() {
+                    let app_weak3 = app_weak2.clone();
+                    tokio::spawn(async move {
+                        let futs: Vec<_> = screenshot_urls
+                            .iter()
+                            .map(|url| {
+                                let url = url.clone();
+                                tokio::spawn(async move { icons::load_screenshot(&url).await })
+                            })
+                            .collect();
+                        // Collect as RawIcon (Send), convert to slint::Image on the UI thread
+                        let raw_shots: Vec<RawIcon> = join_all(futs)
+                            .await
+                            .into_iter()
+                            .filter_map(|r| r.ok().flatten())
+                            .collect();
+                        if !raw_shots.is_empty() {
+                            let _ = app_weak3.upgrade_in_event_loop(move |app| {
+                                let shots: Vec<slint::Image> =
+                                    raw_shots.iter().map(|r| r.to_slint_image()).collect();
+                                app.set_detail_screenshots(shots.as_slice().into());
+                            });
+                        }
+                    });
+                }
             });
 
             if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_detail_screenshots([].as_slice().into());
                 app_ref.set_detail_loading(true);
                 app_ref.set_current_view("detail".into());
             }

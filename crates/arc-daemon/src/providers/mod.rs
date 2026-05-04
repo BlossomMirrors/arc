@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use libarc::{ArcError, Package};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc::UnboundedSender, RwLock};
 
 // 15 minutes
 // newly installed packages show up without a manual refresh
@@ -78,6 +78,36 @@ impl MultiProvider {
 
     pub async fn refresh_cache(&self) -> Result<(), ArcError> {
         self.fetch_and_store().await.map(|_| ())
+    }
+
+    pub async fn install_with_progress(
+        &self,
+        package_id: &str,
+        progress_tx: UnboundedSender<u8>,
+    ) -> Result<(), ArcError> {
+        if Self::is_flatpak_id(package_id) {
+            self.flatpak
+                .install_with_progress(package_id, progress_tx)
+                .await
+        } else if Self::is_lutris_id(package_id) {
+            self.lutris.install(package_id).await
+        } else {
+            self.native.install(package_id).await
+        }
+    }
+
+    pub async fn update_with_progress(
+        &self,
+        package_id: &str,
+        progress_tx: UnboundedSender<u8>,
+    ) -> Result<(), ArcError> {
+        if Self::is_flatpak_id(package_id) {
+            self.flatpak
+                .update_with_progress(package_id, progress_tx)
+                .await
+        } else {
+            self.native.update(package_id).await
+        }
     }
 
     async fn all_packages(&self) -> Result<Vec<Package>, ArcError> {
