@@ -1129,8 +1129,8 @@ fn main() -> Result<()> {
                     .unwrap_or_else(|| app_name.clone());
 
                 // Get description from packages or AppStream
-                let description = flatpak_pkg
-                    .or(native_pkg)
+                // Skip description for Flatpaks since it duplicates the summary
+                let description = native_pkg
                     .or(lutris_pkg)
                     .map(|p| p.description.clone())
                     .or_else(|| appstream_info.as_ref().map(|a| a.summary.clone()))
