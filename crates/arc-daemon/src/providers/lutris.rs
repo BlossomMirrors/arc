@@ -127,14 +127,25 @@ impl LutrisProvider {
         };
 
         let document = scraper::Html::parse_document(&html);
-        let selector = match scraper::Selector::parse("img.slide-content") {
+        // Screenshots live in a hidden #screenshots div as <a href="//lutris.net/..."> tags.
+        // JavaScript reads these and feeds them into the blueimp carousel at runtime.
+        let selector = match scraper::Selector::parse("#screenshots a") {
             Ok(s) => s,
             Err(_) => return vec![],
         };
 
         document
             .select(&selector)
-            .filter_map(|el| el.value().attr("src").map(|s| s.to_string()))
+            .filter_map(|el| {
+                el.value().attr("href").map(|href| {
+                    // protocol-relative URLs — make them absolute
+                    if href.starts_with("//") {
+                        format!("https:{}", href)
+                    } else {
+                        href.to_string()
+                    }
+                })
+            })
             .take(5)
             .collect()
     }
