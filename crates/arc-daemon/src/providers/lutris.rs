@@ -1,7 +1,7 @@
 use super::PackageProvider;
 use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -10,55 +10,31 @@ use tokio::process::Command;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
+fn null_as_empty<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Option::<String>::deserialize(d).map(|o| o.unwrap_or_default())
+}
+
 const WHITELIST_URL: &str = "https://repo.blossomos.org/lutris.txt";
-const LUTRIS_API_BASE: &str = "https://lutris.net/api/installers";
+const LUTRIS_GAMES_API: &str = "https://lutris.net/api/games";
 const CATALOG_CACHE_TTL: Duration = Duration::from_secs(3600);
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-struct LutrisInstallerResponse {
-    count: u32,
-    results: Vec<LutrisInstaller>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ScriptMetadata {
-    #[serde(default)]
-    icon_url: String,
-    #[serde(default)]
-    banner_url: String,
-    #[serde(default)]
-    cover_url: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct LutrisScript {
-    #[serde(default)]
-    metadata: Option<ScriptMetadata>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-struct LutrisInstaller {
-    #[serde(default)]
-    slug: String,
-    #[serde(default)]
+struct LutrisGame {
+    #[serde(default, deserialize_with = "null_as_empty")]
     name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     description: String,
-    #[serde(default)]
-    game_slug: String,
-    #[serde(default)]
-    runner: String,
-    #[serde(default)]
-    version: String,
-    #[serde(default)]
-    notes: String,
-    #[serde(default)]
-    script: Option<LutrisScript>,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    coverart: String,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    #[allow(dead_code)]
+    banner: String,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    icon_url: String,
 }
 
-type CatalogEntry = (String, LutrisInstaller);
+// installer_slug, game metadata, scraped screenshot URLs
+type CatalogEntry = (String, LutrisGame, Vec<String>);
 
 pub struct LutrisProvider {
     catalog_cache: RwLock<Option<(Instant, Vec<CatalogEntry>)>>,
@@ -87,7 +63,9 @@ impl LutrisProvider {
         self.installs_dir.join(format!("{}.json", slug))
     }
 
-    async fn fetch_whitelist(&self) -> Result<Vec<String>, ArcError> {
+    // Each non-comment line is either "game_slug:installer_slug" or just "installer_slug"
+    // (where game_slug == installer_slug).
+    async fn fetch_whitelist(&self) -> Result<Vec<(String, String)>, ArcError> {
         let text = self
             .http_client
             .get(WHITELIST_URL)
@@ -98,43 +76,67 @@ impl LutrisProvider {
             .await
             .map_err(|e| ArcError::ProviderError(format!("Whitelist read: {}", e)))?;
 
-        let slugs = text
+        let entries = text
             .lines()
-            .filter(|line| {
+            .filter_map(|line| {
                 let trimmed = line.trim();
-                !trimmed.is_empty() && !trimmed.starts_with('#')
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    return None;
+                }
+                if let Some((game_slug, installer_slug)) = trimmed.split_once(':') {
+                    Some((installer_slug.to_string(), game_slug.to_string()))
+                } else {
+                    Some((trimmed.to_string(), trimmed.to_string()))
+                }
             })
-            .map(|s| s.trim().to_string())
             .collect();
 
-        Ok(slugs)
+        Ok(entries)
     }
 
-    async fn fetch_installer(&self, slug: &str) -> Result<LutrisInstaller, ArcError> {
-        let url = format!("{}/{}", LUTRIS_API_BASE, slug);
-        let response =
-            self.http_client.get(&url).send().await.map_err(|e| {
-                ArcError::ProviderError(format!("Installer fetch for {}: {}", slug, e))
-            })?;
+    async fn fetch_game(&self, game_slug: &str) -> Result<LutrisGame, ArcError> {
+        let url = format!("{}/{}", LUTRIS_GAMES_API, game_slug);
+        let resp = self
+            .http_client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| ArcError::ProviderError(format!("Game fetch {}: {}", game_slug, e)))?;
 
-        if !response.status().is_success() {
+        if !resp.status().is_success() {
             return Err(ArcError::ProviderError(format!(
-                "Installer API returned {} for {}",
-                response.status(),
-                slug
+                "Games API {} for {}",
+                resp.status(),
+                game_slug
             )));
         }
 
-        let wrapper: LutrisInstallerResponse = response
-            .json()
+        resp.json::<LutrisGame>()
             .await
-            .map_err(|e| ArcError::ProviderError(format!("Installer parse for {}: {}", slug, e)))?;
+            .map_err(|e| ArcError::ProviderError(format!("Game parse {}: {}", game_slug, e)))
+    }
 
-        wrapper
-            .results
-            .into_iter()
-            .next()
-            .ok_or_else(|| ArcError::ProviderError(format!("No installer found for {}", slug)))
+    async fn scrape_screenshots(&self, game_slug: &str) -> Vec<String> {
+        let url = format!("https://lutris.net/games/{}/", game_slug);
+        let html = match self.http_client.get(&url).send().await {
+            Ok(r) => match r.text().await {
+                Ok(t) => t,
+                Err(_) => return vec![],
+            },
+            Err(_) => return vec![],
+        };
+
+        let document = scraper::Html::parse_document(&html);
+        let selector = match scraper::Selector::parse("img.slide-content") {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        document
+            .select(&selector)
+            .filter_map(|el| el.value().attr("src").map(|s| s.to_string()))
+            .take(5)
+            .collect()
     }
 
     async fn fetch_catalog(&self) -> Result<Vec<CatalogEntry>, ArcError> {
@@ -147,17 +149,18 @@ impl LutrisProvider {
             }
         }
 
-        info!("Fetching Lutris whitelist");
-        let slugs = self.fetch_whitelist().await?;
+        info!("Fetching Lutris catalog");
+        let whitelist = self.fetch_whitelist().await?;
 
         let mut entries = Vec::new();
-        for slug in slugs {
-            match self.fetch_installer(&slug).await {
-                Ok(installer) => {
-                    entries.push((slug.clone(), installer));
+        for (installer_slug, game_slug) in whitelist {
+            match self.fetch_game(&game_slug).await {
+                Ok(game) => {
+                    let screenshots = self.scrape_screenshots(&game_slug).await;
+                    entries.push((installer_slug, game, screenshots));
                 }
                 Err(e) => {
-                    warn!("Failed to fetch installer for {}: {}", slug, e);
+                    warn!("Failed to fetch game info for {}: {}", game_slug, e);
                 }
             }
         }
@@ -197,7 +200,7 @@ impl LutrisProvider {
             return Ok(());
         }
 
-        info!("Lutris not found — installing lutris");
+        info!("Lutris not found — installing via Flathub");
         let status = Command::new("flatpak")
             .args([
                 "install",
@@ -236,71 +239,48 @@ impl LutrisProvider {
             })
     }
 
+    fn game_to_package(
+        &self,
+        installer_slug: &str,
+        game: &LutrisGame,
+        screenshots: &[String],
+        installed: bool,
+    ) -> Package {
+        let name = if !game.name.is_empty() {
+            game.name.clone()
+        } else {
+            installer_slug.replace('-', " ")
+        };
+
+        let icon_url = if !game.icon_url.is_empty() {
+            Some(game.icon_url.clone())
+        } else if !game.coverart.is_empty() {
+            Some(game.coverart.clone())
+        } else {
+            None
+        };
+
+        Package {
+            id: Self::pkg_id(installer_slug),
+            name,
+            version: String::new(),
+            description: game.description.clone(),
+            provider: Provider::Lutris,
+            installed,
+            icon_url,
+            remote: None,
+            screenshots: screenshots.to_vec(),
+        }
+    }
+
     pub async fn fetch_all(&self) -> Result<Vec<Package>, ArcError> {
         let entries = self.fetch_catalog().await?;
         let installed = self.installed_slugs().await;
 
         Ok(entries
             .iter()
-            .map(|(slug, installer)| {
-                let name = if !installer.name.is_empty() {
-                    installer.name.clone()
-                } else {
-                    slug.replace('-', " ").to_uppercase()
-                };
-
-                let description = if !installer.description.is_empty() {
-                    installer.description.clone()
-                } else if !installer.notes.is_empty() {
-                    installer.notes.split('\n').next().unwrap_or("").to_string()
-                } else if !installer.runner.is_empty() {
-                    format!("Windows application via Lutris ({})", installer.runner)
-                } else {
-                    "Windows application via Lutris".to_string()
-                };
-
-                let icon_url = installer
-                    .script
-                    .as_ref()
-                    .and_then(|s| s.metadata.as_ref())
-                    .and_then(|m| {
-                        if !m.icon_url.is_empty() {
-                            Some(m.icon_url.clone())
-                        } else if !m.cover_url.is_empty() {
-                            Some(m.cover_url.clone())
-                        } else if !m.banner_url.is_empty() {
-                            Some(m.banner_url.clone())
-                        } else {
-                            None
-                        }
-                    });
-
-                let screenshots: Vec<String> = installer
-                    .script
-                    .as_ref()
-                    .and_then(|s| s.metadata.as_ref())
-                    .and_then(|m| {
-                        if !m.banner_url.is_empty() {
-                            Some(vec![m.banner_url.clone()])
-                        } else if !m.cover_url.is_empty() {
-                            Some(vec![m.cover_url.clone()])
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_default();
-
-                Package {
-                    id: Self::pkg_id(slug),
-                    name,
-                    version: String::new(),
-                    description,
-                    provider: Provider::Lutris,
-                    installed: installed.contains(slug),
-                    icon_url,
-                    remote: None,
-                    screenshots,
-                }
+            .map(|(slug, game, screenshots)| {
+                self.game_to_package(slug, game, screenshots, installed.contains(slug))
             })
             .collect())
     }
@@ -335,10 +315,7 @@ impl PackageProvider for LutrisProvider {
 
         self.ensure_lutris_installed().await?;
 
-        info!("Installing Lutris installer: {}", slug);
-
-        // Use lutris to install the game/application
-        // lutris -i <installer_url> or lutris lutris:<slug>
+        info!("Installing Lutris game: {}", slug);
         let out = self.lutris_cmd(&[&format!("lutris:{}", slug)]).await?;
 
         if !out.status.success() {
@@ -346,21 +323,20 @@ impl PackageProvider for LutrisProvider {
             warn!("lutris install exited non-zero: {}", stderr);
         }
 
-        // Write arc metadata to track installation
         fs::create_dir_all(&self.installs_dir)
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
 
         let entries = self.fetch_catalog().await?;
-        let installer_name = entries
+        let name = entries
             .iter()
-            .find(|(s, _)| s == slug)
-            .map(|(_, i)| i.name.clone())
+            .find(|(s, _, _)| s == slug)
+            .map(|(_, g, _)| g.name.clone())
             .unwrap_or_else(|| slug.to_string());
 
         fs::write(
             self.info_path(slug),
-            serde_json::json!({ "name": installer_name, "slug": slug }).to_string(),
+            serde_json::json!({ "name": name, "slug": slug }).to_string(),
         )
         .await
         .map_err(|e| ArcError::ProviderError(e.to_string()))?;
@@ -373,13 +349,20 @@ impl PackageProvider for LutrisProvider {
             ArcError::ProviderError(format!("Invalid lutris package id: {}", package_id))
         })?;
 
-        info!("Removing Lutris application: {}", slug);
+        info!("Removing Lutris game: {}", slug);
 
-        // Remove metadata file
+        let out = self
+            .lutris_cmd(&["--uninstall-game", slug])
+            .await
+            .map_err(|e| ArcError::ProviderError(format!("lutris uninstall: {}", e)))?;
+
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            warn!("lutris --uninstall-game exited non-zero: {}", stderr);
+        }
+
         let _ = fs::remove_file(self.info_path(slug)).await;
 
-        // Note: Lutris doesn't have a clean uninstall command, so we just remove
-        // our tracking. The user would need to manually remove the game from Lutris.
         Ok(())
     }
 
@@ -394,18 +377,14 @@ impl PackageProvider for LutrisProvider {
             ArcError::ProviderError(format!("Invalid lutris package id: {}", package_id))
         })?;
 
-        // Read metadata to verify installation
-        let info_path = self.info_path(slug);
-        if !fs::metadata(&info_path).await.is_ok() {
+        if !self.info_path(slug).exists() {
             return Err(ArcError::PackageNotFound(format!(
                 "{} is not installed",
                 package_id
             )));
         }
 
-        info!("Running Lutris application: {}", slug);
-
-        // Launch via lutris:<slug> URI scheme
+        info!("Running Lutris game: {}", slug);
         let out = self.lutris_cmd(&[&format!("lutris:{}", slug)]).await?;
 
         if !out.status.success() {
@@ -419,7 +398,6 @@ impl PackageProvider for LutrisProvider {
     }
 
     async fn search_category(&self, _category: &str) -> Result<Vec<Package>, ArcError> {
-        // Lutris doesn't have standard categories, return empty
         Ok(Vec::new())
     }
 
@@ -429,42 +407,9 @@ impl PackageProvider for LutrisProvider {
         })?;
 
         let entries = self.fetch_catalog().await?;
-        if let Some((_, installer)) = entries.iter().find(|(s, _)| s == slug) {
-            let installed = std::path::Path::new(&self.info_path(slug)).exists();
-            let meta = installer.script.as_ref().and_then(|s| s.metadata.as_ref());
-            let icon_url = meta.and_then(|m| {
-                if !m.icon_url.is_empty() {
-                    Some(m.icon_url.clone())
-                } else if !m.cover_url.is_empty() {
-                    Some(m.cover_url.clone())
-                } else if !m.banner_url.is_empty() {
-                    Some(m.banner_url.clone())
-                } else {
-                    None
-                }
-            });
-            let screenshots = meta
-                .and_then(|m| {
-                    if !m.banner_url.is_empty() {
-                        Some(vec![m.banner_url.clone()])
-                    } else if !m.cover_url.is_empty() {
-                        Some(vec![m.cover_url.clone()])
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_default();
-            Ok(Some(Package {
-                id: Self::pkg_id(slug),
-                name: installer.name.clone(),
-                version: String::new(),
-                description: installer.description.clone(),
-                provider: Provider::Lutris,
-                installed,
-                icon_url,
-                remote: None,
-                screenshots,
-            }))
+        if let Some((_, game, screenshots)) = entries.iter().find(|(s, _, _)| s == slug) {
+            let installed = self.info_path(slug).exists();
+            Ok(Some(self.game_to_package(slug, game, screenshots, installed)))
         } else {
             Ok(None)
         }

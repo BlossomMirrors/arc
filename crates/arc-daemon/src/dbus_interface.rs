@@ -78,6 +78,7 @@ impl ArcDaemonInterface {
 
             match provider.install_with_progress(&package_id, progress_tx).await {
                 Ok(()) => {
+                    provider.invalidate_package_cache().await;
                     tm.complete(tx_id, true, "Installation successful".to_string())
                         .await;
                     let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
@@ -135,6 +136,7 @@ impl ArcDaemonInterface {
 
             match provider.remove(&package_id).await {
                 Ok(()) => {
+                    provider.invalidate_package_cache().await;
                     tm.complete(tx_id, true, "Removal successful".to_string())
                         .await;
                     let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
@@ -201,6 +203,7 @@ impl ArcDaemonInterface {
 
             match provider.update_with_progress(&package_id, progress_tx).await {
                 Ok(()) => {
+                    provider.invalidate_package_cache().await;
                     tm.complete(tx_id, true, "Update successful".to_string())
                         .await;
                     let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;

@@ -475,18 +475,46 @@ fn main() -> Result<()> {
 
                 let all_pkgs = dedup_by_preference(all_pkgs, &s);
 
-                let mut raw_pkgs: Vec<RawPackage> = Vec::new();
-                for pkg in all_pkgs {
-                    let icon = if pkg.provider == Provider::Flatpak {
-                        let id = pkg.id.clone();
-                        tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
-                            .await
-                            .unwrap_or(None)
-                    } else {
-                        None
-                    };
-                    raw_pkgs.push(RawPackage { pkg, icon });
-                }
+                let icon_futures: Vec<_> = all_pkgs
+                    .iter()
+                    .map(|pkg| async {
+                        match pkg.provider {
+                            Provider::Flatpak => {
+                                let id = pkg.id.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    icons::load_local_flatpak_icon(&id)
+                                })
+                                .await
+                                .unwrap_or(None)
+                            }
+                            Provider::Lutris => {
+                                if let Some(url) = &pkg.icon_url {
+                                    let url = url.clone();
+                                    tokio::spawn(async move { icons::load_lutris_icon(&url).await })
+                                        .await
+                                        .ok()
+                                        .flatten()
+                                } else {
+                                    None
+                                }
+                            }
+                            Provider::Distrobox => {
+                                let name = pkg.name.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    icons::load_native_package_icon(&name)
+                                })
+                                .await
+                                .unwrap_or(None)
+                            }
+                        }
+                    })
+                    .collect();
+                let icons_result: Vec<_> = join_all(icon_futures).await;
+                let raw_pkgs: Vec<RawPackage> = all_pkgs
+                    .into_iter()
+                    .zip(icons_result)
+                    .map(|(pkg, icon)| RawPackage { pkg, icon })
+                    .collect();
 
                 let status = format!("Found {} result(s) for '{}'", raw_pkgs.len(), query_str);
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {

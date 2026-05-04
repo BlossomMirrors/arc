@@ -80,6 +80,11 @@ impl MultiProvider {
         self.fetch_and_store().await.map(|_| ())
     }
 
+    pub async fn invalidate_package_cache(&self) {
+        let mut cache = self.package_cache.write().await;
+        *cache = None;
+    }
+
     pub async fn install_with_progress(
         &self,
         package_id: &str,
