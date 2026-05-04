@@ -194,6 +194,7 @@ struct RawCard {
 
 // CachedAppInfo matches the daemon's icon_cache::AppInfo struct
 #[derive(serde::Deserialize, Clone)]
+#[allow(dead_code)]
 struct CachedAppInfo {
     id: String,
     name: String,

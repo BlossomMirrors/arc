@@ -18,6 +18,7 @@ impl RawIcon {
     }
 }
 
+#[allow(dead_code)]
 pub async fn load_icon(url: &str) -> Option<RawIcon> {
     let bytes = reqwest::get(url).await.ok()?.bytes().await.ok()?;
     let img = image::load_from_memory(&bytes).ok()?;

@@ -6,6 +6,7 @@ pub struct AppStreamDb {
     components: Vec<(Component, Option<String>)>,
 }
 
+#[allow(dead_code)]
 pub struct AppStreamEntry {
     pub id: String,
     pub name: String,
@@ -61,6 +62,7 @@ impl AppStreamDb {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn get_apps_by_category(&self, category: &str) -> Vec<AppStreamEntry> {
         self.components
             .iter()
@@ -80,6 +82,7 @@ impl AppStreamDb {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn search_apps(&self, query: &str) -> Vec<AppStreamEntry> {
         let q = query.to_lowercase();
         self.components
@@ -110,6 +113,7 @@ impl AppStreamDb {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn find_by_id(&self, id: &str) -> Option<AppStreamEntry> {
         self.components
             .iter()
