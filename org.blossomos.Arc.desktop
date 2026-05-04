@@ -8,6 +8,7 @@ Icon=org.blossomos.Arc
 Terminal=false
 Categories=System;PackageManager;
 StartupNotify=true
+StartupWMClass=arc-frontend
 MimeType=application/x-deb;application/x-rpm;application/vnd.archlinux.pkg;x-scheme-handler/appstream;
 Actions=ManageExtensions;
 X-KDE-Protocols=appstream
