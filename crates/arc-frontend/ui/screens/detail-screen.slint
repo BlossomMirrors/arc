@@ -2,7 +2,7 @@ import { Palette, HorizontalBox } from "std-widgets.slint";
 import { AppDetailData } from "../types.slint";
 import { DetailHeader } from "../components/detail-header.slint";
 import { ScreenshotCarousel } from "../components/screenshot-carousel.slint";
-import { DetailLightbox } from "../components/detail-lightbox.slint";
+import { Lightbox } from "../components/lightbox.slint";
 
 export component DetailScreen inherits Rectangle {
     in property <AppDetailData> detail-app;
@@ -145,10 +145,10 @@ export component DetailScreen inherits Rectangle {
     }
 
     // Lightbox
-    if root.lightbox-visible: DetailLightbox {
+    if root.lightbox-visible: Lightbox {
         width: parent.width;
         height: parent.height;
-        screenshots: root.detail-screenshots;
+        images: root.detail-screenshots;
         initial-index: root.lightbox-index;
         closed => {
             root.lightbox-visible = false;
