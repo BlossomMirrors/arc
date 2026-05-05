@@ -1,0 +1,47 @@
+import { Button, LineEdit, HorizontalBox } from "std-widgets.slint";
+
+export component TopBar inherits HorizontalBox {
+    in-out property <string> search-text;
+    in property <int> update-count;
+
+    callback search-requested(string);
+    callback installed-clicked();
+    callback updates-clicked();
+    callback home-clicked();
+    callback settings-clicked();
+
+    padding: 8px;
+    spacing: 6px;
+
+    LineEdit {
+        horizontal-stretch: 1;
+        placeholder-text: "Search for applications...";
+        text <=> root.search-text;
+        accepted(text) => { root.search-requested(text); }
+    }
+
+    Button {
+        text: "Search";
+        clicked => { root.search-requested(root.search-text); }
+    }
+
+    Button {
+        text: "Installed";
+        clicked => { root.installed-clicked(); }
+    }
+
+    Button {
+        text: root.update-count > 0 ? "Updates (" + root.update-count + ")" : "Updates";
+        clicked => { root.updates-clicked(); }
+    }
+
+    Button {
+        text: "Home";
+        clicked => { root.home-clicked(); }
+    }
+
+    Button {
+        text: "⚙";
+        clicked => { root.settings-clicked(); }
+    }
+}

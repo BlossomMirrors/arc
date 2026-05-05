@@ -1,0 +1,82 @@
+import { ListView, HorizontalBox, VerticalBox, Button } from "std-widgets.slint";
+import { PackageItem } from "../types.slint";
+
+export component PackageListScreen inherits Rectangle {
+    in property <[PackageItem]> packages;
+    in property <bool> is-loading;
+    in property <string> current-view;
+
+    callback detail-requested(string);
+    callback install-requested(string);
+    callback remove-requested(string);
+    callback update-requested(string);
+
+    if root.is-loading: VerticalBox {
+        alignment: center;
+        Text { text: "Loading..."; horizontal-alignment: center; }
+    }
+
+    if !root.is-loading && root.packages.length == 0: VerticalBox {
+        alignment: center;
+        Text {
+            text: root.current-view == "search"
+                ? "No packages found.\nSearch for an application to get started."
+                : (root.current-view == "updates" ? "Everything is up to date." : "No applications installed.");
+            horizontal-alignment: center;
+        }
+    }
+
+    if !root.is-loading && root.packages.length > 0: ListView {
+        for pkg[i] in root.packages: Rectangle {
+            height: 56px;
+
+            TouchArea {
+                clicked => {
+                    if root.current-view != "updates" {
+                        root.detail-requested(pkg.id);
+                    }
+                }
+            }
+
+            HorizontalBox {
+                padding: 8px;
+                spacing: 10px;
+
+                Image {
+                    source: pkg.icon;
+                    width: 40px;
+                    height: 40px;
+                    vertical-alignment: center;
+                }
+
+                VerticalBox {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    spacing: 2px;
+                    Text { text: pkg.name != "" ? pkg.name : pkg.id; font-weight: 600; overflow: elide; }
+                    Text { text: pkg.description; font-size: 11px; overflow: elide; }
+                }
+
+                Text {
+                    text: pkg.version;
+                    min-width: 80px;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+
+                Button {
+                    text: root.current-view == "updates" ? "Update" : (pkg.installed ? "Remove" : "Install");
+                    clicked => {
+                        if root.current-view == "updates" {
+                            root.update-requested(pkg.id);
+                        } else if pkg.installed {
+                            root.remove-requested(pkg.id);
+                        } else {
+                            root.install-requested(pkg.id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

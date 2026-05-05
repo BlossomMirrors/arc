@@ -1,0 +1,19 @@
+import { HorizontalBox, ProgressIndicator } from "std-widgets.slint";
+
+export component StatusBar inherits HorizontalBox {
+    in property <string> status-text;
+    in property <float> progress;
+
+    padding: 6px;
+
+    Text {
+        text: root.status-text;
+        horizontal-stretch: 1;
+        vertical-alignment: center;
+    }
+
+    if root.progress > 0.0 && root.progress < 1.0: ProgressIndicator {
+        width: 150px;
+        progress: root.progress;
+    }
+}

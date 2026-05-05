@@ -1,99 +1,16 @@
-import {
-    Button,
-    LineEdit,
-    ListView,
-    VerticalBox,
-    HorizontalBox,
-    ProgressIndicator,
-    ComboBox,
-    CheckBox,
-    TextEdit,
-} from "std-widgets.slint";
+import { VerticalBox } from "std-widgets.slint";
 
-export struct PackageItem {
-    id: string,
-    name: string,
-    version: string,
-    description: string,
-    installed: bool,
-    icon: image,
-}
+import { TopBar } from "components/top-bar.slint";
+import { StatusBar } from "components/status-bar.slint";
 
-export struct AppDetailData {
-    id: string,
-    name: string,
-    developer: string,
-    description: string,
-    summary: string,
-    version: string,
-    icon: image,
-    installed: bool,
-    flatpak-id: string,
-    native-id: string,
-    lutris-id: string,
-    flatpak-installed: bool,
-    native-installed: bool,
-    lutris-installed: bool,
-    verified: bool,
-}
+import { HomeScreen } from "screens/home-screen.slint";
+import { PackageListScreen } from "screens/package-list-screen.slint";
+import { DetailScreen } from "screens/detail-screen.slint";
+import { InstallFileScreen } from "screens/install-file-screen.slint";
+import { SettingsScreen } from "screens/settings-screen.slint";
 
-export struct AppCardData {
-    id: string,
-    name: string,
-    summary: string,
-    icon: image,
-}
-
-export struct CategoryItem {
-    id: string,
-    label: string,
-    icon: image,
-    bg-color: color,
-}
-
-component AppCard inherits Rectangle {
-    in property <AppCardData> card;
-    callback clicked(string);
-
-    width: 160px;
-    height: 172px;
-
-    border-radius: 8px;
-    background: #00000010;
-
-    TouchArea {
-        clicked => { root.clicked(root.card.id); }
-    }
-
-    VerticalBox {
-        alignment: center;
-        padding: 12px;
-        spacing: 6px;
-
-        Image {
-            source: root.card.icon;
-            width: 64px;
-            height: 64px;
-            horizontal-alignment: center;
-        }
-
-        Text {
-            text: root.card.name;
-            font-weight: 600;
-            font-size: 12px;
-            overflow: elide;
-            horizontal-alignment: center;
-        }
-
-        Text {
-            text: root.card.summary;
-            font-size: 10px;
-            overflow: elide;
-            wrap: word-wrap;
-            horizontal-alignment: center;
-        }
-    }
-}
+import { PackageItem, AppDetailData, AppCardData, CategoryItem } from "types.slint";
+export { PackageItem, AppDetailData, AppCardData, CategoryItem } from "types.slint";
 
 export component AppWindow inherits Window {
     title: "Arc Software";
@@ -146,55 +63,25 @@ export component AppWindow inherits Window {
         padding: 0px;
         spacing: 0px;
 
-        HorizontalBox {
-            padding: 8px;
-            spacing: 6px;
-
-            LineEdit {
-                horizontal-stretch: 1;
-                placeholder-text: "Search for applications...";
-                text <=> root.search-text;
-                accepted(text) => {
-                    root.current-view = "search";
-                    root.search-requested(text);
-                }
+        TopBar {
+            search-text <=> root.search-text;
+            update-count: root.update-count;
+            search-requested(text) => {
+                root.current-view = "search";
+                root.search-requested(text);
             }
-
-            Button {
-                text: "Search";
-                clicked => {
-                    root.current-view = "search";
-                    root.search-requested(root.search-text);
-                }
+            installed-clicked => {
+                root.current-view = "installed";
+                root.refresh-requested();
             }
-
-            Button {
-                text: "Installed";
-                clicked => {
-                    root.current-view = "installed";
-                    root.refresh-requested();
-                }
+            updates-clicked => {
+                root.current-view = "updates";
+                root.refresh-updates-requested();
             }
-
-            Button {
-                text: root.update-count > 0 ? "Updates (" + root.update-count + ")" : "Updates";
-                clicked => {
-                    root.current-view = "updates";
-                    root.refresh-updates-requested();
-                }
-            }
-
-            Button {
-                text: "Home";
-                clicked => { root.current-view = "home"; }
-            }
-
-            Button {
-                text: "⚙";
-                clicked => {
-                    root.prev-view = root.current-view;
-                    root.current-view = "settings";
-                }
+            home-clicked => { root.current-view = "home"; }
+            settings-clicked => {
+                root.prev-view = root.current-view;
+                root.current-view = "settings";
             }
         }
 
@@ -202,467 +89,69 @@ export component AppWindow inherits Window {
             vertical-stretch: 1;
             clip: true;
 
-            if root.current-view == "home": Rectangle {
+            if root.current-view == "home": HomeScreen {
                 width: parent.width;
                 height: parent.height;
-                clip: true;
-
-                if root.home-loading: VerticalBox {
-                    alignment: center;
-                    Text { text: "Loading..."; horizontal-alignment: center; }
+                popular-apps: root.popular-apps;
+                recent-apps: root.recent-apps;
+                categories: root.categories;
+                home-loading: root.home-loading;
+                detail-requested(id) => {
+                    root.prev-view = "home";
+                    root.detail-requested(id);
                 }
-
-                if !root.home-loading: Flickable {
-                    width: parent.width;
-                    height: parent.height;
-                    viewport-width: parent.width;
-                    viewport-height: self.compute-height();
-
-                    function compute-height() -> length {
-                        180px
-                        + (root.popular-apps.length > 0 ? 28px + root.popular-apps.length * 56px : 0px)
-                        + (root.recent-apps.length > 0 ? 28px + 196px + 16px : 0px)
-                        + (root.categories.length > 0 ? 28px + ceil(root.categories.length / 3) * 56px : 0px)
-                        + 32px
-                    }
-
-                    VerticalBox {
-                        padding: 16px;
-                        spacing: 0px;
-                        width: parent.width;
-
-                        Rectangle {
-                            height: 140px;
-                            border-radius: 12px;
-                            background: @linear-gradient(135deg, #5b7fa6, #8a5bab);
-
-                            VerticalBox {
-                                alignment: center;
-                                Text {
-                                    text: "Discover Great Software";
-                                    font-size: 22px;
-                                    font-weight: 700;
-                                    color: white;
-                                    horizontal-alignment: center;
-                                }
-                                Text {
-                                    text: "Install apps from Flathub and your system repositories";
-                                    font-size: 13px;
-                                    color: #ffffffcc;
-                                    horizontal-alignment: center;
-                                }
-                            }
-                        }
-
-                        if root.popular-apps.length > 0: VerticalBox {
-                            padding-top: 20px;
-                            spacing: 4px;
-
-                            Text { text: "Popular"; font-size: 16px; font-weight: 700; }
-
-                            for app[i] in root.popular-apps: Rectangle {
-                                height: 56px;
-                                border-radius: 6px;
-
-                                TouchArea {
-                                    clicked => { root.prev-view = "home"; root.detail-requested(app.id); }
-                                }
-
-                                HorizontalBox {
-                                    padding: 8px;
-                                    spacing: 10px;
-
-                                    Image {
-                                        source: app.icon;
-                                        width: 40px;
-                                        height: 40px;
-                                        vertical-alignment: center;
-                                    }
-
-                                    VerticalBox {
-                                        horizontal-stretch: 1;
-                                        alignment: center;
-                                        spacing: 2px;
-                                        Text { text: app.name; font-weight: 600; overflow: elide; }
-                                        Text { text: app.summary; font-size: 11px; overflow: elide; }
-                                    }
-                                }
-                            }
-                        }
-
-                        if root.recent-apps.length > 0: VerticalBox {
-                            padding-top: 20px;
-                            spacing: 8px;
-
-                            Text { text: "Recently Added"; font-size: 16px; font-weight: 700; }
-
-                            HorizontalBox {
-                                spacing: 12px;
-                                height: 196px;
-
-                                for app[i] in root.recent-apps: AppCard {
-                                    card: app;
-                                    clicked(id) => { root.prev-view = "home"; root.detail-requested(id); }
-                                }
-                            }
-                        }
-
-                        if root.categories.length > 0: VerticalBox {
-                            padding-top: 20px;
-                            spacing: 8px;
-
-                            Text { text: "Categories"; font-size: 16px; font-weight: 700; }
-
-                            HorizontalBox {
-                                spacing: 10px;
-                                height: 104px;
-
-                                for cat[i] in root.categories: Rectangle {
-                                    width: 120px;
-                                    height: 104px;
-                                    border-radius: 10px;
-                                    background: cat.bg-color;
-
-                                    TouchArea { clicked => { root.category-selected(cat.id); } }
-
-                                    VerticalBox {
-                                        alignment: center;
-                                        spacing: 4px;
-                                        padding: 8px;
-
-                                        Image {
-                                            source: cat.icon;
-                                            width: 36px;
-                                            height: 36px;
-                                            horizontal-alignment: center;
-                                            image-fit: contain;
-                                        }
-
-                                        Text {
-                                            text: cat.label;
-                                            horizontal-alignment: center;
-                                            font-weight: 600;
-                                            font-size: 10px;
-                                            color: white;
-                                            overflow: elide;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                category-selected(id) => { root.category-selected(id); }
             }
 
-            if root.current-view == "search" || root.current-view == "installed" || root.current-view == "updates": Rectangle {
+            if root.current-view == "search" || root.current-view == "installed" || root.current-view == "updates": PackageListScreen {
                 width: parent.width;
                 height: parent.height;
-
-                if root.is-loading: VerticalBox {
-                    alignment: center;
-                    Text { text: "Loading..."; horizontal-alignment: center; }
-                }
-
-                if !root.is-loading && root.packages.length == 0: VerticalBox {
-                    alignment: center;
-                    Text {
-                        text: root.current-view == "search"
-                            ? "No packages found.\nSearch for an application to get started."
-                            : (root.current-view == "updates" ? "Everything is up to date." : "No applications installed.");
-                        horizontal-alignment: center;
-                    }
-                }
-
-                if !root.is-loading && root.packages.length > 0: ListView {
-                    for pkg[i] in root.packages: Rectangle {
-                        height: 56px;
-
-                        TouchArea {
-                            clicked => {
-                                if root.current-view != "updates" {
-                                    root.detail-requested(pkg.id);
-                                }
-                            }
-                        }
-
-                        HorizontalBox {
-                            padding: 8px;
-                            spacing: 10px;
-
-                            Image {
-                                source: pkg.icon;
-                                width: 40px;
-                                height: 40px;
-                                vertical-alignment: center;
-                            }
-
-                            VerticalBox {
-                                horizontal-stretch: 1;
-                                alignment: center;
-                                spacing: 2px;
-                                Text { text: pkg.name != "" ? pkg.name : pkg.id; font-weight: 600; overflow: elide; }
-                                Text { text: pkg.description; font-size: 11px; overflow: elide; }
-                            }
-
-                            Text {
-                                text: pkg.version;
-                                min-width: 80px;
-                                horizontal-alignment: right;
-                                vertical-alignment: center;
-                            }
-
-                            Button {
-                                text: root.current-view == "updates" ? "Update" : (pkg.installed ? "Remove" : "Install");
-                                clicked => {
-                                    if root.current-view == "updates" {
-                                        root.update-requested(pkg.id);
-                                    } else if pkg.installed {
-                                        root.remove-requested(pkg.id);
-                                    } else {
-                                        root.install-requested(pkg.id);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                packages: root.packages;
+                is-loading: root.is-loading;
+                current-view: root.current-view;
+                detail-requested(id) => { root.detail-requested(id); }
+                install-requested(id) => { root.install-requested(id); }
+                remove-requested(id) => { root.remove-requested(id); }
+                update-requested(id) => { root.update-requested(id); }
             }
 
-            if root.current-view == "detail": Rectangle {
+            if root.current-view == "detail": DetailScreen {
                 width: parent.width;
                 height: parent.height;
-                clip: true;
-
-                if root.detail-loading: VerticalBox {
-                    alignment: center;
-                    Text { text: "Loading..."; horizontal-alignment: center; }
-                }
-
-                if !root.detail-loading: Flickable {
-                    width: parent.width;
-                    height: parent.height;
-                    viewport-width: parent.width;
-                    viewport-height: 600px + (root.detail-screenshots.length > 0 ? 240px : 0px);
-
-                    VerticalBox {
-                        padding: 16px;
-                        spacing: 12px;
-                        width: parent.width;
-
-                        Button {
-                            text: "← Back";
-                            clicked => { root.current-view = root.prev-view; }
-                        }
-
-                        HorizontalBox {
-                            spacing: 16px;
-                            alignment: start;
-
-                            Image {
-                                source: root.detail-app.icon;
-                                width: 96px;
-                                height: 96px;
-                                image-fit: contain;
-                            }
-
-                            VerticalBox {
-                                alignment: center;
-                                spacing: 4px;
-                                horizontal-stretch: 1;
-
-                                Text { text: root.detail-app.name; font-size: 20px; font-weight: 700; overflow: elide; }
-                                HorizontalBox {
-                                    spacing: 4px;
-                                    alignment: center;
-                                    Text { text: root.detail-app.developer; font-size: 13px; }
-                                    if root.detail-app.verified: Image {
-                                        source: @image-url("../assets/verified.png");
-                                        width: 14px;
-                                        height: 14px;
-                                        vertical-alignment: center;
-                                        colorize: #0d6efd;
-                                    }
-                                }
-                                Text { text: root.detail-app.version; font-size: 11px; }
-                            }
-
-                            Button {
-                                // Fall back to any available provider when the preferred one isn't present
-                                property <bool> only-lutris: root.detail-app.lutris-id != "" && root.detail-app.flatpak-id == "" && root.detail-app.native-id == "";
-                                property <bool> only-native: root.detail-app.native-id != "" && root.detail-app.flatpak-id == "" && root.detail-app.lutris-id == "";
-                                property <bool> is-lutris: root.detail-app.lutris-id != "" && (root.settings-preferred == "Lutris" || self.only-lutris);
-                                property <bool> is-native: root.detail-app.native-id != "" && (root.settings-preferred == "Native" || self.only-native);
-                                property <bool> is-flatpak: root.detail-app.flatpak-id != "" && (root.settings-preferred == "Flatpak" || (!self.is-lutris && !self.is-native));
-                                property <bool> is-installed: self.is-lutris ? root.detail-app.lutris-installed : (self.is-native ? root.detail-app.native-installed : root.detail-app.flatpak-installed);
-                                property <string> active-id: self.is-lutris ? root.detail-app.lutris-id : (self.is-native ? root.detail-app.native-id : root.detail-app.flatpak-id);
-
-                                text: root.detail-busy ? "Working..." : (self.is-installed ? "Remove" : "Install");
-                                enabled: self.active-id != "" && !root.detail-busy;
-                                clicked => {
-                                    if self.is-installed {
-                                        root.remove-requested(self.active-id);
-                                    } else {
-                                        root.install-requested(self.active-id);
-                                    }
-                                }
-                            }
-                        }
-
-                        Text { text: root.detail-app.summary; font-size: 13px; wrap: word-wrap; }
-                        Text { text: root.detail-app.description; font-size: 12px; wrap: word-wrap; }
-
-                        if root.detail-screenshots.length > 0: Flickable {
-                            width: parent.width;
-                            height: 220px;
-                            viewport-height: self.height;
-                            viewport-width: root.detail-screenshots.length * 330px;
-
-                            HorizontalBox {
-                                spacing: 10px;
-                                padding: 0px;
-                                for shot in root.detail-screenshots: Image {
-                                    source: shot;
-                                    width: 320px;
-                                    height: 200px;
-                                    image-fit: contain;
-                                }
-                            }
-                        }
-                    }
-                }
+                detail-app: root.detail-app;
+                detail-loading: root.detail-loading;
+                detail-busy: root.detail-busy;
+                detail-screenshots: root.detail-screenshots;
+                settings-preferred: root.settings-preferred;
+                back-clicked => { root.current-view = root.prev-view; }
+                install-requested(id) => { root.install-requested(id); }
+                remove-requested(id) => { root.remove-requested(id); }
             }
 
-            if root.current-view == "install-file": Rectangle {
+            if root.current-view == "install-file": InstallFileScreen {
                 width: parent.width;
                 height: parent.height;
-
-                VerticalBox {
-                    alignment: center;
-                    padding: 48px;
-                    spacing: 20px;
-
-                    Text {
-                        text: "Install Package";
-                        font-size: 22px;
-                        font-weight: 700;
-                        horizontal-alignment: center;
-                    }
-
-                    Text {
-                        text: root.install-file-name;
-                        font-size: 13px;
-                        color: #888;
-                        horizontal-alignment: center;
-                        overflow: elide;
-                    }
-
-                    Button {
-                        text: "Install via Distrobox";
-                        clicked => { root.install-file-distrobox-requested(); }
-                    }
-
-                    if root.install-file-has-flatpak: Button {
-                        text: "Install " + root.install-file-flatpak-name + " from Flathub instead";
-                        clicked => { root.install-file-flatpak-requested(); }
-                    }
-
-                    if !root.install-file-has-flatpak: Text {
-                        text: "Searching for Flathub alternative...";
-                        font-size: 11px;
-                        color: #888;
-                        horizontal-alignment: center;
-                    }
-
-                    Button {
-                        text: "Cancel";
-                        clicked => { root.install-file-cancelled(); }
-                    }
-                }
+                install-file-name: root.install-file-name;
+                install-file-has-flatpak: root.install-file-has-flatpak;
+                install-file-flatpak-name: root.install-file-flatpak-name;
+                distrobox-requested => { root.install-file-distrobox-requested(); }
+                flatpak-requested => { root.install-file-flatpak-requested(); }
+                cancelled => { root.install-file-cancelled(); }
             }
 
-            if root.current-view == "settings": Rectangle {
+            if root.current-view == "settings": SettingsScreen {
                 width: parent.width;
                 height: parent.height;
-                clip: true;
-
-                Flickable {
-                    width: parent.width;
-                    height: parent.height;
-                    viewport-width: parent.width;
-                    viewport-height: 480px;
-
-                    VerticalBox {
-                        padding: 16px;
-                        spacing: 16px;
-                        width: parent.width;
-
-                        Button {
-                            text: "← Back";
-                            clicked => { root.current-view = root.prev-view; }
-                        }
-
-                        Text { text: "Settings"; font-size: 20px; font-weight: 700; }
-
-                        HorizontalBox {
-                            spacing: 12px;
-                            alignment: start;
-
-                            Text {
-                                text: "Preferred provider:";
-                                vertical-alignment: center;
-                                min-width: 160px;
-                            }
-
-                            ComboBox {
-                                model: ["Flatpak", "Native"];
-                                current-value: root.settings-preferred;
-                                selected(value) => { root.settings-preferred = value; }
-                            }
-                        }
-
-                        HorizontalBox {
-                            spacing: 12px;
-                            alignment: start;
-
-                            Text {
-                                text: "Ignore native preference list:";
-                                vertical-alignment: center;
-                                min-width: 160px;
-                            }
-
-                            CheckBox {
-                                checked: root.settings-ignore-native-pref;
-                                toggled => { root.settings-ignore-native-pref = self.checked; }
-                            }
-                        }
-
-                        Button {
-                            text: "Save";
-                            clicked => {
-                                root.save-settings(
-                                    root.settings-preferred,
-                                    root.settings-ignore-native-pref
-                                );
-                            }
-                        }
-                    }
-                }
+                settings-preferred <=> root.settings-preferred;
+                settings-ignore-native-pref <=> root.settings-ignore-native-pref;
+                back-clicked => { root.current-view = root.prev-view; }
+                save-settings(preferred, ignore) => { root.save-settings(preferred, ignore); }
             }
         }
 
-        HorizontalBox {
-            padding: 6px;
-
-            Text {
-                text: root.status-text;
-                horizontal-stretch: 1;
-                vertical-alignment: center;
-            }
-
-            if root.progress > 0.0 && root.progress < 1.0: ProgressIndicator {
-                width: 150px;
-                progress: root.progress;
-            }
+        StatusBar {
+            status-text: root.status-text;
+            progress: root.progress;
         }
     }
 }

@@ -1,0 +1,54 @@
+import { VerticalBox, Button } from "std-widgets.slint";
+
+export component InstallFileScreen inherits Rectangle {
+    in property <string> install-file-name;
+    in property <bool> install-file-has-flatpak;
+    in property <string> install-file-flatpak-name;
+
+    callback distrobox-requested();
+    callback flatpak-requested();
+    callback cancelled();
+
+    VerticalBox {
+        alignment: center;
+        padding: 48px;
+        spacing: 20px;
+
+        Text {
+            text: "Install Package";
+            font-size: 22px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.install-file-name;
+            font-size: 13px;
+            color: #888;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+
+        Button {
+            text: "Install via Distrobox";
+            clicked => { root.distrobox-requested(); }
+        }
+
+        if root.install-file-has-flatpak: Button {
+            text: "Install " + root.install-file-flatpak-name + " from Flathub instead";
+            clicked => { root.flatpak-requested(); }
+        }
+
+        if !root.install-file-has-flatpak: Text {
+            text: "Searching for Flathub alternative...";
+            font-size: 11px;
+            color: #888;
+            horizontal-alignment: center;
+        }
+
+        Button {
+            text: "Cancel";
+            clicked => { root.cancelled(); }
+        }
+    }
+}

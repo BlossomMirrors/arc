@@ -1,0 +1,50 @@
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { AppCardData } from "../types.slint";
+
+export component AppCard inherits Rectangle {
+    in property <AppCardData> card;
+    callback clicked(string);
+
+    border-radius: 10px;
+    background: #00000033;
+    border-width: 1px;
+    border-color: #00000022;
+
+    TouchArea {
+        clicked => {
+            root.clicked(root.card.id);
+        }
+    }
+
+    VerticalBox {
+        alignment: center;
+        padding: 12px;
+        spacing: 6px;
+
+        HorizontalBox {
+            alignment: center;
+            Image {
+                source: root.card.icon;
+                width: 64px;
+                height: 64px;
+            }
+        }
+
+        Text {
+            text: root.card.name;
+            font-weight: 600;
+            font-size: 12px;
+            overflow: elide;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.card.summary;
+            font-size: 10px;
+            overflow: elide;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+            preferred-height: 24px;
+        }
+    }
+}

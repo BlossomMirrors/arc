@@ -1,0 +1,74 @@
+import { VerticalBox, HorizontalBox, Button, ComboBox, CheckBox } from "std-widgets.slint";
+
+export component SettingsScreen inherits Rectangle {
+    in-out property <string> settings-preferred;
+    in-out property <bool> settings-ignore-native-pref;
+
+    callback back-clicked();
+    callback save-settings(string, bool);
+
+    clip: true;
+
+    Flickable {
+        width: parent.width;
+        height: parent.height;
+        viewport-width: parent.width;
+        viewport-height: 480px;
+
+        VerticalBox {
+            padding: 16px;
+            spacing: 16px;
+            width: parent.width;
+
+            Button {
+                text: "← Back";
+                clicked => { root.back-clicked(); }
+            }
+
+            Text { text: "Settings"; font-size: 20px; font-weight: 700; }
+
+            HorizontalBox {
+                spacing: 12px;
+                alignment: start;
+
+                Text {
+                    text: "Preferred provider:";
+                    vertical-alignment: center;
+                    min-width: 160px;
+                }
+
+                ComboBox {
+                    model: ["Flatpak", "Native"];
+                    current-value: root.settings-preferred;
+                    selected(value) => { root.settings-preferred = value; }
+                }
+            }
+
+            HorizontalBox {
+                spacing: 12px;
+                alignment: start;
+
+                Text {
+                    text: "Ignore native preference list:";
+                    vertical-alignment: center;
+                    min-width: 160px;
+                }
+
+                CheckBox {
+                    checked: root.settings-ignore-native-pref;
+                    toggled => { root.settings-ignore-native-pref = self.checked; }
+                }
+            }
+
+            Button {
+                text: "Save";
+                clicked => {
+                    root.save-settings(
+                        root.settings-preferred,
+                        root.settings-ignore-native-pref
+                    );
+                }
+            }
+        }
+    }
+}

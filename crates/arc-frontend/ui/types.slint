@@ -1,0 +1,40 @@
+export struct PackageItem {
+    id: string,
+    name: string,
+    version: string,
+    description: string,
+    installed: bool,
+    icon: image,
+}
+
+export struct AppDetailData {
+    id: string,
+    name: string,
+    developer: string,
+    description: string,
+    summary: string,
+    version: string,
+    icon: image,
+    installed: bool,
+    flatpak-id: string,
+    native-id: string,
+    lutris-id: string,
+    flatpak-installed: bool,
+    native-installed: bool,
+    lutris-installed: bool,
+    verified: bool,
+}
+
+export struct AppCardData {
+    id: string,
+    name: string,
+    summary: string,
+    icon: image,
+}
+
+export struct CategoryItem {
+    id: string,
+    label: string,
+    icon: image,
+    bg-color: color,
+}

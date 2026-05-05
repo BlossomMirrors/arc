@@ -1,0 +1,46 @@
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { CategoryItem } from "../types.slint";
+
+export component CategoryCard inherits Rectangle {
+    in property <CategoryItem> category;
+    callback clicked(string);
+
+    border-radius: 10px;
+    background: root.category.bg-color;
+    border-width: 1px;
+    border-color: root.category.bg-color.brighter(0.1);
+
+    TouchArea {
+        clicked => {
+            root.clicked(root.category.id);
+        }
+    }
+
+    HorizontalBox {
+        alignment: center;
+        padding: 12px;
+
+        HorizontalBox {
+            padding-top: 24px;
+            vertical-stretch: 0;
+            Image {
+                source: root.category.icon;
+                width: 36px;
+                height: 36px;
+                image-fit: contain;
+                vertical-stretch: 0;
+            }
+        }
+
+        VerticalBox {
+            padding-top: 32px;
+            padding-right: 32px;
+            Text {
+                text: root.category.label;
+                font-weight: 600;
+                font-size: 14px;
+                color: white;
+            }
+        }
+    }
+}

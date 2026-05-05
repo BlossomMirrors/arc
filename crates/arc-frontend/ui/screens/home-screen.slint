@@ -1,0 +1,168 @@
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { AppCard } from "../components/app-card.slint";
+import { CategoryCard } from "../components/category-card.slint";
+import { AppCardData, CategoryItem } from "../types.slint";
+
+export component HomeScreen inherits Rectangle {
+    in property <[AppCardData]> popular-apps;
+    in property <[AppCardData]> recent-apps;
+    in property <[CategoryItem]> categories;
+    in property <bool> home-loading;
+
+    callback detail-requested(string);
+    callback category-selected(string);
+
+    clip: true;
+
+    if root.home-loading: VerticalBox {
+        alignment: center;
+        Text {
+            text: "Loading...";
+            horizontal-alignment: center;
+        }
+    }
+
+    if !root.home-loading: Flickable {
+        width: parent.width;
+        height: parent.height;
+        viewport-width: parent.width;
+        viewport-height: self.compute-height();
+
+        function compute-height() -> length {
+            200px + (root.popular-apps.length > 0 ? 44px + root.popular-apps.length * 60px : 0px) + (root.recent-apps.length > 0 ? 52px + ceil(root.recent-apps.length / 4) * 184px : 0px) + (root.categories.length > 0 ? 52px + ceil(root.categories.length / 4) * 114px : 0px) + 16px
+        }
+
+        VerticalBox {
+            padding: 16px;
+            spacing: 0px;
+            width: parent.width;
+
+            Rectangle {
+                height: 140px;
+                border-radius: 12px;
+                background: @linear-gradient(135deg, #5b7fa6, #8a5bab);
+
+                VerticalBox {
+                    alignment: center;
+                    Text {
+                        text: "Discover Great Software";
+                        font-size: 22px;
+                        font-weight: 700;
+                        color: white;
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        text: "Install apps from Flathub and your system repositories";
+                        font-size: 13px;
+                        color: #ffffffcc;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+
+            if root.popular-apps.length > 0: VerticalBox {
+                padding-top: 20px;
+                spacing: 4px;
+
+                Text {
+                    text: "Popular";
+                    font-size: 16px;
+                    font-weight: 700;
+                }
+
+                for app[i] in root.popular-apps: Rectangle {
+                    height: 56px;
+                    border-radius: 6px;
+
+                    TouchArea {
+                        clicked => {
+                            root.detail-requested(app.id);
+                        }
+                    }
+
+                    HorizontalBox {
+                        padding: 8px;
+                        spacing: 10px;
+
+                        Image {
+                            source: app.icon;
+                            width: 40px;
+                            height: 40px;
+                            vertical-alignment: center;
+                        }
+
+                        VerticalBox {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            spacing: 2px;
+                            Text {
+                                text: app.name;
+                                font-weight: 600;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: app.summary;
+                                font-size: 11px;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.recent-apps.length > 0: VerticalBox {
+                padding-top: 20px;
+                spacing: 8px;
+
+                Text {
+                    text: "Recently Added";
+                    font-size: 16px;
+                    font-weight: 700;
+                }
+
+                Rectangle {
+                    height: ceil(root.recent-apps.length / 4) * 184px;
+
+                    for app[i] in root.recent-apps: AppCard {
+                        x: mod(i, 4) * (parent.width + 12px) / 4;
+                        y: ((i - mod(i, 4)) / 4) * 184px;
+                        width: (parent.width + 12px) / 4 - 12px;
+                        height: 172px;
+                        card: app;
+                        clicked(id) => {
+                            root.detail-requested(id);
+                        }
+                    }
+                }
+            }
+
+            if root.categories.length > 0: VerticalBox {
+                padding-top: 20px;
+                spacing: 8px;
+
+                Text {
+                    text: "Categories";
+                    font-size: 16px;
+                    font-weight: 700;
+                }
+
+                Rectangle {
+                    height: ceil(root.categories.length / 4) * 114px;
+
+                    for cat[i] in root.categories: CategoryCard {
+                        x: mod(i, 4) * (parent.width + 12px) / 4;
+                        y: ((i - mod(i, 4)) / 4) * 114px;
+                        width: (parent.width + 12px) / 4 - 12px;
+                        height: 104px;
+                        category: cat;
+                        clicked(id) => {
+                            root.category-selected(id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
