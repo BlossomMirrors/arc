@@ -18,12 +18,16 @@ export component Badge inherits Rectangle {
         spacing: 4px;
         alignment: center;
 
-        if root.has-icon: Image {
-            source: root.icon;
-            width: 9px;
-            height: 9px;
-            vertical-alignment: center;
-            colorize: root.accent;
+        if root.has-icon:
+        HorizontalLayout {
+            padding-top: 1px;
+            Image {
+                source: root.icon;
+                width: 9px;
+                height: 9px;
+                vertical-alignment: center;
+                colorize: root.accent;
+            }
         }
 
         Text {
