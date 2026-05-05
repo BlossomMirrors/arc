@@ -288,7 +288,7 @@ async fn load_home(app_weak: slint::Weak<AppWindow>, _proxy: Option<ArcDaemonPro
     let appstream_db = AppStreamDb::get_static();
     // Load popular and recent apps from cached AppStream data
     let popular_apps: Vec<_> = appstream_db.get_popular_apps(10);
-    let recent_apps: Vec<_> = appstream_db.get_recent_apps(4);
+    let recent_apps: Vec<_> = appstream_db.get_recent_apps(20);
 
     // Load icons in parallel for popular apps
     let popular_tasks: Vec<_> = popular_apps

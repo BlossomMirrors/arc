@@ -2,6 +2,7 @@ import { VerticalBox, HorizontalBox } from "std-widgets.slint";
 import { AppCard } from "../components/app-card.slint";
 import { CategoryCard } from "../components/category-card.slint";
 import { PopularCard } from "../components/popular-card.slint";
+import { Carousel } from "../components/carousel.slint";
 import { AppCardData, CategoryItem } from "../types.slint";
 
 export component HomeScreen inherits Rectangle {
@@ -30,7 +31,7 @@ export component HomeScreen inherits Rectangle {
         viewport-height: self.compute-height();
 
         function compute-height() -> length {
-            200px + (root.popular-apps.length > 0 ? 44px + ceil(root.popular-apps.length / 5) * 144px : 0px) + (root.recent-apps.length > 0 ? 52px + ceil(root.recent-apps.length / 4) * 184px : 0px) + (root.categories.length > 0 ? 52px + ceil(root.categories.length / 4) * 114px : 0px) + 16px
+            200px + (root.popular-apps.length > 0 ? 44px + ceil(root.popular-apps.length / 5) * 144px : 0px) + (root.recent-apps.length > 0 ? 52px + 172px : 0px) + (root.categories.length > 0 ? 52px + ceil(root.categories.length / 4) * 114px : 0px) + 16px
         }
 
         VerticalBox {
@@ -98,18 +99,11 @@ export component HomeScreen inherits Rectangle {
                     font-weight: 700;
                 }
 
-                Rectangle {
-                    height: ceil(root.recent-apps.length / 4) * 184px;
-
-                    for app[i] in root.recent-apps: AppCard {
-                        x: mod(i, 4) * (parent.width + 12px) / 4;
-                        y: ((i - mod(i, 4)) / 4) * 184px;
-                        width: (parent.width + 12px) / 4 - 12px;
-                        height: 172px;
-                        card: app;
-                        clicked(id) => {
-                            root.detail-requested(id);
-                        }
+                Carousel {
+                    width: parent.width;
+                    items: root.recent-apps;
+                    item-clicked(id) => {
+                        root.detail-requested(id);
                     }
                 }
             }

@@ -1,0 +1,78 @@
+import { AppCard } from "app-card.slint";
+import { AppCardData } from "../types.slint";
+
+export component Carousel inherits Rectangle {
+    in property <[AppCardData]> items;
+    callback item-clicked(string);
+
+    private property <length> scroll-x: 0px;
+    private property <length> max-scroll: max(0px, root.items.length * 172px - root.width);
+
+    animate scroll-x { duration: 250ms; easing: ease-in-out; }
+
+    height: 172px;
+    clip: true;
+
+    for app[i] in root.items: AppCard {
+        x: i * 172px + root.scroll-x;
+        y: 0px;
+        width: 160px;
+        height: 172px;
+        card: app;
+        clicked(id) => { root.item-clicked(id); }
+    }
+
+    // Left button
+    Rectangle {
+        x: 4px;
+        y: (parent.height - 48px) / 2;
+        width: 32px;
+        height: 48px;
+        border-radius: 8px;
+        background: #000000bb;
+        opacity: root.scroll-x < 0px ? 1.0 : 0.0;
+        animate opacity { duration: 150ms; }
+
+        TouchArea {
+            enabled: root.scroll-x < 0px;
+            clicked => {
+                root.scroll-x = min(0px, root.scroll-x + 3 * 172px);
+            }
+        }
+
+        Text {
+            text: "‹";
+            font-size: 24px;
+            color: white;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // Right button
+    Rectangle {
+        x: parent.width - 36px;
+        y: (parent.height - 48px) / 2;
+        width: 32px;
+        height: 48px;
+        border-radius: 8px;
+        background: #000000bb;
+        opacity: root.scroll-x > -root.max-scroll ? 1.0 : 0.0;
+        animate opacity { duration: 150ms; }
+
+        TouchArea {
+            enabled: root.scroll-x > -root.max-scroll;
+            clicked => {
+                root.scroll-x = max(-root.max-scroll, root.scroll-x - 3 * 172px);
+            }
+        }
+
+        Text {
+            text: "›";
+            font-size: 24px;
+            color: white;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
