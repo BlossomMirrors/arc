@@ -1,0 +1,179 @@
+import { Button } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
+import { AppDetailData } from "../types.slint";
+import { Badge } from "badge.slint";
+
+export component DetailHeader inherits Rectangle {
+    in property <AppDetailData> detail-app;
+    in property <bool> detail-busy;
+    in property <string> settings-preferred;
+
+    callback back-clicked();
+    callback install-requested(string);
+    callback remove-requested(string);
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // Back button row
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 20px;
+            padding-bottom: 12px;
+            alignment: start;
+
+            Rectangle {
+                width: back-row.preferred-width + 12px;
+                height: 28px;
+                border-radius: 6px;
+                background: back-ta.has-hover ? #80808018 : #00000000;
+                border-width: 1px;
+                border-color: back-ta.has-hover ? #80808035 : #80808025;
+
+                back-ta := TouchArea {
+                    clicked => {
+                        root.back-clicked();
+                    }
+                }
+
+                back-row := HorizontalLayout {
+                    x: 0;
+                    y: 0;
+                    padding-left: 6px;
+                    padding-right: 8px;
+                    padding-top: 4px;
+                    padding-bottom: 4px;
+                    spacing: 4px;
+                    alignment: center;
+
+                    Text {
+                        text: "←";
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        color: Palette.foreground.transparentize(0.2);
+                    }
+
+                    Text {
+                        text: "Back";
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        color: Palette.foreground.transparentize(0.2);
+                    }
+                }
+            }
+        }
+
+        // App info row: icon | name/developer/badges (stretch) | install button
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-bottom: 20px;
+            spacing: 20px;
+
+            // App icon
+            Rectangle {
+                width: 96px;
+                height: 96px;
+                border-radius: 16px;
+                background: #80808012;
+                border-width: 1px;
+                border-color: #80808025;
+
+                Image {
+                    source: root.detail-app.icon;
+                    width: 80px;
+                    height: 80px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    image-fit: contain;
+                }
+            }
+
+            // Name / developer / metadata chips
+            VerticalLayout {
+                alignment: center;
+                spacing: 6px;
+                horizontal-stretch: 1;
+
+                Text {
+                    text: root.detail-app.name;
+                    font-size: 22px;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+
+                    Text {
+                        text: root.detail-app.developer;
+                        font-size: 13px;
+                        color: Palette.foreground.transparentize(0.35);
+                        vertical-alignment: center;
+                    }
+
+                    if root.detail-app.verified: Image {
+                        source: @image-url("../../assets/verified.svg");
+                        width: 14px;
+                        height: 14px;
+                        vertical-alignment: center;
+                        colorize: #0d6efd;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    padding-top: 4px;
+
+                    if root.detail-app.version != "": Badge {
+                        label: root.detail-app.version;
+                        accent: Palette.foreground.transparentize(0.3);
+                    }
+
+                    if root.detail-app.license != "": Badge {
+                        label: root.detail-app.license;
+                        accent: #3b82f6;
+                    }
+
+                    if root.detail-app.content-rating != "": Badge {
+                        label: root.detail-app.content-rating;
+                        accent: root.detail-app.content-rating == "18+" ? #ef4444 : root.detail-app.content-rating == "12+" ? #f97316 : root.detail-app.content-rating == "7+" ? #eab308 : Palette.foreground.transparentize(0.4);
+                    }
+                }
+            }
+
+            // Install / remove button — right edge because info column stretches
+            VerticalLayout {
+                alignment: center;
+
+                install-btn := Button {
+                    property <bool> only-lutris: root.detail-app.lutris-id != "" && root.detail-app.flatpak-id == "" && root.detail-app.native-id == "";
+                    property <bool> only-native: root.detail-app.native-id != "" && root.detail-app.flatpak-id == "" && root.detail-app.lutris-id == "";
+                    property <bool> is-lutris: root.detail-app.lutris-id != "" && (root.settings-preferred == "Lutris" || self.only-lutris);
+                    property <bool> is-native: root.detail-app.native-id != "" && (root.settings-preferred == "Native" || self.only-native);
+                    property <bool> is-installed: self.is-lutris ? root.detail-app.lutris-installed : (self.is-native ? root.detail-app.native-installed : root.detail-app.flatpak-installed);
+                    property <string> active-id: self.is-lutris ? root.detail-app.lutris-id : (self.is-native ? root.detail-app.native-id : root.detail-app.flatpak-id);
+
+                    text: root.detail-busy ? "Working..." : (self.is-installed ? "Remove" : "Install");
+                    enabled: self.active-id != "" && !root.detail-busy;
+                    clicked => {
+                        if self.is-installed {
+                            root.remove-requested(self.active-id);
+                        } else {
+                            root.install-requested(self.active-id);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Divider
+        Rectangle {
+            height: 1px;
+            background: #80808025;
+        }
+    }
+}

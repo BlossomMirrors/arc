@@ -1,3 +1,4 @@
+use appstream::enums::{ContentAttribute, ContentState, ProjectUrl};
 use appstream::{Collection, Component};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -16,6 +17,9 @@ pub struct AppStreamEntry {
     pub summary: String,
     pub icon_url: Option<String>,
     pub remote: Option<String>,
+    pub license: Option<String>,
+    pub homepage_url: Option<String>,
+    pub content_rating_age: String,
 }
 
 impl AppStreamDb {
@@ -129,6 +133,34 @@ impl AppStreamDb {
     }
 }
 
+fn attr_severity(attr: &ContentAttribute) -> u8 {
+    fn state_sev(s: &ContentState) -> u8 {
+        match s {
+            ContentState::None => 0,
+            ContentState::Mild => 1,
+            ContentState::Moderate => 2,
+            ContentState::Intense => 3,
+        }
+    }
+    match attr {
+        ContentAttribute::ViolenceCartoon(s) | ContentAttribute::ViolenceFantasy(s)
+        | ContentAttribute::ViolenceRealistic(s) | ContentAttribute::ViolenceBloodshed(s)
+        | ContentAttribute::ViolenceSexual(s) | ContentAttribute::ViolenceDesecration(s)
+        | ContentAttribute::ViolenceSlavery(s) | ContentAttribute::ViolenceWorship(s)
+        | ContentAttribute::DrugsAlcohol(s) | ContentAttribute::DrugsNarcotics(s)
+        | ContentAttribute::DrugsTobacco(s) | ContentAttribute::SexNudity(s)
+        | ContentAttribute::SexThemes(s) | ContentAttribute::SexHomosexuality(s)
+        | ContentAttribute::SexProstitution(s) | ContentAttribute::SexAdultery(s)
+        | ContentAttribute::SexAppearance(s) | ContentAttribute::LanguageProfanity(s)
+        | ContentAttribute::LanguageHumor(s) | ContentAttribute::LanguageDiscrimination(s)
+        | ContentAttribute::SocialChat(s) | ContentAttribute::SocialInfo(s)
+        | ContentAttribute::SocialAudio(s) | ContentAttribute::SocialLocation(s)
+        | ContentAttribute::SocialContacts(s) | ContentAttribute::MoneyAdvertising(s)
+        | ContentAttribute::MoneyPurchasing(s) | ContentAttribute::MoneyGambling(s) => state_sev(s),
+        _ => 0,
+    }
+}
+
 fn component_to_entry(c: &Component, remote: Option<String>) -> AppStreamEntry {
     let icon_url = c.icons.first().and_then(|icon| match icon {
         appstream::enums::Icon::Remote { url, .. } => Some(url.to_string()),
@@ -136,6 +168,27 @@ fn component_to_entry(c: &Component, remote: Option<String>) -> AppStreamEntry {
         appstream::enums::Icon::Cached { path, .. } => Some(format!("local:{}", path.display())),
         appstream::enums::Icon::Stock(name) => Some(format!("local:{}", name)),
     });
+
+    let license = c.project_license.as_ref().map(|l| l.to_string());
+
+    let homepage_url = c.urls.iter().find_map(|u| match u {
+        ProjectUrl::Homepage(url) => Some(url.to_string()),
+        _ => None,
+    });
+
+    let content_rating_age = c
+        .content_rating
+        .as_ref()
+        .map(|rating| {
+            let max = rating.attributes.iter().map(attr_severity).max().unwrap_or(0);
+            match max {
+                3 => "18+".to_string(),
+                2 => "12+".to_string(),
+                1 => "7+".to_string(),
+                _ => "All ages".to_string(),
+            }
+        })
+        .unwrap_or_default();
 
     AppStreamEntry {
         id: c.id.to_string(),
@@ -148,6 +201,9 @@ fn component_to_entry(c: &Component, remote: Option<String>) -> AppStreamEntry {
             .unwrap_or_default(),
         icon_url,
         remote,
+        license,
+        homepage_url,
+        content_rating_age,
     }
 }
 

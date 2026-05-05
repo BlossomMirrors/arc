@@ -1,5 +1,8 @@
-import { VerticalBox, HorizontalBox, Button } from "std-widgets.slint";
+import { Palette, HorizontalBox } from "std-widgets.slint";
 import { AppDetailData } from "../types.slint";
+import { DetailHeader } from "../components/detail-header.slint";
+import { ScreenshotCarousel } from "../components/screenshot-carousel.slint";
+import { DetailLightbox } from "../components/detail-lightbox.slint";
 
 export component DetailScreen inherits Rectangle {
     in property <AppDetailData> detail-app;
@@ -11,14 +14,18 @@ export component DetailScreen inherits Rectangle {
     callback back-clicked();
     callback install-requested(string);
     callback remove-requested(string);
+    callback open-url-requested(string);
+
+    private property <bool> lightbox-visible: false;
+    private property <int> lightbox-index: 0;
 
     clip: true;
 
-    if root.detail-loading: VerticalBox {
-        alignment: center;
+    if root.detail-loading: Rectangle {
         Text {
             text: "Loading...";
             horizontal-alignment: center;
+            vertical-alignment: center;
         }
     }
 
@@ -26,116 +33,125 @@ export component DetailScreen inherits Rectangle {
         width: parent.width;
         height: parent.height;
         viewport-width: parent.width;
-        viewport-height: 600px + (root.detail-screenshots.length > 0 ? 240px : 0px);
+        viewport-height: content-layout.preferred-height + 32px;
 
-        VerticalBox {
-            padding: 16px;
-            spacing: 12px;
+        content-layout := VerticalLayout {
+            spacing: 0px;
             width: parent.width;
 
-            Button {
-                text: "← Back";
-                clicked => {
+            // Header: back button + app info + divider
+            DetailHeader {
+                detail-app: root.detail-app;
+                detail-busy: root.detail-busy;
+                settings-preferred: root.settings-preferred;
+                back-clicked => {
                     root.back-clicked();
                 }
+                install-requested(id) => {
+                    root.install-requested(id);
+                }
+                remove-requested(id) => {
+                    root.remove-requested(id);
+                }
             }
 
+            // Short description
+            if root.detail-app.summary != "": VerticalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-top: 16px;
+                padding-bottom: 12px;
+
+                Text {
+                    text: root.detail-app.summary;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                    color: Palette.foreground.transparentize(0.1);
+                }
+            }
+
+            // Full description (native/Lutris packages only)
+            if root.detail-app.description != "": VerticalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-bottom: 12px;
+
+                Text {
+                    text: root.detail-app.description;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                    color: Palette.foreground.transparentize(0.25);
+                }
+            }
+
+            // Screenshots
             HorizontalBox {
-                spacing: 16px;
-                alignment: start;
+                padding: 8px;
+                if root.detail-screenshots.length > 0: ScreenshotCarousel {
+                    screenshots: root.detail-screenshots;
+                    screenshot-clicked(i) => {
+                        root.lightbox-index = i;
+                        root.lightbox-visible = true;
+                    }
+                }
+            }
 
-                Image {
-                    source: root.detail-app.icon;
-                    width: 96px;
-                    height: 96px;
-                    image-fit: contain;
+            // Homepage URL
+            if root.detail-app.homepage-url != "": VerticalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-top: 8px;
+                padding-bottom: 4px;
+
+                Rectangle {
+                    height: 1px;
+                    background: #80808025;
                 }
 
-                VerticalBox {
-                    alignment: center;
-                    spacing: 4px;
-                    horizontal-stretch: 1;
+                HorizontalLayout {
+                    padding-top: 12px;
+                    spacing: 12px;
+                    alignment: start;
 
                     Text {
-                        text: root.detail-app.name;
-                        font-size: 20px;
-                        font-weight: 700;
-                        overflow: elide;
+                        text: "Website";
+                        font-size: 12px;
+                        font-weight: 600;
+                        color: Palette.foreground.transparentize(0.3);
+                        vertical-alignment: center;
+                        min-width: 80px;
                     }
 
-                    HorizontalBox {
-                        spacing: 4px;
-                        alignment: center;
+                    Rectangle {
+                        horizontal-stretch: 1;
+
+                        url-ta := TouchArea {
+                            clicked => {
+                                root.open-url-requested(root.detail-app.homepage-url);
+                            }
+                        }
+
                         Text {
-                            text: root.detail-app.developer;
-                            font-size: 13px;
-                        }
-
-                        if root.detail-app.verified: Image {
-                            source: @image-url("../../assets/verified.svg");
-                            width: 14px;
-                            height: 14px;
-                            vertical-alignment: center;
-                            colorize: #0d6efd;
-                        }
-                    }
-
-                    Text {
-                        text: root.detail-app.version;
-                        font-size: 11px;
-                    }
-                }
-
-                Button {
-                    property <bool> only-lutris: root.detail-app.lutris-id != "" && root.detail-app.flatpak-id == "" && root.detail-app.native-id == "";
-                    property <bool> only-native: root.detail-app.native-id != "" && root.detail-app.flatpak-id == "" && root.detail-app.lutris-id == "";
-                    property <bool> is-lutris: root.detail-app.lutris-id != "" && (root.settings-preferred == "Lutris" || self.only-lutris);
-                    property <bool> is-native: root.detail-app.native-id != "" && (root.settings-preferred == "Native" || self.only-native);
-                    property <bool> is-flatpak: root.detail-app.flatpak-id != "" && (root.settings-preferred == "Flatpak" || (!self.is-lutris && !self.is-native));
-                    property <bool> is-installed: self.is-lutris ? root.detail-app.lutris-installed : (self.is-native ? root.detail-app.native-installed : root.detail-app.flatpak-installed);
-                    property <string> active-id: self.is-lutris ? root.detail-app.lutris-id : (self.is-native ? root.detail-app.native-id : root.detail-app.flatpak-id);
-
-                    text: root.detail-busy ? "Working..." : (self.is-installed ? "Remove" : "Install");
-                    enabled: self.active-id != "" && !root.detail-busy;
-                    clicked => {
-                        if self.is-installed {
-                            root.remove-requested(self.active-id);
-                        } else {
-                            root.install-requested(self.active-id);
+                            text: root.detail-app.homepage-url;
+                            font-size: 12px;
+                            color: url-ta.has-hover ? #60a5fa : #3b82f6;
+                            overflow: elide;
+                            width: parent.width;
                         }
                     }
                 }
             }
+        }
+    }
 
-            Text {
-                text: root.detail-app.summary;
-                font-size: 13px;
-                wrap: word-wrap;
-            }
-
-            Text {
-                text: root.detail-app.description;
-                font-size: 12px;
-                wrap: word-wrap;
-            }
-
-            if root.detail-screenshots.length > 0: Flickable {
-                width: parent.width;
-                height: 220px;
-                viewport-height: self.height;
-                viewport-width: root.detail-screenshots.length * 330px;
-
-                HorizontalBox {
-                    spacing: 10px;
-                    padding: 0px;
-                    for shot in root.detail-screenshots: Image {
-                        source: shot;
-                        width: 320px;
-                        height: 200px;
-                        image-fit: contain;
-                    }
-                }
-            }
+    // Lightbox
+    if root.lightbox-visible: DetailLightbox {
+        width: parent.width;
+        height: parent.height;
+        screenshots: root.detail-screenshots;
+        initial-index: root.lightbox-index;
+        closed => {
+            root.lightbox-visible = false;
         }
     }
 }

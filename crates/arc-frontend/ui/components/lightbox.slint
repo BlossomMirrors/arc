@@ -1,0 +1,117 @@
+/*
+ * Full-screen lightbox for viewing
+ * Use with `if visible: LightBox { initial-index: N; ... }` so
+ * each opening creates a fresh instance with the correct starting index.
+*/
+export component LightBox inherits Rectangle {
+    in property <[image]> images;
+    in property <int> initial-index;
+
+    callback closed();
+
+    /*
+     * current-index starts bound to initial-index; first prev/next click breaks
+     * the binding and the property becomes independently writable.
+    */
+    private property <int> current-index: root.initial-index;
+
+    background: #000000aa;
+
+    // Tap the dark background to dismiss
+    TouchArea {
+        clicked => {
+            root.closed();
+        }
+    }
+
+    /*
+     * Current screenshot, centred, 90 % of screen — no touch area so taps fall
+     * through to the background and close the lightbox
+    */
+    Image {
+        source: root.images[root.current-index];
+        x: parent.width * 0.05;
+        y: parent.height * 0.05;
+        width: parent.width * 0.9;
+        height: parent.height * 0.9;
+        image-fit: contain;
+    }
+
+    // Prev arrow
+    Rectangle {
+        x: 16px;
+        y: (parent.height - self.height) / 2;
+        width: 48px;
+        height: 48px;
+        border-radius: 24px;
+        background: lb-prev-ta.has-hover ? #000000cc : #00000088;
+        opacity: root.current-index > 0 ? 1.0 : 0.0;
+        animate opacity { duration: 150ms; }
+
+        lb-prev-ta := TouchArea {
+            enabled: root.current-index > 0;
+            clicked => {
+                root.current-index -= 1;
+            }
+        }
+
+        Text {
+            text: "‹";
+            font-size: 28px;
+            color: white;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // Next arrow
+    Rectangle {
+        x: parent.width - self.width - 16px;
+        y: (parent.height - self.height) / 2;
+        width: 48px;
+        height: 48px;
+        border-radius: 24px;
+        background: lb-next-ta.has-hover ? #000000cc : #00000088;
+        opacity: root.current-index < root.images.length - 1 ? 1.0 : 0.0;
+        animate opacity { duration: 150ms; }
+
+        lb-next-ta := TouchArea {
+            enabled: root.current-index < root.images.length - 1;
+            clicked => {
+                root.current-index += 1;
+            }
+        }
+
+        Text {
+            text: "›";
+            font-size: 28px;
+            color: white;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // Close button
+    Rectangle {
+        x: parent.width - self.width - 16px;
+        y: 16px;
+        width: 40px;
+        height: 40px;
+        border-radius: 20px;
+        background: lb-close-ta.has-hover ? #000000cc : #00000088;
+
+        lb-close-ta := TouchArea {
+            clicked => {
+                root.closed();
+            }
+        }
+
+        Text {
+            text: "×";
+            font-size: 22px;
+            color: white;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

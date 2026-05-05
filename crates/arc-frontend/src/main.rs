@@ -246,6 +246,9 @@ struct RawDetailData {
     native_installed: bool,
     lutris_installed: bool,
     verified: bool,
+    license: String,
+    homepage_url: String,
+    content_rating: String,
 }
 
 struct RawPackage {
@@ -438,13 +441,13 @@ fn main() -> Result<()> {
 
     let app = AppWindow::new()?;
 
-    if let Some(icon) = icons::load_ui_icon("go-home") {
+    if let Some(icon) = icons::load_ui_icon("go-home-symbolic") {
         app.set_icon_home(icon.to_slint_image());
     }
-    if let Some(icon) = icons::load_ui_icon("edit-find") {
+    if let Some(icon) = icons::load_ui_icon("edit-find-symbolic") {
         app.set_icon_search(icon.to_slint_image());
     }
-    if let Some(icon) = icons::load_ui_icon("preferences-system-symbolic") {
+    if let Some(icon) = icons::load_ui_icon("settings-configure") {
         app.set_icon_settings(icon.to_slint_image());
     }
 
@@ -1204,6 +1207,18 @@ fn main() -> Result<()> {
                     native_installed,
                     lutris_installed,
                     verified,
+                    license: appstream_info
+                        .as_ref()
+                        .and_then(|a| a.license.clone())
+                        .unwrap_or_default(),
+                    homepage_url: appstream_info
+                        .as_ref()
+                        .and_then(|a| a.homepage_url.clone())
+                        .unwrap_or_default(),
+                    content_rating: appstream_info
+                        .as_ref()
+                        .map(|a| a.content_rating_age.clone())
+                        .unwrap_or_default(),
                 };
 
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
@@ -1230,6 +1245,9 @@ fn main() -> Result<()> {
                             || raw.native_installed
                             || raw.lutris_installed,
                         verified: raw.verified,
+                        license: raw.license.into(),
+                        homepage_url: raw.homepage_url.into(),
+                        content_rating: raw.content_rating.into(),
                     });
                     app.set_detail_loading(false);
                 });
@@ -1422,6 +1440,10 @@ fn main() -> Result<()> {
             }
         }
     }
+
+    app.on_open_url_requested(|url| {
+        let _ = std::process::Command::new("xdg-open").arg(url.as_str()).spawn();
+    });
 
     app.run()?;
     Ok(())

@@ -67,6 +67,7 @@ export component AppWindow inherits Window {
     callback install-file-distrobox-requested();
     callback install-file-flatpak-requested();
     callback install-file-cancelled();
+    callback open-url-requested(string);
 
     VerticalBox {
         padding: 0px;
@@ -157,6 +158,9 @@ export component AppWindow inherits Window {
                 }
                 remove-requested(id) => {
                     root.remove-requested(id);
+                }
+                open-url-requested(url) => {
+                    root.open-url-requested(url);
                 }
             }
 
