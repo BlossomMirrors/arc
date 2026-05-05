@@ -95,6 +95,20 @@ impl FlatpakProvider {
             let cancel = libflatpak::gio::Cancellable::NONE;
             let db = AppStreamDb::get_static();
 
+            // collect installed app ids so we can mark them correctly in search results
+            let mut installed_ids: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for inst in all_installations() {
+                let refs = inst
+                    .list_installed_refs_by_kind(libflatpak::RefKind::App, cancel)
+                    .unwrap_or_default();
+                for r in &refs {
+                    if let Some(name) = r.name() {
+                        installed_ids.insert(name.to_string());
+                    }
+                }
+            }
+
             // collect unique app ids from all remotes across all installations
             let mut app_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             for inst in all_installations() {
@@ -119,17 +133,18 @@ impl FlatpakProvider {
             Ok(app_ids
                 .into_iter()
                 .map(|id| {
+                    let is_installed = installed_ids.contains(&id);
                     // enrich with appstream metadata if we have it, otherwise
                     // just return a bare package with the id as the name
                     db.find_by_id(&id)
-                        .map(|e| entry_to_flatpak_package(e, false))
+                        .map(|e| entry_to_flatpak_package(e, is_installed))
                         .unwrap_or_else(|| Package {
                             name: id.clone(),
                             id: id.clone(),
                             version: String::new(),
                             description: String::new(),
                             provider: libarc::Provider::Flatpak,
-                            installed: false,
+                            installed: is_installed,
                             icon_url: None,
                             remote: None,
                             screenshots: vec![],
@@ -144,10 +159,26 @@ impl FlatpakProvider {
     pub async fn search_category(&self, category: &str) -> Result<Vec<Package>, ArcError> {
         let category = category.to_string();
         tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
+            let cancel = libflatpak::gio::Cancellable::NONE;
+            let mut installed_ids: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for inst in all_installations() {
+                let refs = inst
+                    .list_installed_refs_by_kind(libflatpak::RefKind::App, cancel)
+                    .unwrap_or_default();
+                for r in &refs {
+                    if let Some(name) = r.name() {
+                        installed_ids.insert(name.to_string());
+                    }
+                }
+            }
             Ok(AppStreamDb::get_static()
                 .get_apps_by_category(&category)
                 .into_iter()
-                .map(|e| entry_to_flatpak_package(e, false))
+                .map(|e| {
+                    let is_installed = installed_ids.contains(&e.id);
+                    entry_to_flatpak_package(e, is_installed)
+                })
                 .collect())
         })
         .await

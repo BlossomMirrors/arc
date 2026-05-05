@@ -398,6 +398,10 @@ fn load_icon_by_name_variations(app_id: &str) -> Option<RawIcon> {
     None
 }
 
+pub fn load_ui_icon(icon_name: &str) -> Option<RawIcon> {
+    find_system_icon(icon_name, 16).and_then(|path| load_icon_from_path(&path, 16))
+}
+
 pub fn load_native_package_icon(package_name: &str) -> Option<RawIcon> {
     if let Some(icon) = load_icon_from_desktop(package_name) {
         return Some(icon);

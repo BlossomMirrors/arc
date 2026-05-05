@@ -1,50 +1,16 @@
-import { VerticalBox, HorizontalBox } from "std-widgets.slint";
 import { AppCardData } from "../types.slint";
+import { AppCard } from "app-card.slint";
 
+// Thin wrapper — PopularCard is AppCard with is-small: true.
 export component PopularCard inherits Rectangle {
     in property <AppCardData> card;
     callback clicked(string);
 
-    border-radius: 10px;
-    background: #00000033;
-    border-width: 1px;
-    border-color: #00000022;
-
-    TouchArea {
-        clicked => {
-            root.clicked(root.card.id);
-        }
-    }
-
-    VerticalBox {
-        alignment: center;
-        padding: 8px;
-        spacing: 4px;
-
-        HorizontalBox {
-            alignment: center;
-            Image {
-                source: root.card.icon;
-                width: 32px;
-                height: 32px;
-            }
-        }
-
-        Text {
-            text: root.card.name;
-            font-weight: 600;
-            font-size: 12px;
-            overflow: elide;
-            horizontal-alignment: center;
-        }
-
-        Text {
-            text: root.card.summary;
-            font-size: 10px;
-            overflow: elide;
-            wrap: word-wrap;
-            horizontal-alignment: center;
-            preferred-height: 24px;
-        }
+    AppCard {
+        width: parent.width;
+        height: parent.height;
+        card: root.card;
+        is-small: true;
+        clicked(id) => { root.clicked(id); }
     }
 }

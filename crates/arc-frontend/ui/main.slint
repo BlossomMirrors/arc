@@ -9,7 +9,12 @@ import { DetailScreen } from "screens/detail-screen.slint";
 import { InstallFileScreen } from "screens/install-file-screen.slint";
 import { SettingsScreen } from "screens/settings-screen.slint";
 
-import { PackageItem, AppDetailData, AppCardData, CategoryItem } from "types.slint";
+import {
+    PackageItem,
+    AppDetailData,
+    AppCardData,
+    CategoryItem,
+} from "types.slint";
 export { PackageItem, AppDetailData, AppCardData, CategoryItem } from "types.slint";
 
 export component AppWindow inherits Window {
@@ -45,6 +50,10 @@ export component AppWindow inherits Window {
     in-out property <string> install-file-flatpak-name: "";
     in-out property <bool> install-file-has-flatpak: false;
 
+    in-out property <image> icon-home;
+    in-out property <image> icon-search;
+    in-out property <image> icon-settings;
+
     callback detail-requested(string);
     callback search-requested(string);
     callback install-requested(string);
@@ -66,6 +75,9 @@ export component AppWindow inherits Window {
         TopBar {
             search-text <=> root.search-text;
             update-count: root.update-count;
+            icon-home: root.icon-home;
+            icon-search: root.icon-search;
+            icon-settings: root.icon-settings;
             search-requested(text) => {
                 root.current-view = "search";
                 root.search-requested(text);
@@ -78,7 +90,9 @@ export component AppWindow inherits Window {
                 root.current-view = "updates";
                 root.refresh-updates-requested();
             }
-            home-clicked => { root.current-view = "home"; }
+            home-clicked => {
+                root.current-view = "home";
+            }
             settings-clicked => {
                 root.prev-view = root.current-view;
                 root.current-view = "settings";
@@ -100,19 +114,31 @@ export component AppWindow inherits Window {
                     root.prev-view = "home";
                     root.detail-requested(id);
                 }
-                category-selected(id) => { root.category-selected(id); }
+                category-selected(id) => {
+                    root.category-selected(id);
+                }
             }
 
-            if root.current-view == "search" || root.current-view == "installed" || root.current-view == "updates": PackageListScreen {
+            PackageListScreen {
+                visible: root.current-view == "search" || root.current-view == "installed" || root.current-view == "updates";
                 width: parent.width;
                 height: parent.height;
                 packages: root.packages;
                 is-loading: root.is-loading;
                 current-view: root.current-view;
-                detail-requested(id) => { root.detail-requested(id); }
-                install-requested(id) => { root.install-requested(id); }
-                remove-requested(id) => { root.remove-requested(id); }
-                update-requested(id) => { root.update-requested(id); }
+                detail-requested(id) => {
+                    root.prev-view = root.current-view;
+                    root.detail-requested(id);
+                }
+                install-requested(id) => {
+                    root.install-requested(id);
+                }
+                remove-requested(id) => {
+                    root.remove-requested(id);
+                }
+                update-requested(id) => {
+                    root.update-requested(id);
+                }
             }
 
             if root.current-view == "detail": DetailScreen {
@@ -123,9 +149,15 @@ export component AppWindow inherits Window {
                 detail-busy: root.detail-busy;
                 detail-screenshots: root.detail-screenshots;
                 settings-preferred: root.settings-preferred;
-                back-clicked => { root.current-view = root.prev-view; }
-                install-requested(id) => { root.install-requested(id); }
-                remove-requested(id) => { root.remove-requested(id); }
+                back-clicked => {
+                    root.current-view = root.prev-view;
+                }
+                install-requested(id) => {
+                    root.install-requested(id);
+                }
+                remove-requested(id) => {
+                    root.remove-requested(id);
+                }
             }
 
             if root.current-view == "install-file": InstallFileScreen {
@@ -134,9 +166,15 @@ export component AppWindow inherits Window {
                 install-file-name: root.install-file-name;
                 install-file-has-flatpak: root.install-file-has-flatpak;
                 install-file-flatpak-name: root.install-file-flatpak-name;
-                distrobox-requested => { root.install-file-distrobox-requested(); }
-                flatpak-requested => { root.install-file-flatpak-requested(); }
-                cancelled => { root.install-file-cancelled(); }
+                distrobox-requested => {
+                    root.install-file-distrobox-requested();
+                }
+                flatpak-requested => {
+                    root.install-file-flatpak-requested();
+                }
+                cancelled => {
+                    root.install-file-cancelled();
+                }
             }
 
             if root.current-view == "settings": SettingsScreen {
@@ -144,8 +182,12 @@ export component AppWindow inherits Window {
                 height: parent.height;
                 settings-preferred <=> root.settings-preferred;
                 settings-ignore-native-pref <=> root.settings-ignore-native-pref;
-                back-clicked => { root.current-view = root.prev-view; }
-                save-settings(preferred, ignore) => { root.save-settings(preferred, ignore); }
+                back-clicked => {
+                    root.current-view = root.prev-view;
+                }
+                save-settings(preferred, ignore) => {
+                    root.save-settings(preferred, ignore);
+                }
             }
         }
 

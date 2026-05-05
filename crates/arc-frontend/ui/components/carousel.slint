@@ -6,18 +6,18 @@ export component Carousel inherits Rectangle {
     callback item-clicked(string);
 
     private property <length> scroll-x: 0px;
-    private property <length> max-scroll: max(0px, root.items.length * 172px - root.width);
+    private property <length> max-scroll: max(0px, root.items.length * 192px - root.width);
 
     animate scroll-x { duration: 250ms; easing: ease-in-out; }
 
-    height: 172px;
+    height: 192px;
     clip: true;
 
     for app[i] in root.items: AppCard {
-        x: i * 172px + root.scroll-x;
+        x: i * 192px + root.scroll-x;
         y: 0px;
-        width: 160px;
-        height: 172px;
+        width: 180px;
+        height: 192px;
         card: app;
         clicked(id) => { root.item-clicked(id); }
     }
@@ -36,7 +36,7 @@ export component Carousel inherits Rectangle {
         TouchArea {
             enabled: root.scroll-x < 0px;
             clicked => {
-                root.scroll-x = min(0px, root.scroll-x + 3 * 172px);
+                root.scroll-x = min(0px, root.scroll-x + 3 * 192px);
             }
         }
 
@@ -63,7 +63,7 @@ export component Carousel inherits Rectangle {
         TouchArea {
             enabled: root.scroll-x > -root.max-scroll;
             clicked => {
-                root.scroll-x = max(-root.max-scroll, root.scroll-x - 3 * 172px);
+                root.scroll-x = max(-root.max-scroll, root.scroll-x - 3 * 192px);
             }
         }
 

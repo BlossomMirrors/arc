@@ -1,8 +1,10 @@
 import { VerticalBox, HorizontalBox } from "std-widgets.slint";
 import { AppCardData } from "../types.slint";
+import { Badge } from "badge.slint";
 
 export component AppCard inherits Rectangle {
     in property <AppCardData> card;
+    in property <bool> is-small: false;
     callback clicked(string);
 
     border-radius: 10px;
@@ -11,22 +13,20 @@ export component AppCard inherits Rectangle {
     border-color: #00000022;
 
     TouchArea {
-        clicked => {
-            root.clicked(root.card.id);
-        }
+        clicked => { root.clicked(root.card.id); }
     }
 
     VerticalBox {
         alignment: center;
-        padding: 12px;
-        spacing: 6px;
+        padding: root.is-small ? 8px : 12px;
+        spacing: root.is-small ? 4px : 6px;
 
         HorizontalBox {
             alignment: center;
             Image {
                 source: root.card.icon;
-                width: 64px;
-                height: 64px;
+                width: root.is-small ? 32px : 64px;
+                height: root.is-small ? 32px : 64px;
             }
         }
 
@@ -45,6 +45,17 @@ export component AppCard inherits Rectangle {
             wrap: word-wrap;
             horizontal-alignment: center;
             preferred-height: 24px;
+        }
+
+        if root.card.installed: HorizontalLayout {
+            alignment: center;
+            padding-top: 4px;
+            padding-bottom: 4px;
+            Badge {
+                has-icon: true;
+                icon: @image-url("../../assets/check.svg");
+                label: "Installed";
+            }
         }
     }
 }

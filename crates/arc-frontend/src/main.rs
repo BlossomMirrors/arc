@@ -183,7 +183,7 @@ async fn wait_for_transaction(
                                         app.set_status_text(msg.into());
                                         app.set_progress(0.0);
                                         app.set_detail_busy(false);
-                                        if refresh_detail {
+                                        if refresh_detail && app.get_current_view() == "detail" {
                                             app.invoke_detail_requested(pid.into());
                                         }
                                     });
@@ -211,6 +211,7 @@ struct RawCard {
     name: String,
     summary: String,
     icon: Option<RawIcon>,
+    installed: bool,
 }
 
 // CachedAppInfo matches the daemon's icon_cache::AppInfo struct
@@ -280,15 +281,30 @@ impl RawCard {
                 .as_ref()
                 .map(|r| r.to_slint_image())
                 .unwrap_or_default(),
+            installed: self.installed,
         }
     }
 }
 
-async fn load_home(app_weak: slint::Weak<AppWindow>, _proxy: Option<ArcDaemonProxy<'static>>) {
+async fn load_home(app_weak: slint::Weak<AppWindow>, proxy: Option<ArcDaemonProxy<'static>>) {
     let appstream_db = AppStreamDb::get_static();
     // Load popular and recent apps from cached AppStream data
     let popular_apps: Vec<_> = appstream_db.get_popular_apps(10);
     let recent_apps: Vec<_> = appstream_db.get_recent_apps(20);
+
+    // Fetch installed Flatpak IDs to mark cards correctly
+    let installed_ids: std::collections::HashSet<String> = if let Some(ref p) = proxy {
+        p.list_installed()
+            .await
+            .ok()
+            .and_then(|json| serde_json::from_str::<Vec<libarc::Package>>(&json).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|pkg| pkg.id)
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
 
     // Load icons in parallel for popular apps
     let popular_tasks: Vec<_> = popular_apps
@@ -312,11 +328,13 @@ async fn load_home(app_weak: slint::Weak<AppWindow>, _proxy: Option<ArcDaemonPro
     let mut popular_cards: Vec<RawCard> = Vec::new();
     for result in popular_results {
         if let Ok((app, icon)) = result {
+            let installed = installed_ids.contains(&app.id);
             popular_cards.push(RawCard {
                 id: app.id.clone(),
                 name: app.name.clone(),
                 summary: app.summary.clone(),
                 icon,
+                installed,
             });
         }
     }
@@ -343,11 +361,13 @@ async fn load_home(app_weak: slint::Weak<AppWindow>, _proxy: Option<ArcDaemonPro
     let mut recent_cards: Vec<RawCard> = Vec::new();
     for result in recent_results {
         if let Ok((app, icon)) = result {
+            let installed = installed_ids.contains(&app.id);
             recent_cards.push(RawCard {
                 id: app.id.clone(),
                 name: app.name.clone(),
                 summary: app.summary.clone(),
                 icon,
+                installed,
             });
         }
     }
@@ -418,6 +438,16 @@ fn main() -> Result<()> {
 
     let app = AppWindow::new()?;
 
+    if let Some(icon) = icons::load_ui_icon("go-home") {
+        app.set_icon_home(icon.to_slint_image());
+    }
+    if let Some(icon) = icons::load_ui_icon("edit-find") {
+        app.set_icon_search(icon.to_slint_image());
+    }
+    if let Some(icon) = icons::load_ui_icon("preferences-system-symbolic") {
+        app.set_icon_settings(icon.to_slint_image());
+    }
+
     let proxy_opt: Arc<Mutex<Option<ArcDaemonProxy<'static>>>> =
         Arc::new(Mutex::new(proxy_result.ok()));
 
@@ -467,6 +497,9 @@ fn main() -> Result<()> {
 
         app.on_search_requested(move |query| {
             let query_str = query.to_string();
+            if query_str.trim().is_empty() {
+                return;
+            }
             let app_weak2 = app_weak.clone();
             let proxy = get_proxy(&proxy_arc);
             let s = settings.lock().unwrap().clone();

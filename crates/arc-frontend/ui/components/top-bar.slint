@@ -1,8 +1,12 @@
-import { Button, LineEdit, HorizontalBox } from "std-widgets.slint";
+import { Button, LineEdit } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
 
-export component TopBar inherits HorizontalBox {
+export component TopBar inherits Rectangle {
     in-out property <string> search-text;
     in property <int> update-count;
+    in property <image> icon-home;
+    in property <image> icon-search;
+    in property <image> icon-settings;
 
     callback search-requested(string);
     callback installed-clicked();
@@ -10,38 +14,138 @@ export component TopBar inherits HorizontalBox {
     callback home-clicked();
     callback settings-clicked();
 
-    padding: 8px;
-    spacing: 6px;
+    height: 52px;
 
-    LineEdit {
-        horizontal-stretch: 1;
-        placeholder-text: "Search for applications...";
-        text <=> root.search-text;
-        accepted(text) => { root.search-requested(text); }
-    }
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
 
-    Button {
-        text: "Search";
-        clicked => { root.search-requested(root.search-text); }
-    }
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-top: 8px;
+            padding-bottom: 7px;
+            spacing: 8px;
 
-    Button {
-        text: "Installed";
-        clicked => { root.installed-clicked(); }
-    }
+            // Home icon button
+            Rectangle {
+                width: 34px;
+                border-radius: 6px;
+                background: home-ta.has-hover ? #80808018 : #00000000;
 
-    Button {
-        text: root.update-count > 0 ? "Updates (" + root.update-count + ")" : "Updates";
-        clicked => { root.updates-clicked(); }
-    }
+                home-ta := TouchArea {
+                    clicked => {
+                        root.home-clicked();
+                    }
+                }
 
-    Button {
-        text: "Home";
-        clicked => { root.home-clicked(); }
-    }
+                Image {
+                    width: 16px;
+                    height: 16px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    source: root.icon-home;
+                    colorize: Palette.foreground;
+                    image-fit: contain;
+                }
+            }
 
-    Button {
-        text: "⚙";
-        clicked => { root.settings-clicked(); }
+            // Group separator
+            Rectangle {
+                width: 1px;
+                background: #80808035;
+            }
+
+            LineEdit {
+                horizontal-stretch: 1;
+                placeholder-text: "Search for applications...";
+                text <=> root.search-text;
+                accepted(text) => {
+                    if (text != "") {
+                        root.search-requested(text);
+                    }
+                }
+            }
+
+            // Search icon button
+            Rectangle {
+                width: 34px;
+                border-radius: 6px;
+                background: search-ta.has-hover ? #80808018 : #00000000;
+
+                search-ta := TouchArea {
+                    clicked => {
+                        if (root.search-text != "") {
+                            root.search-requested(root.search-text);
+                        }
+                    }
+                }
+
+                Image {
+                    width: 16px;
+                    height: 16px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    source: root.icon-search;
+                    colorize: Palette.foreground;
+                    image-fit: contain;
+                }
+            }
+
+            // Group separator
+            Rectangle {
+                width: 1px;
+                background: #80808035;
+            }
+
+            Button {
+                text: "Installed";
+                clicked => {
+                    root.installed-clicked();
+                }
+            }
+
+            Button {
+                text: root.update-count > 0 ? "Updates (" + root.update-count + ")" : "Updates";
+                clicked => {
+                    root.updates-clicked();
+                }
+            }
+
+            // Group separator
+            Rectangle {
+                width: 1px;
+                background: #80808035;
+            }
+
+            // Settings icon button
+            Rectangle {
+                width: 34px;
+                border-radius: 6px;
+                background: settings-ta.has-hover ? #80808018 : #00000000;
+
+                settings-ta := TouchArea {
+                    clicked => {
+                        root.settings-clicked();
+                    }
+                }
+
+                Image {
+                    width: 16px;
+                    height: 16px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    source: root.icon-settings;
+                    colorize: Palette.foreground;
+                    image-fit: contain;
+                }
+            }
+        }
+
+        // Bottom edge rule
+        Rectangle {
+            height: 1px;
+            background: #80808025;
+        }
     }
 }

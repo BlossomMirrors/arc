@@ -16,7 +16,10 @@ export component DetailScreen inherits Rectangle {
 
     if root.detail-loading: VerticalBox {
         alignment: center;
-        Text { text: "Loading..."; horizontal-alignment: center; }
+        Text {
+            text: "Loading...";
+            horizontal-alignment: center;
+        }
     }
 
     if !root.detail-loading: Flickable {
@@ -32,7 +35,9 @@ export component DetailScreen inherits Rectangle {
 
             Button {
                 text: "← Back";
-                clicked => { root.back-clicked(); }
+                clicked => {
+                    root.back-clicked();
+                }
             }
 
             HorizontalBox {
@@ -51,20 +56,34 @@ export component DetailScreen inherits Rectangle {
                     spacing: 4px;
                     horizontal-stretch: 1;
 
-                    Text { text: root.detail-app.name; font-size: 20px; font-weight: 700; overflow: elide; }
+                    Text {
+                        text: root.detail-app.name;
+                        font-size: 20px;
+                        font-weight: 700;
+                        overflow: elide;
+                    }
+
                     HorizontalBox {
                         spacing: 4px;
                         alignment: center;
-                        Text { text: root.detail-app.developer; font-size: 13px; }
+                        Text {
+                            text: root.detail-app.developer;
+                            font-size: 13px;
+                        }
+
                         if root.detail-app.verified: Image {
-                            source: @image-url("../../assets/verified.png");
+                            source: @image-url("../../assets/verified.svg");
                             width: 14px;
                             height: 14px;
                             vertical-alignment: center;
                             colorize: #0d6efd;
                         }
                     }
-                    Text { text: root.detail-app.version; font-size: 11px; }
+
+                    Text {
+                        text: root.detail-app.version;
+                        font-size: 11px;
+                    }
                 }
 
                 Button {
@@ -88,8 +107,17 @@ export component DetailScreen inherits Rectangle {
                 }
             }
 
-            Text { text: root.detail-app.summary; font-size: 13px; wrap: word-wrap; }
-            Text { text: root.detail-app.description; font-size: 12px; wrap: word-wrap; }
+            Text {
+                text: root.detail-app.summary;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+
+            Text {
+                text: root.detail-app.description;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
 
             if root.detail-screenshots.length > 0: Flickable {
                 width: parent.width;

@@ -31,7 +31,7 @@ export component HomeScreen inherits Rectangle {
         viewport-height: self.compute-height();
 
         function compute-height() -> length {
-            200px + (root.popular-apps.length > 0 ? 44px + ceil(root.popular-apps.length / 5) * 144px : 0px) + (root.recent-apps.length > 0 ? 52px + 172px : 0px) + (root.categories.length > 0 ? 52px + ceil(root.categories.length / 4) * 114px : 0px) + 16px
+            200px + (root.popular-apps.length > 0 ? 44px + ceil(root.popular-apps.length / 5) * 164px : 0px) + (root.recent-apps.length > 0 ? 52px + 192px : 0px) + (root.categories.length > 0 ? 52px + ceil(root.categories.length / 4) * 114px : 0px) + 16px
         }
 
         VerticalBox {
@@ -74,13 +74,13 @@ export component HomeScreen inherits Rectangle {
                 }
 
                 Rectangle {
-                    height: ceil(root.popular-apps.length / 5) * 144px;
+                    height: ceil(root.popular-apps.length / 5) * 164px;
 
                     for app[i] in root.popular-apps: PopularCard {
                         x: mod(i, 5) * (parent.width + 12px) / 5;
-                        y: ((i - mod(i, 5)) / 5) * 144px;
+                        y: ((i - mod(i, 5)) / 5) * 164px;
                         width: (parent.width + 12px) / 5 - 12px;
-                        height: 132px;
+                        height: 152px;
                         card: app;
                         clicked(id) => {
                             root.detail-requested(id);
