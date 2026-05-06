@@ -699,6 +699,48 @@ async fn load_home(app_weak: slint::Weak<AppWindow>, proxy: Option<ArcDaemonProx
     });
 }
 
+async fn refresh_home_installed(
+    app_weak: slint::Weak<AppWindow>,
+    proxy: Option<ArcDaemonProxy<'static>>,
+) {
+    let installed_ids: std::collections::HashSet<String> = if let Some(ref p) = proxy {
+        p.list_installed()
+            .await
+            .ok()
+            .and_then(|json| serde_json::from_str::<Vec<libarc::Package>>(&json).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|pkg| pkg.id)
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
+
+    let _ = app_weak.upgrade_in_event_loop(move |app| {
+        // Update popular apps installed state
+        let popular_model = app.get_popular_apps();
+        let popular_count = popular_model.row_count();
+        let mut popular_items: Vec<AppCardData> = (0..popular_count)
+            .filter_map(|i| popular_model.row_data(i))
+            .collect();
+        for item in &mut popular_items {
+            item.installed = installed_ids.contains(item.id.as_str());
+        }
+        app.set_popular_apps(popular_items.as_slice().into());
+
+        // Update recent apps installed state
+        let recent_model = app.get_recent_apps();
+        let recent_count = recent_model.row_count();
+        let mut recent_items: Vec<AppCardData> = (0..recent_count)
+            .filter_map(|i| recent_model.row_data(i))
+            .collect();
+        for item in &mut recent_items {
+            item.installed = installed_ids.contains(item.id.as_str());
+        }
+        app.set_recent_apps(recent_items.as_slice().into());
+    });
+}
+
 async fn load_package_icons(pkgs: Vec<libarc::Package>) -> Vec<RawPackage> {
     let icon_futures: Vec<_> = pkgs
         .iter()
@@ -791,6 +833,38 @@ fn main() -> Result<()> {
 
     // Transaction store shared across all handlers
     let tx_store: TxStore = Arc::new(Mutex::new(Vec::new()));
+
+    // ── Home clicked (refresh installed state) ────────────────────────────────
+    {
+        let app_weak = app.as_weak();
+        let proxy = proxy_opt.lock().unwrap().clone();
+        let rt_handle = rt.handle().clone();
+
+        app.on_home_clicked(move || {
+            let app_weak = app_weak.clone();
+            let proxy = proxy.clone();
+            let rt_handle = rt_handle.clone();
+            rt_handle.spawn(async move {
+                refresh_home_installed(app_weak, proxy).await;
+            });
+        });
+    }
+
+    // ── Back to home (refresh installed state) ───────────────────────────────
+    {
+        let app_weak = app.as_weak();
+        let proxy = proxy_opt.lock().unwrap().clone();
+        let rt_handle = rt.handle().clone();
+
+        app.on_back_to_home(move || {
+            let app_weak = app_weak.clone();
+            let proxy = proxy.clone();
+            let rt_handle = rt_handle.clone();
+            rt_handle.spawn(async move {
+                refresh_home_installed(app_weak, proxy).await;
+            });
+        });
+    }
 
     // Spawn the global signal listener once if the daemon is available
     if let Some(proxy) = get_proxy(&proxy_opt) {

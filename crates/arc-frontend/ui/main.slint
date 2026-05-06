@@ -95,6 +95,8 @@ export component AppWindow inherits Window {
     callback clear-completed-requested();
     callback update-all-requested();
     callback cancel-requested(string);
+    callback home-clicked();
+    callback back-to-home();
 
     VerticalBox {
         padding: 0px;
@@ -124,6 +126,7 @@ export component AppWindow inherits Window {
             }
             home-clicked => {
                 root.current-view = "home";
+                root.home-clicked();
             }
             settings-clicked => {
                 root.prev-view = root.current-view;
@@ -182,6 +185,9 @@ export component AppWindow inherits Window {
                 detail-screenshots: root.detail-screenshots;
                 settings-preferred: root.settings-preferred;
                 back-clicked => {
+                    if root.prev-view == "home" {
+                        root.back-to-home();
+                    }
                     root.current-view = root.prev-view;
                 }
                 install-requested(id) => {
