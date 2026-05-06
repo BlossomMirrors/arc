@@ -38,7 +38,14 @@ struct TrackedTx {
 
 type TxStore = Arc<Mutex<Vec<TrackedTx>>>;
 
-fn push_transactions_to_ui(store: &TxStore, app_weak: &slint::Weak<AppWindow>) {
+fn has_ongoing_transaction_for_package(store: &TxStore, pkg_id: &str) -> bool {
+    let s = store.lock().unwrap();
+    s.iter().any(|tx| {
+        tx.pkg_id == pkg_id && (tx.status == TxStatus::Pending || tx.status == TxStatus::Running)
+    })
+}
+
+fn push_transactions_to_ui(store: TxStore, app_weak: &slint::Weak<AppWindow>) {
     let (active, pending, completed) = {
         let s = store.lock().unwrap();
         let mut a: Vec<TrackedTx> = Vec::new();
@@ -96,6 +103,12 @@ fn push_transactions_to_ui(store: &TxStore, app_weak: &slint::Weak<AppWindow>) {
         app.set_active_transaction_count(active_count);
         if !status_text.is_empty() {
             app.set_status_text(status_text.into());
+        }
+        // Update detail-busy based on whether the current detail package has an ongoing transaction
+        let current_detail_pkg = app.get_detail_app().flatpak_id.to_string();
+        if !current_detail_pkg.is_empty() {
+            let is_busy = has_ongoing_transaction_for_package(&store, &current_detail_pkg);
+            app.set_detail_busy(is_busy);
         }
     });
 }
@@ -158,7 +171,7 @@ fn begin_transaction(
         });
         s.len() - 1
     };
-    push_transactions_to_ui(&store, &app_weak);
+    push_transactions_to_ui(store.clone(), &app_weak);
 
     let name_for_icon = display_name.clone();
     let pkg_id_for_icon = pkg_id.clone();
@@ -184,7 +197,7 @@ fn begin_transaction(
                         e.status = TxStatus::Running;
                     }
                 }
-                push_transactions_to_ui(&store, &app_weak);
+                push_transactions_to_ui(store.clone(), &app_weak);
 
                 let icon = load_icon_for_pkg(&pkg_id_for_icon, &name_for_icon).await;
                 {
@@ -193,7 +206,7 @@ fn begin_transaction(
                         e.icon = icon;
                     }
                 }
-                push_transactions_to_ui(&store, &app_weak);
+                push_transactions_to_ui(store.clone(), &app_weak);
             }
             None => {
                 {
@@ -203,10 +216,7 @@ fn begin_transaction(
                         e.error = "Failed to connect to daemon".to_string();
                     }
                 }
-                push_transactions_to_ui(&store, &app_weak);
-                let _ = app_weak.upgrade_in_event_loop(|app| {
-                    app.set_detail_busy(false);
-                });
+                push_transactions_to_ui(store.clone(), &app_weak);
             }
         }
     });
@@ -241,7 +251,7 @@ async fn run_signal_listener(
                         }
                     }
                 }
-                push_transactions_to_ui(&store, &app_weak);
+                push_transactions_to_ui(store.clone(), &app_weak);
             }
             sig = finished_stream.next() => {
                 let Some(sig) = sig else { break; };
@@ -273,11 +283,12 @@ async fn run_signal_listener(
                     }
                 };
 
-                push_transactions_to_ui(&store, &app_weak);
+                push_transactions_to_ui(store.clone(), &app_weak);
 
                 if let Some((pkg_id, installed_after, refresh_detail, ok, name, tx_type)) =
                     side_effect
                 {
+                    let store_for_closure = store.clone();
                     let _ = app_weak.upgrade_in_event_loop(move |app| {
                         if ok {
                             update_package_installed(&app, &pkg_id, installed_after);
@@ -293,7 +304,12 @@ async fn run_signal_listener(
                         } else {
                             app.set_status_text("Operation failed.".into());
                         }
-                        app.set_detail_busy(false);
+                        // Update detail-busy state after transaction completes
+                        let current_detail_pkg = app.get_detail_app().flatpak_id.to_string();
+                        if !current_detail_pkg.is_empty() {
+                            let is_busy = has_ongoing_transaction_for_package(&store_for_closure, &current_detail_pkg);
+                            app.set_detail_busy(is_busy);
+                        }
                     });
                 }
             }
@@ -921,12 +937,6 @@ fn main() -> Result<()> {
                 .map(|a| get_display_name(&a, &pkg_id_str))
                 .unwrap_or_else(|| pkg_id_str.clone());
 
-            if in_detail {
-                if let Some(a) = app_weak.upgrade() {
-                    a.set_detail_busy(true);
-                }
-            }
-
             begin_transaction(
                 pkg_id_str,
                 display_name,
@@ -959,12 +969,6 @@ fn main() -> Result<()> {
                 .map(|a| get_display_name(&a, &pkg_id_str))
                 .unwrap_or_else(|| pkg_id_str.clone());
 
-            if in_detail {
-                if let Some(a) = app_weak.upgrade() {
-                    a.set_detail_busy(true);
-                }
-            }
-
             begin_transaction(
                 pkg_id_str,
                 display_name,
@@ -996,12 +1000,6 @@ fn main() -> Result<()> {
                 .upgrade()
                 .map(|a| get_display_name(&a, &pkg_id_str))
                 .unwrap_or_else(|| pkg_id_str.clone());
-
-            if in_detail {
-                if let Some(a) = app_weak.upgrade() {
-                    a.set_detail_busy(true);
-                }
-            }
 
             begin_transaction(
                 pkg_id_str,
@@ -1062,7 +1060,7 @@ fn main() -> Result<()> {
                 let mut s = store.lock().unwrap();
                 s.retain(|tx| tx.status != TxStatus::Completed && tx.status != TxStatus::Failed);
             }
-            push_transactions_to_ui(&store, &app_weak);
+            push_transactions_to_ui(store.clone(), &app_weak);
         });
     }
 
@@ -1091,7 +1089,7 @@ fn main() -> Result<()> {
                             tx.error = "Cancelled".to_string();
                         }
                         drop(s);
-                        push_transactions_to_ui(&store, &app_weak);
+                        push_transactions_to_ui(store.clone(), &app_weak);
                     }
                 }
             });
@@ -1190,12 +1188,14 @@ fn main() -> Result<()> {
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
         let settings = settings.clone();
+        let store = tx_store.clone();
 
         app.on_detail_requested(move |id| {
             let app_id = id.to_string();
             let app_weak2 = app_weak.clone();
             let proxy = get_proxy(&proxy_arc);
             let _s = settings.lock().unwrap().clone();
+            let store = store.clone();
 
             rt_handle.spawn(async move {
                 let appstream_db = AppStreamDb::get_static();
@@ -1395,6 +1395,7 @@ fn main() -> Result<()> {
                         .unwrap_or_default(),
                 };
 
+                let pkg_id_for_busy_check = raw.flatpak_id.clone();
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
                     app.set_detail_screenshots([].as_slice().into());
                     app.set_detail_app(AppDetailData {
@@ -1424,6 +1425,10 @@ fn main() -> Result<()> {
                         content_rating: raw.content_rating.into(),
                     });
                     app.set_detail_loading(false);
+                    // Check if this package has an ongoing transaction
+                    let is_busy =
+                        has_ongoing_transaction_for_package(&store, &pkg_id_for_busy_check);
+                    app.set_detail_busy(is_busy);
                 });
 
                 if !screenshot_urls.is_empty() {
