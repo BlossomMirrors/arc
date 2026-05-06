@@ -41,7 +41,7 @@ impl ArcDaemonInterface {
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> String {
         info!("InstallPackage: {}", package_id);
-        let tx = self
+        let (tx, cancel_token) = self
             .transaction_manager
             .create(
                 TransactionType::Install,
@@ -68,38 +68,67 @@ impl ArcDaemonInterface {
             // Forward GLib progress signals to DBus as they arrive
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
+            let cancel_token_fwd = cancel_token.clone();
             tokio::spawn(async move {
-                while let Some(pct) = progress_rx.recv().await {
-                    tm_fwd.update_progress(tx_id, pct).await;
-                    let _ =
-                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                loop {
+                    tokio::select! {
+                        _ = cancel_token_fwd.cancelled() => {
+                            // Cancelled, stop forwarding progress
+                            break;
+                        }
+                        result = progress_rx.recv() => {
+                            match result {
+                                Some(pct) => {
+                                    tm_fwd.update_progress(tx_id, pct).await;
+                                    let _ =
+                                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                                }
+                                None => break, // Channel closed
+                            }
+                        }
+                    }
                 }
             });
 
-            match provider.install_with_progress(&package_id, progress_tx).await {
-                Ok(()) => {
-                    provider.invalidate_package_cache().await;
-                    tm.complete(tx_id, true, "Installation successful".to_string())
-                        .await;
-                    let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
-                    let _ = Self::transaction_finished(
-                        &emitter,
-                        tx_id.to_string(),
-                        true,
-                        "Installation successful".to_string(),
-                    )
-                    .await;
-                }
-                Err(e) => {
-                    error!("Install failed: {}", e);
-                    tm.complete(tx_id, false, e.to_string()).await;
+            tokio::select! {
+                _ = cancel_token.cancelled() => {
+                    info!("Transaction {} cancelled", tx_id);
+                    tm.complete(tx_id, false, "Cancelled".to_string()).await;
                     let _ = Self::transaction_finished(
                         &emitter,
                         tx_id.to_string(),
                         false,
-                        e.to_string(),
+                        "Cancelled".to_string(),
                     )
                     .await;
+                }
+                result = provider.install_with_progress(&package_id, progress_tx) => {
+                    match result {
+                        Ok(()) => {
+                            provider.invalidate_package_cache().await;
+                            tm.complete(tx_id, true, "Installation successful".to_string())
+                                .await;
+                            let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
+                            let _ = Self::transaction_finished(
+                                &emitter,
+                                tx_id.to_string(),
+                                true,
+                                "Installation successful".to_string(),
+                            )
+                            .await;
+                        }
+                        Err(e) => {
+                            error!("Install failed: {}", e);
+                            tm.complete(tx_id, false, e.to_string()).await;
+                            let _ = Self::transaction_finished(
+                                &emitter,
+                                tx_id.to_string(),
+                                false,
+                                e.to_string(),
+                            )
+                            .await;
+                        }
+                    }
                 }
             }
         });
@@ -113,7 +142,7 @@ impl ArcDaemonInterface {
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> String {
         info!("InstallFlatpakref: {}", url);
-        let tx = self
+        let (tx, cancel_token) = self
             .transaction_manager
             .create(
                 TransactionType::Install,
@@ -128,48 +157,73 @@ impl ArcDaemonInterface {
         let emitter = emitter.to_owned();
 
         tokio::spawn(async move {
-            let _ =
-                Self::transaction_started(&emitter, tx_id.to_string(), url.clone()).await;
+            let _ = Self::transaction_started(&emitter, tx_id.to_string(), url.clone()).await;
 
             let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
 
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
+            let cancel_token_fwd = cancel_token.clone();
             tokio::spawn(async move {
-                while let Some(pct) = progress_rx.recv().await {
-                    tm_fwd.update_progress(tx_id, pct).await;
-                    let _ =
-                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                loop {
+                    tokio::select! {
+                        _ = cancel_token_fwd.cancelled() => {
+                            // Cancelled, stop forwarding progress
+                            break;
+                        }
+                        result = progress_rx.recv() => {
+                            match result {
+                                Some(pct) => {
+                                    tm_fwd.update_progress(tx_id, pct).await;
+                                    let _ =
+                                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                                }
+                                None => break, // Channel closed
+                            }
+                        }
+                    }
                 }
             });
 
-            match provider
-                .install_flatpakref_with_progress(&url, progress_tx)
-                .await
-            {
-                Ok(()) => {
-                    provider.invalidate_package_cache().await;
-                    tm.complete(tx_id, true, "Installation successful".to_string())
-                        .await;
-                    let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
-                    let _ = Self::transaction_finished(
-                        &emitter,
-                        tx_id.to_string(),
-                        true,
-                        "Installation successful".to_string(),
-                    )
-                    .await;
-                }
-                Err(e) => {
-                    error!("InstallFlatpakref failed: {}", e);
-                    tm.complete(tx_id, false, e.to_string()).await;
+            tokio::select! {
+                _ = cancel_token.cancelled() => {
+                    info!("Transaction {} cancelled", tx_id);
+                    tm.complete(tx_id, false, "Cancelled".to_string()).await;
                     let _ = Self::transaction_finished(
                         &emitter,
                         tx_id.to_string(),
                         false,
-                        e.to_string(),
+                        "Cancelled".to_string(),
                     )
                     .await;
+                }
+                result = provider.install_flatpakref_with_progress(&url, progress_tx) => {
+                    match result {
+                        Ok(()) => {
+                            provider.invalidate_package_cache().await;
+                            tm.complete(tx_id, true, "Installation successful".to_string())
+                                .await;
+                            let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
+                            let _ = Self::transaction_finished(
+                                &emitter,
+                                tx_id.to_string(),
+                                true,
+                                "Installation successful".to_string(),
+                            )
+                            .await;
+                        }
+                        Err(e) => {
+                            error!("InstallFlatpakref failed: {}", e);
+                            tm.complete(tx_id, false, e.to_string()).await;
+                            let _ = Self::transaction_finished(
+                                &emitter,
+                                tx_id.to_string(),
+                                false,
+                                e.to_string(),
+                            )
+                            .await;
+                        }
+                    }
                 }
             }
         });
@@ -183,7 +237,7 @@ impl ArcDaemonInterface {
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> String {
         info!("RemovePackage: {}", package_id);
-        let tx = self
+        let (tx, _cancel_token) = self
             .transaction_manager
             .create(
                 TransactionType::Remove,
@@ -241,7 +295,7 @@ impl ArcDaemonInterface {
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> String {
         info!("UpdatePackage: {}", package_id);
-        let tx = self
+        let (tx, cancel_token) = self
             .transaction_manager
             .create(
                 TransactionType::Update,
@@ -263,38 +317,67 @@ impl ArcDaemonInterface {
 
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
+            let cancel_token_fwd = cancel_token.clone();
             tokio::spawn(async move {
-                while let Some(pct) = progress_rx.recv().await {
-                    tm_fwd.update_progress(tx_id, pct).await;
-                    let _ =
-                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                loop {
+                    tokio::select! {
+                        _ = cancel_token_fwd.cancelled() => {
+                            // Cancelled, stop forwarding progress
+                            break;
+                        }
+                        result = progress_rx.recv() => {
+                            match result {
+                                Some(pct) => {
+                                    tm_fwd.update_progress(tx_id, pct).await;
+                                    let _ =
+                                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                                }
+                                None => break, // Channel closed
+                            }
+                        }
+                    }
                 }
             });
 
-            match provider.update_with_progress(&package_id, progress_tx).await {
-                Ok(()) => {
-                    provider.invalidate_package_cache().await;
-                    tm.complete(tx_id, true, "Update successful".to_string())
-                        .await;
-                    let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
-                    let _ = Self::transaction_finished(
-                        &emitter,
-                        tx_id.to_string(),
-                        true,
-                        "Update successful".to_string(),
-                    )
-                    .await;
-                }
-                Err(e) => {
-                    error!("Update failed: {}", e);
-                    tm.complete(tx_id, false, e.to_string()).await;
+            tokio::select! {
+                _ = cancel_token.cancelled() => {
+                    info!("Transaction {} cancelled", tx_id);
+                    tm.complete(tx_id, false, "Cancelled".to_string()).await;
                     let _ = Self::transaction_finished(
                         &emitter,
                         tx_id.to_string(),
                         false,
-                        e.to_string(),
+                        "Cancelled".to_string(),
                     )
                     .await;
+                }
+                result = provider.update_with_progress(&package_id, progress_tx) => {
+                    match result {
+                        Ok(()) => {
+                            provider.invalidate_package_cache().await;
+                            tm.complete(tx_id, true, "Update successful".to_string())
+                                .await;
+                            let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
+                            let _ = Self::transaction_finished(
+                                &emitter,
+                                tx_id.to_string(),
+                                true,
+                                "Update successful".to_string(),
+                            )
+                            .await;
+                        }
+                        Err(e) => {
+                            error!("Update failed: {}", e);
+                            tm.complete(tx_id, false, e.to_string()).await;
+                            let _ = Self::transaction_finished(
+                                &emitter,
+                                tx_id.to_string(),
+                                false,
+                                e.to_string(),
+                            )
+                            .await;
+                        }
+                    }
                 }
             }
         });
@@ -390,6 +473,30 @@ impl ArcDaemonInterface {
                 None => "null".to_string(),
             },
             Err(_) => "null".to_string(),
+        }
+    }
+
+    async fn cancel_transaction(
+        &self,
+        transaction_id: String,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> bool {
+        info!("CancelTransaction: {}", transaction_id);
+        match transaction_id.parse::<uuid::Uuid>() {
+            Ok(id) => {
+                let cancelled = self.transaction_manager.cancel(id).await;
+                if cancelled {
+                    let _ = Self::transaction_finished(
+                        &emitter,
+                        transaction_id.clone(),
+                        false,
+                        "Cancelled".to_string(),
+                    )
+                    .await;
+                }
+                cancelled
+            }
+            Err(_) => false,
         }
     }
 

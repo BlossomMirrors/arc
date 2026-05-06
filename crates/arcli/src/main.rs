@@ -3,8 +3,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use colored::Colorize;
 use futures_util::StreamExt;
-use libarc::{connect, ArcDaemonProxy};
 use libarc::Package;
+use libarc::{connect, ArcDaemonProxy};
 use serde::Deserialize;
 
 // the daemon returns json strings over dbus, this catches the case where
@@ -30,14 +30,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Install { app_id: String },
-    Remove { app_id: String },
+    Install {
+        app_id: String,
+    },
+    Remove {
+        app_id: String,
+    },
     Update,
-    Search { query: String },
+    Search {
+        query: String,
+    },
     List,
     RefreshCache,
     /// Print shell completion script
-    Completions { shell: Shell },
+    Completions {
+        shell: Shell,
+    },
 }
 
 // instead of polling are we done yet every 500ms we subscribe to the daemon's
@@ -74,6 +82,12 @@ async fn wait_for_transaction(proxy: &ArcDaemonProxy<'_>, tx_id: &str) -> Result
                     }
                     None => break,
                 }
+            }
+            _ = tokio::signal::ctrl_c() => {
+                println!("\n{}", "Cancelling transaction...".yellow());
+                let _ = proxy.cancel_transaction(tx_id).await;
+                println!("{}", "Transaction cancelled.".yellow());
+                anyhow::bail!("Cancelled by user");
             }
         }
     }

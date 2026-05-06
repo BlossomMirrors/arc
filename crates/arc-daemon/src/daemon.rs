@@ -56,7 +56,7 @@ impl Daemon {
 
         let interface = ArcDaemonInterface {
             provider: self.provider,
-            transaction_manager: self.transaction_manager,
+            transaction_manager: self.transaction_manager.clone(),
         };
 
         // register on the session dbus under our name so clients
@@ -72,6 +72,11 @@ impl Daemon {
 
         // wait here until ctrl+c, the actual work happens in the dbus callbacks
         tokio::signal::ctrl_c().await?;
+
+        // Cancel all running transactions before shutdown
+        info!("Cancelling all running transactions...");
+        self.transaction_manager.cancel_all().await;
+
         info!("Shutting down Arc daemon");
 
         Ok(())

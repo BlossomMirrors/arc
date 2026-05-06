@@ -5,6 +5,8 @@ export component TransactionRow inherits Rectangle {
     in property <TransactionItem> item;
     private property <int> pct: root.item.progress * 100;
 
+    callback cancel-clicked(string);
+
     height: 68px;
 
     Rectangle {
@@ -58,9 +60,7 @@ export component TransactionRow inherits Rectangle {
                 }
 
                 Text {
-                    text: root.item.tx-type == "install" || root.item.tx-type == "flatpakref" ? "Installing"
-                        : root.item.tx-type == "remove" ? "Removing"
-                        : "Updating";
+                    text: root.item.tx-type == "install" || root.item.tx-type == "flatpakref" ? "Installing" : root.item.tx-type == "remove" ? "Removing" : "Updating";
                     font-size: 10px;
                     color: Palette.foreground.transparentize(0.5);
                     vertical-alignment: center;
@@ -76,12 +76,14 @@ export component TransactionRow inherits Rectangle {
                 Rectangle {
                     x: 0px;
                     y: 0px;
-                    width: root.item.status == "pending" ? 0px
-                        : parent.width * root.item.progress;
+                    width: root.item.status == "pending" ? 0px : parent.width * root.item.progress;
                     height: parent.height;
                     border-radius: 2px;
                     background: #3b82f6;
-                    animate width { duration: 300ms; easing: ease-out; }
+                    animate width {
+                        duration: 300ms;
+                        easing: ease-out;
+                    }
                 }
             }
 
@@ -95,21 +97,37 @@ export component TransactionRow inherits Rectangle {
 
         VerticalLayout {
             alignment: center;
+            spacing: 4px;
             min-width: 64px;
 
             Text {
-                text: root.item.status == "running" ? root.pct + "%"
-                    : root.item.status == "pending" ? "Queued"
-                    : root.item.status == "completed" ? "Done"
-                    : root.item.status == "failed" ? "Failed"
-                    : "";
+                text: root.item.status == "running" ? root.pct + "%" : root.item.status == "pending" ? "Queued" : root.item.status == "completed" ? "Done" : root.item.status == "failed" ? "Failed" : "";
                 font-size: 12px;
                 font-weight: root.item.status == "running" ? 600 : 400;
-                color: root.item.status == "completed" ? #22c55e
-                    : root.item.status == "failed" ? #ef4444
-                    : root.item.status == "running" ? #3b82f6
-                    : Palette.foreground.transparentize(0.4);
+                color: root.item.status == "completed" ? #22c55e : root.item.status == "failed" ? #ef4444 : root.item.status == "running" ? #3b82f6 : Palette.foreground.transparentize(0.4);
                 horizontal-alignment: right;
+            }
+
+            if root.item.status == "running" || root.item.status == "pending": Rectangle {
+                width: cancel-btn-label.preferred-width + 16px;
+                height: 24px;
+                border-radius: 4px;
+                background: cancel-btn-ta.has-hover ? #ef4444 : #dc2626;
+
+                cancel-btn-ta := TouchArea {
+                    clicked => {
+                        root.cancel-clicked(root.item.id);
+                    }
+                }
+
+                cancel-btn-label := Text {
+                    text: "Cancel";
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: white;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
             }
         }
     }

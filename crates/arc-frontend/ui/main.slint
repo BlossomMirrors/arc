@@ -7,7 +7,9 @@ import { HomeScreen } from "screens/home-screen.slint";
 import { PackageListScreen } from "screens/package-list-screen.slint";
 import { DetailScreen } from "screens/detail-screen.slint";
 import { InstallFileScreen } from "screens/install-file-screen.slint";
-import { InstallFlatpakrefScreen } from "screens/install-flatpakref-screen.slint";
+import {
+    InstallFlatpakrefScreen,
+} from "screens/install-flatpakref-screen.slint";
 import { SettingsScreen } from "screens/settings-screen.slint";
 import { DownloadManagerScreen } from "screens/download-manager-screen.slint";
 
@@ -92,6 +94,7 @@ export component AppWindow inherits Window {
     callback open-url-requested(string);
     callback clear-completed-requested();
     callback update-all-requested();
+    callback cancel-requested(string);
 
     VerticalBox {
         padding: 0px;
@@ -211,6 +214,9 @@ export component AppWindow inherits Window {
                 }
                 refresh-updates-requested => {
                     root.refresh-updates-requested();
+                }
+                cancel-requested(id) => {
+                    root.cancel-requested(id);
                 }
             }
 

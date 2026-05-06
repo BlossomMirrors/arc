@@ -14,12 +14,10 @@ export component DownloadManagerScreen inherits Rectangle {
     callback update-all-requested();
     callback update-requested(string);
     callback refresh-updates-requested();
+    callback cancel-requested(string);
 
     private property <bool> has-content:
-        root.active-transactions.length > 0
-        || root.pending-transactions.length > 0
-        || root.completed-transactions.length > 0
-        || root.available-updates.length > 0;
+        root.active-transactions.length > 0 || root.pending-transactions.length > 0 || root.completed-transactions.length > 0 || root.available-updates.length > 0;
 
     Flickable {
         width: parent.width;
@@ -57,15 +55,15 @@ export component DownloadManagerScreen inherits Rectangle {
 
                     check-ta := TouchArea {
                         enabled: !root.updates-loading;
-                        clicked => { root.refresh-updates-requested(); }
+                        clicked => {
+                            root.refresh-updates-requested();
+                        }
                     }
 
                     check-label := Text {
                         text: root.updates-loading ? "Checking..." : "Check for Updates";
                         font-size: 12px;
-                        color: root.updates-loading
-                            ? Palette.foreground.transparentize(0.5)
-                            : Palette.foreground.transparentize(0.1);
+                        color: root.updates-loading ? Palette.foreground.transparentize(0.5) : Palette.foreground.transparentize(0.1);
                         x: (parent.width - self.width) / 2;
                         y: (parent.height - self.height) / 2;
                     }
@@ -98,6 +96,9 @@ export component DownloadManagerScreen inherits Rectangle {
 
                 for tx[i] in root.active-transactions: TransactionRow {
                     item: tx;
+                    cancel-clicked(id) => {
+                        root.cancel-requested(id);
+                    }
                 }
             }
 
@@ -122,6 +123,9 @@ export component DownloadManagerScreen inherits Rectangle {
 
                 for tx[i] in root.pending-transactions: TransactionRow {
                     item: tx;
+                    cancel-clicked(id) => {
+                        root.cancel-requested(id);
+                    }
                 }
             }
 
@@ -154,7 +158,9 @@ export component DownloadManagerScreen inherits Rectangle {
                         border-color: #80808028;
 
                         clr-ta := TouchArea {
-                            clicked => { root.clear-completed-requested(); }
+                            clicked => {
+                                root.clear-completed-requested();
+                            }
                         }
 
                         clr-label := Text {
@@ -204,7 +210,9 @@ export component DownloadManagerScreen inherits Rectangle {
                         background: upd-all-ta.has-hover ? #3b82f6 : #2563eb;
 
                         upd-all-ta := TouchArea {
-                            clicked => { root.update-all-requested(); }
+                            clicked => {
+                                root.update-all-requested();
+                            }
                         }
 
                         upd-all-label := Text {
@@ -220,7 +228,9 @@ export component DownloadManagerScreen inherits Rectangle {
 
                 for pkg[i] in root.available-updates: UpdateRow {
                     item: pkg;
-                    update-clicked(id) => { root.update-requested(id); }
+                    update-clicked(id) => {
+                        root.update-requested(id);
+                    }
                 }
             }
 

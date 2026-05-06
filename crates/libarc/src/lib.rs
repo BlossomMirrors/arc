@@ -31,6 +31,7 @@ pub trait ArcDaemon {
     async fn get_transaction(&self, transaction_id: &str) -> zbus::Result<String>;
     async fn refresh_cache(&self) -> zbus::Result<bool>;
     async fn run_package(&self, package_id: &str) -> zbus::Result<String>;
+    async fn cancel_transaction(&self, transaction_id: &str) -> zbus::Result<bool>;
 
     // signals are one way messages the daemon sends to all connected clients
     // without them having to ask, fire and forget from the daemon side

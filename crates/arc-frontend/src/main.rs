@@ -136,8 +136,7 @@ fn begin_transaction(
     {
         let s = store.lock().unwrap();
         if s.iter().any(|e| {
-            e.pkg_id == pkg_id
-                && (e.status == TxStatus::Pending || e.status == TxStatus::Running)
+            e.pkg_id == pkg_id && (e.status == TxStatus::Pending || e.status == TxStatus::Running)
         }) {
             return;
         }
@@ -781,7 +780,8 @@ fn main() -> Result<()> {
     if let Some(proxy) = get_proxy(&proxy_opt) {
         let store = tx_store.clone();
         let app_weak = app.as_weak();
-        rt.handle().spawn(run_signal_listener(proxy, store, app_weak));
+        rt.handle()
+            .spawn(run_signal_listener(proxy, store, app_weak));
     }
 
     // Load home in background
@@ -813,8 +813,7 @@ fn main() -> Result<()> {
             }
             let raw_pkgs = load_package_icons(updates).await;
             let _ = app_weak.upgrade_in_event_loop(move |app| {
-                let pkgs: Vec<PackageItem> =
-                    raw_pkgs.iter().map(|r| r.to_slint()).collect();
+                let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
                 app.set_available_updates(pkgs.as_slice().into());
                 app.set_update_count(count as i32);
             });
@@ -1061,11 +1060,41 @@ fn main() -> Result<()> {
         app.on_clear_completed_requested(move || {
             {
                 let mut s = store.lock().unwrap();
-                s.retain(|tx| {
-                    tx.status != TxStatus::Completed && tx.status != TxStatus::Failed
-                });
+                s.retain(|tx| tx.status != TxStatus::Completed && tx.status != TxStatus::Failed);
             }
             push_transactions_to_ui(&store, &app_weak);
+        });
+    }
+
+    // ── Cancel transaction ────────────────────────────────────────────────────
+    {
+        let store = tx_store.clone();
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+
+        app.on_cancel_requested(move |tx_id| {
+            let tx_id = tx_id.to_string();
+            let proxy = get_proxy(&proxy_arc);
+            let store = store.clone();
+            let app_weak = app_weak.clone();
+            let rt_handle = rt_handle.clone();
+
+            rt_handle.spawn(async move {
+                if let Some(p) = proxy {
+                    let cancelled = p.cancel_transaction(&tx_id).await.unwrap_or(false);
+                    if cancelled {
+                        // Update local state to reflect cancellation
+                        let mut s = store.lock().unwrap();
+                        if let Some(tx) = s.iter_mut().find(|t| t.id == tx_id) {
+                            tx.status = TxStatus::Failed;
+                            tx.error = "Cancelled".to_string();
+                        }
+                        drop(s);
+                        push_transactions_to_ui(&store, &app_weak);
+                    }
+                }
+            });
         });
     }
 
@@ -1629,7 +1658,9 @@ fn main() -> Result<()> {
     }
 
     app.on_open_url_requested(|url| {
-        let _ = std::process::Command::new("xdg-open").arg(url.as_str()).spawn();
+        let _ = std::process::Command::new("xdg-open")
+            .arg(url.as_str())
+            .spawn();
     });
 
     app.run()?;
