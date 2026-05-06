@@ -7,6 +7,7 @@ import { HomeScreen } from "screens/home-screen.slint";
 import { PackageListScreen } from "screens/package-list-screen.slint";
 import { DetailScreen } from "screens/detail-screen.slint";
 import { InstallFileScreen } from "screens/install-file-screen.slint";
+import { InstallFlatpakrefScreen } from "screens/install-flatpakref-screen.slint";
 import { SettingsScreen } from "screens/settings-screen.slint";
 
 import {
@@ -50,6 +51,10 @@ export component AppWindow inherits Window {
     in-out property <string> install-file-flatpak-name: "";
     in-out property <bool> install-file-has-flatpak: false;
 
+    in-out property <string> install-flatpakref-name: "";
+    in-out property <string> install-flatpakref-app-id: "";
+    in-out property <string> install-flatpakref-repo-url: "";
+
     in-out property <image> icon-home;
     in-out property <image> icon-search;
     in-out property <image> icon-settings;
@@ -67,6 +72,8 @@ export component AppWindow inherits Window {
     callback install-file-distrobox-requested();
     callback install-file-flatpak-requested();
     callback install-file-cancelled();
+    callback install-flatpakref-confirmed();
+    callback install-flatpakref-cancelled();
     callback open-url-requested(string);
 
     VerticalBox {
@@ -178,6 +185,20 @@ export component AppWindow inherits Window {
                 }
                 cancelled => {
                     root.install-file-cancelled();
+                }
+            }
+
+            if root.current-view == "install-flatpakref": InstallFlatpakrefScreen {
+                width: parent.width;
+                height: parent.height;
+                app-name: root.install-flatpakref-name;
+                app-id: root.install-flatpakref-app-id;
+                repo-url: root.install-flatpakref-repo-url;
+                confirmed => {
+                    root.install-flatpakref-confirmed();
+                }
+                cancelled => {
+                    root.install-flatpakref-cancelled();
                 }
             }
 

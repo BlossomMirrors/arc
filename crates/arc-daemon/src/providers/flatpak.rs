@@ -314,6 +314,98 @@ impl FlatpakProvider {
         .map_err(|e| ArcError::TransactionFailed(e.to_string()))?
     }
 
+    pub async fn install_flatpakref_with_progress(
+        &self,
+        url: &str,
+        progress_tx: UnboundedSender<u8>,
+    ) -> Result<(), ArcError> {
+        let url = url.to_string();
+        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+            let rt = tokio::runtime::Handle::current();
+            let bytes = rt.block_on(async {
+                reqwest::get(&url)
+                    .await
+                    .map_err(|e| ArcError::ProviderError(e.to_string()))?
+                    .bytes()
+                    .await
+                    .map_err(|e| ArcError::ProviderError(e.to_string()))
+            })?;
+
+            // Parse the flatpakref INI to extract the repository fields so we can
+            // add the remote explicitly before running the install transaction.
+            let content = String::from_utf8_lossy(&bytes);
+            let mut remote_url = String::new();
+            let mut suggest_name = String::new();
+            let mut gpg_key_b64 = String::new();
+            for line in content.lines() {
+                let line = line.trim();
+                if let Some(v) = line.strip_prefix("Url=") {
+                    remote_url = v.to_string();
+                } else if let Some(v) = line.strip_prefix("SuggestRemoteName=") {
+                    suggest_name = v.to_string();
+                } else if let Some(v) = line.strip_prefix("GPGKey=") {
+                    gpg_key_b64 = v.to_string();
+                }
+            }
+
+            let cancel = libflatpak::gio::Cancellable::NONE;
+            let inst = libflatpak::Installation::new_user(cancel)
+                .map_err(|e: glib::Error| ArcError::ProviderError(e.to_string()))?;
+
+            // Add the remote from the flatpakref if it is not already present.
+            // GPG verification is handled by add_install_flatpakref which reads the
+            // key from the flatpakref bytes, so we only need to register the URL here.
+            if !remote_url.is_empty() {
+                let remote_name = if suggest_name.is_empty() {
+                    "flatpakref-remote".to_string()
+                } else {
+                    suggest_name.clone()
+                };
+                let already_exists = inst
+                    .list_remotes(cancel)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|r| r.name().map(|n| n == remote_name).unwrap_or(false));
+
+                if !already_exists {
+                    let remote = libflatpak::Remote::new(&remote_name);
+                    remote.set_url(&remote_url);
+                    if !gpg_key_b64.is_empty() {
+                        let key_bytes = glib::base64_decode(&gpg_key_b64);
+                        remote.set_gpg_verify(true);
+                        let key_gbytes = glib::Bytes::from(key_bytes.as_slice());
+                        remote.set_gpg_key(&key_gbytes);
+                    }
+                    inst.add_remote(&remote, true, cancel)
+                        .map_err(|e: glib::Error| ArcError::ProviderError(e.to_string()))?;
+                }
+            }
+
+            // Run the install transaction — add_install_flatpakref resolves the
+            // exact ref (name + branch) and handles the RuntimeRepo if needed.
+            let glib_bytes = glib::Bytes::from(bytes.as_ref());
+            let tx = libflatpak::Transaction::for_installation(&inst, cancel)
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+            tx.set_no_interaction(true);
+            tx.add_install_flatpakref(&glib_bytes)
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+
+            let progress_tx_for_tx = progress_tx.clone();
+            tx.connect_new_operation(move |_, _op, progress| {
+                progress.set_update_frequency(1500);
+                let sender = progress_tx_for_tx.clone();
+                progress.connect_changed(move |p| {
+                    let _ = sender.send(p.progress().clamp(0, 100) as u8);
+                });
+            });
+
+            tx.run(cancel)
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))
+        })
+        .await
+        .map_err(|e| ArcError::TransactionFailed(e.to_string()))?
+    }
+
     pub async fn update_with_progress(
         &self,
         app_id: &str,

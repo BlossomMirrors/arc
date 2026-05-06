@@ -11,6 +11,26 @@ use std::sync::{Arc, Mutex};
 
 slint::include_modules!();
 
+fn parse_flatpakref(content: &str) -> (String, String, String) {
+    let mut name = String::new();
+    let mut title = String::new();
+    let mut url = String::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("Name=") {
+            name = v.to_string();
+        } else if let Some(v) = line.strip_prefix("Title=") {
+            title = v.to_string();
+        } else if let Some(v) = line.strip_prefix("Url=") {
+            url = v.to_string();
+        }
+    }
+    if title.is_empty() {
+        title = name.clone();
+    }
+    (title, name, url)
+}
+
 fn is_pkg_file(path: &str) -> bool {
     path.ends_with(".deb")
         || path.ends_with(".rpm")
@@ -1304,6 +1324,8 @@ fn main() -> Result<()> {
 
     {
         let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
         let manage_extensions = std::env::args().any(|a| a == "--manage-extensions");
         let initial_app = std::env::args()
             .find(|a| a.starts_with("appstream://") || a.starts_with("appstream:"))
@@ -1313,6 +1335,9 @@ fn main() -> Result<()> {
                     .trim_start_matches("//")
                     .to_string()
             });
+        let flatpakref_url = std::env::args()
+            .find(|a| a.starts_with("flatpak+https://") || a.starts_with("flatpak+http://"))
+            .map(|a| a.trim_start_matches("flatpak+").to_string());
 
         if manage_extensions || initial_app.as_deref() == Some("") {
             if let Some(app_ref) = app_weak.upgrade() {
@@ -1322,6 +1347,82 @@ fn main() -> Result<()> {
         } else if let Some(app_id) = initial_app.filter(|s| !s.is_empty()) {
             if let Some(app_ref) = app_weak.upgrade() {
                 app_ref.invoke_detail_requested(app_id.into());
+            }
+        } else if let Some(url) = flatpakref_url {
+            // Download and parse the flatpakref so we can show the confirmation screen
+            // with the app name, ID, and repo URL before doing anything.
+            let app_weak2 = app_weak.clone();
+            let url2 = url.clone();
+            rt_handle.spawn(async move {
+                let content = reqwest::get(&url2)
+                    .await
+                    .ok()
+                    .and_then(|r| {
+                        let rt = tokio::runtime::Handle::current();
+                        rt.block_on(r.text()).ok()
+                    })
+                    .unwrap_or_default();
+                let (title, app_id, repo_url) = parse_flatpakref(&content);
+                let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                    app.set_install_flatpakref_name(title.into());
+                    app.set_install_flatpakref_app_id(app_id.into());
+                    app.set_install_flatpakref_repo_url(repo_url.into());
+                    app.set_current_view("install-flatpakref".into());
+                });
+            });
+
+            // "Install" — call daemon to add the repo and install the app
+            {
+                let app_weak3 = app_weak.clone();
+                let proxy_arc2 = proxy_arc.clone();
+                let rt_handle2 = rt_handle.clone();
+                app.on_install_flatpakref_confirmed(move || {
+                    let url3 = url.clone();
+                    let app_weak4 = app_weak3.clone();
+                    let proxy_arc3 = proxy_arc2.clone();
+                    rt_handle2.spawn(async move {
+                        let result = if let Some(p) = get_or_connect(&proxy_arc3).await {
+                            p.install_flatpakref(&url3).await.ok()
+                        } else {
+                            None
+                        };
+                        match result {
+                            Some(tx_id) => {
+                                wait_for_transaction(
+                                    proxy_arc3,
+                                    tx_id,
+                                    app_weak4,
+                                    "Installation complete.".to_string(),
+                                    url3,
+                                    true,
+                                    false,
+                                )
+                                .await;
+                            }
+                            None => {
+                                let _ = app_weak4.upgrade_in_event_loop(|app| {
+                                    app.set_status_text(
+                                        "Failed to connect to Arc daemon.".into(),
+                                    );
+                                });
+                            }
+                        }
+                    });
+                    if let Some(app_ref) = app_weak3.upgrade() {
+                        app_ref.set_current_view("home".into());
+                        app_ref.set_status_text("Installing...".into());
+                    }
+                });
+            }
+
+            // "Cancel"
+            {
+                let app_weak3 = app_weak.clone();
+                app.on_install_flatpakref_cancelled(move || {
+                    if let Some(app_ref) = app_weak3.upgrade() {
+                        app_ref.set_current_view("home".into());
+                    }
+                });
             }
         }
     }

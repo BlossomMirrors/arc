@@ -101,6 +101,16 @@ impl MultiProvider {
         }
     }
 
+    pub async fn install_flatpakref_with_progress(
+        &self,
+        url: &str,
+        progress_tx: UnboundedSender<u8>,
+    ) -> Result<(), ArcError> {
+        self.flatpak
+            .install_flatpakref_with_progress(url, progress_tx)
+            .await
+    }
+
     pub async fn update_with_progress(
         &self,
         package_id: &str,

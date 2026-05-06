@@ -1,0 +1,69 @@
+import { VerticalBox, Button } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
+import { Badge } from "../components/badge.slint";
+
+export component InstallFlatpakrefScreen inherits Rectangle {
+    in property <string> app-name;
+    in property <string> app-id;
+    in property <string> repo-url;
+
+    callback confirmed();
+    callback cancelled();
+
+    VerticalBox {
+        alignment: center;
+        padding: 48px;
+        spacing: 20px;
+
+        Text {
+            text: "Install Application";
+            font-size: 22px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.app-name;
+            font-size: 15px;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.app-id;
+            font-size: 12px;
+            color: Palette.foreground.transparentize(0.45);
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+
+        HorizontalLayout {
+            alignment: center;
+
+            Badge {
+                has-icon: true;
+                icon: @image-url("../../assets/warning.svg");
+                label: "Contains repository";
+                accent: #eab308;
+            }
+        }
+
+        Text {
+            text: root.repo-url;
+            font-size: 11px;
+            color: Palette.foreground.transparentize(0.45);
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+
+        Button {
+            text: "Install";
+            clicked => { root.confirmed(); }
+        }
+
+        Button {
+            text: "Cancel";
+            clicked => { root.cancelled(); }
+        }
+    }
+}

@@ -20,6 +20,7 @@ use zbus::{proxy, Connection};
 )]
 pub trait ArcDaemon {
     async fn install_package(&self, package_id: &str) -> zbus::Result<String>;
+    async fn install_flatpakref(&self, url: &str) -> zbus::Result<String>;
     async fn remove_package(&self, package_id: &str) -> zbus::Result<String>;
     async fn search(&self, query: &str) -> zbus::Result<String>;
     async fn search_category(&self, category: &str) -> zbus::Result<String>;

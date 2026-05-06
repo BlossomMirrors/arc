@@ -107,6 +107,76 @@ impl ArcDaemonInterface {
         tx_id.to_string()
     }
 
+    async fn install_flatpakref(
+        &self,
+        url: String,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> String {
+        info!("InstallFlatpakref: {}", url);
+        let tx = self
+            .transaction_manager
+            .create(
+                TransactionType::Install,
+                url.clone(),
+                libarc::Provider::Flatpak,
+            )
+            .await;
+        let tx_id = tx.id;
+
+        let provider = self.provider.clone();
+        let tm = self.transaction_manager.clone();
+        let emitter = emitter.to_owned();
+
+        tokio::spawn(async move {
+            let _ =
+                Self::transaction_started(&emitter, tx_id.to_string(), url.clone()).await;
+
+            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
+
+            let emitter_fwd = emitter.clone();
+            let tm_fwd = tm.clone();
+            tokio::spawn(async move {
+                while let Some(pct) = progress_rx.recv().await {
+                    tm_fwd.update_progress(tx_id, pct).await;
+                    let _ =
+                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                }
+            });
+
+            match provider
+                .install_flatpakref_with_progress(&url, progress_tx)
+                .await
+            {
+                Ok(()) => {
+                    provider.invalidate_package_cache().await;
+                    tm.complete(tx_id, true, "Installation successful".to_string())
+                        .await;
+                    let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
+                    let _ = Self::transaction_finished(
+                        &emitter,
+                        tx_id.to_string(),
+                        true,
+                        "Installation successful".to_string(),
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    error!("InstallFlatpakref failed: {}", e);
+                    tm.complete(tx_id, false, e.to_string()).await;
+                    let _ = Self::transaction_finished(
+                        &emitter,
+                        tx_id.to_string(),
+                        false,
+                        e.to_string(),
+                    )
+                    .await;
+                }
+            }
+        });
+
+        tx_id.to_string()
+    }
+
     async fn remove_package(
         &self,
         package_id: String,
