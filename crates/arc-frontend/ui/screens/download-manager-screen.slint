@@ -9,6 +9,7 @@ export component DownloadManagerScreen inherits Rectangle {
     in property <[TransactionItem]> completed-transactions: [];
     in property <[PackageItem]> available-updates: [];
     in property <bool> updates-loading: false;
+    in property <bool> updates-all-queued: false;
 
     callback clear-completed-requested();
     callback update-all-requested();
@@ -207,9 +208,12 @@ export component DownloadManagerScreen inherits Rectangle {
                         width: upd-all-label.preferred-width + 24px;
                         height: 24px;
                         border-radius: 5px;
-                        background: upd-all-ta.has-hover ? #3b82f6 : #2563eb;
+                        background: root.updates-all-queued
+                            ? #2563eb60
+                            : (upd-all-ta.has-hover ? #3b82f6 : #2563eb);
 
                         upd-all-ta := TouchArea {
+                            enabled: !root.updates-all-queued;
                             clicked => {
                                 root.update-all-requested();
                             }
@@ -219,7 +223,7 @@ export component DownloadManagerScreen inherits Rectangle {
                             text: "Update All";
                             font-size: 11px;
                             font-weight: 600;
-                            color: white;
+                            color: root.updates-all-queued ? #ffffff80 : white;
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                         }

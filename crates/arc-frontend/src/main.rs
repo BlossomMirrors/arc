@@ -331,6 +331,12 @@ fn main() -> Result<()> {
                 })
                 .unwrap_or_default();
 
+            if !updates.is_empty() {
+                if let Some(a) = app_weak.upgrade() {
+                    a.set_updates_all_queued(true);
+                }
+            }
+
             for (pkg_id, name) in updates {
                 begin_transaction(
                     pkg_id,
@@ -384,6 +390,9 @@ fn main() -> Result<()> {
                         }
                         drop(s);
                         push_transactions_to_ui(store.clone(), &app_weak);
+                        let _ = app_weak.upgrade_in_event_loop(|app| {
+                            app.set_updates_all_queued(false);
+                        });
                     }
                 }
             });

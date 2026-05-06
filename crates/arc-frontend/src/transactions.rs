@@ -35,6 +35,17 @@ pub fn has_ongoing_transaction_for_package(store: &TxStore, pkg_id: &str) -> boo
     })
 }
 
+pub fn remove_from_available_updates(app: &crate::AppWindow, pkg_id: &str) {
+    let model = app.get_available_updates();
+    let items: Vec<crate::PackageItem> = (0..model.row_count())
+        .filter_map(|i| model.row_data(i))
+        .filter(|p| p.id.as_str() != pkg_id)
+        .collect();
+    let count = items.len() as i32;
+    app.set_available_updates(items.as_slice().into());
+    app.set_update_count(count);
+}
+
 pub fn update_package_installed(app: &crate::AppWindow, pkg_id: &str, installed: bool) {
     let model = app.get_packages();
     let count = model.row_count();
@@ -299,10 +310,16 @@ pub async fn run_signal_listener(
                             };
                             app.set_status_text(format!("{} {}.", verb, name).into());
                             if refresh_detail && app.get_current_view() == "detail" {
-                                app.invoke_detail_requested(pkg_id.into());
+                                app.invoke_detail_requested(pkg_id.clone().into());
+                            }
+                            if tx_type == "update" {
+                                remove_from_available_updates(&app, &pkg_id);
                             }
                         } else {
                             app.set_status_text("Operation failed.".into());
+                        }
+                        if tx_type == "update" {
+                            app.set_updates_all_queued(false);
                         }
                         let current_detail_pkg = app.get_detail_app().flatpak_id.to_string();
                         if !current_detail_pkg.is_empty() {

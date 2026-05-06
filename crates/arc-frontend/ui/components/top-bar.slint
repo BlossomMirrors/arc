@@ -4,7 +4,6 @@ import { Palette } from "std-widgets.slint";
 export component TopBar inherits Rectangle {
     in-out property <string> search-text;
     in property <int> update-count;
-    in property <int> active-transaction-count;
     in property <image> icon-home;
     in property <image> icon-search;
     in property <image> icon-settings;
@@ -12,7 +11,6 @@ export component TopBar inherits Rectangle {
     callback search-requested(string);
     callback installed-clicked();
     callback downloads-clicked();
-    callback update-all-requested();
     callback home-clicked();
     callback settings-clicked();
 
@@ -29,7 +27,6 @@ export component TopBar inherits Rectangle {
             padding-bottom: 7px;
             spacing: 8px;
 
-            // Home icon button
             Rectangle {
                 width: 34px;
                 border-radius: 6px;
@@ -52,7 +49,6 @@ export component TopBar inherits Rectangle {
                 }
             }
 
-            // Group separator
             Rectangle {
                 width: 1px;
                 background: #80808035;
@@ -69,7 +65,6 @@ export component TopBar inherits Rectangle {
                 }
             }
 
-            // Search icon button
             Rectangle {
                 width: 34px;
                 border-radius: 6px;
@@ -107,32 +102,49 @@ export component TopBar inherits Rectangle {
                 }
             }
 
-            if root.update-count > 0: Rectangle {
-                width: upd-all-label.preferred-width + 24px;
+            Rectangle {
+                width: dl-row.preferred-width + 20px;
                 height: 34px;
                 border-radius: 6px;
-                background: upd-all-ta.has-hover ? #3b82f6 : #2563eb;
+                background: dl-ta.has-hover ? #80808018 : #00000000;
+                border-width: 1px;
+                border-color: #80808030;
 
-                upd-all-ta := TouchArea {
-                    clicked => { root.update-all-requested(); }
+                dl-ta := TouchArea {
+                    clicked => {
+                        root.downloads-clicked();
+                    }
                 }
 
-                upd-all-label := Text {
-                    text: "Update All (" + root.update-count + ")";
-                    font-size: 12px;
-                    font-weight: 600;
-                    color: white;
+                dl-row := HorizontalLayout {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
-                }
-            }
+                    spacing: 5px;
+                    alignment: center;
 
-            Button {
-                text: root.active-transaction-count > 0
-                    ? "Downloads (" + root.active-transaction-count + ")"
-                    : "Downloads";
-                clicked => {
-                    root.downloads-clicked();
+                    Text {
+                        text: "Downloads & Updates";
+                        font-size: 12px;
+                        color: Palette.foreground;
+                        vertical-alignment: center;
+                    }
+
+                    if root.update-count > 0: Rectangle {
+                        width: max(bubble-n.preferred-width + 8px, 16px);
+                        height: 16px;
+                        border-radius: 8px;
+                        background: #ef4444;
+                        y: (parent.height - self.height) / 2;
+
+                        bubble-n := Text {
+                            text: root.update-count;
+                            font-size: 9px;
+                            font-weight: 700;
+                            color: white;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
                 }
             }
 
@@ -142,7 +154,6 @@ export component TopBar inherits Rectangle {
                 background: #80808035;
             }
 
-            // Settings icon button
             Rectangle {
                 width: 34px;
                 border-radius: 6px;
@@ -166,7 +177,6 @@ export component TopBar inherits Rectangle {
             }
         }
 
-        // Bottom edge rule
         Rectangle {
             height: 1px;
             background: #80808025;
