@@ -7,9 +7,302 @@ use appstream_db::AppStreamDb;
 use futures_util::{future::join_all, StreamExt};
 use libarc::{connect, ArcDaemonProxy, Package, Provider, Settings};
 use slint::{Model, SharedString};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 slint::include_modules!();
+
+// ── Transaction tracking ──────────────────────────────────────────────────────
+
+#[derive(Clone, PartialEq)]
+enum TxStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+}
+
+#[derive(Clone)]
+struct TrackedTx {
+    id: String,
+    pkg_id: String,
+    name: String,
+    icon: Option<RawIcon>,
+    progress: f32,
+    status: TxStatus,
+    tx_type: String,
+    error: String,
+    installed_after: bool,
+    refresh_detail: bool,
+}
+
+type TxStore = Arc<Mutex<Vec<TrackedTx>>>;
+
+fn push_transactions_to_ui(store: &TxStore, app_weak: &slint::Weak<AppWindow>) {
+    let (active, pending, completed) = {
+        let s = store.lock().unwrap();
+        let mut a: Vec<TrackedTx> = Vec::new();
+        let mut p: Vec<TrackedTx> = Vec::new();
+        let mut c: Vec<TrackedTx> = Vec::new();
+        for tx in s.iter() {
+            match tx.status {
+                TxStatus::Running => a.push(tx.clone()),
+                TxStatus::Pending => p.push(tx.clone()),
+                TxStatus::Completed | TxStatus::Failed => c.push(tx.clone()),
+            }
+        }
+        (a, p, c)
+    };
+
+    let active_count = (active.len() + pending.len()) as i32;
+
+    let status_text = if let Some(tx) = active.first() {
+        let verb = match tx.tx_type.as_str() {
+            "install" | "flatpakref" => "Installing",
+            "remove" => "Removing",
+            _ => "Updating",
+        };
+        format!("{} {} ({}%)", verb, tx.name, (tx.progress * 100.0) as i32)
+    } else if !pending.is_empty() {
+        format!("{} operation(s) queued", pending.len())
+    } else {
+        String::new()
+    };
+
+    let _ = app_weak.upgrade_in_event_loop(move |app| {
+        fn to_slint_items(txs: Vec<TrackedTx>) -> Vec<TransactionItem> {
+            txs.into_iter()
+                .map(|tx| TransactionItem {
+                    id: tx.id.into(),
+                    name: tx.name.into(),
+                    icon: tx.icon.map(|r| r.to_slint_image()).unwrap_or_default(),
+                    progress: tx.progress,
+                    status: match tx.status {
+                        TxStatus::Pending => "pending",
+                        TxStatus::Running => "running",
+                        TxStatus::Completed => "completed",
+                        TxStatus::Failed => "failed",
+                    }
+                    .into(),
+                    tx_type: tx.tx_type.into(),
+                    error: tx.error.into(),
+                })
+                .collect()
+        }
+
+        app.set_active_transactions(to_slint_items(active).as_slice().into());
+        app.set_pending_transactions(to_slint_items(pending).as_slice().into());
+        app.set_completed_transactions(to_slint_items(completed).as_slice().into());
+        app.set_active_transaction_count(active_count);
+        if !status_text.is_empty() {
+            app.set_status_text(status_text.into());
+        }
+    });
+}
+
+async fn load_icon_for_pkg(pkg_id: &str, name: &str) -> Option<RawIcon> {
+    if pkg_id.starts_with("lutris:") {
+        return None;
+    }
+    let is_flatpak = !pkg_id.contains('/')
+        && !pkg_id.contains(';')
+        && !pkg_id.starts_with("distrobox:")
+        && pkg_id.matches('.').count() >= 2;
+    if is_flatpak {
+        let id = pkg_id.to_string();
+        tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
+            .await
+            .unwrap_or(None)
+    } else {
+        let n = name.to_string();
+        tokio::task::spawn_blocking(move || icons::load_native_package_icon(&n))
+            .await
+            .unwrap_or(None)
+    }
+}
+
+fn begin_transaction(
+    pkg_id: String,
+    display_name: String,
+    tx_type: String,
+    installed_after: bool,
+    refresh_detail: bool,
+    store: TxStore,
+    proxy_arc: Arc<Mutex<Option<ArcDaemonProxy<'static>>>>,
+    app_weak: slint::Weak<AppWindow>,
+    rt_handle: tokio::runtime::Handle,
+) {
+    // Don't queue duplicates for the same package
+    {
+        let s = store.lock().unwrap();
+        if s.iter().any(|e| {
+            e.pkg_id == pkg_id
+                && (e.status == TxStatus::Pending || e.status == TxStatus::Running)
+        }) {
+            return;
+        }
+    }
+
+    let entry_idx = {
+        let mut s = store.lock().unwrap();
+        s.push(TrackedTx {
+            id: String::new(),
+            pkg_id: pkg_id.clone(),
+            name: display_name.clone(),
+            icon: None,
+            progress: 0.0,
+            status: TxStatus::Pending,
+            tx_type: tx_type.clone(),
+            error: String::new(),
+            installed_after,
+            refresh_detail,
+        });
+        s.len() - 1
+    };
+    push_transactions_to_ui(&store, &app_weak);
+
+    let name_for_icon = display_name.clone();
+    let pkg_id_for_icon = pkg_id.clone();
+
+    rt_handle.spawn(async move {
+        let tx_id_result = match get_or_connect(&proxy_arc).await {
+            Some(p) => match tx_type.as_str() {
+                "install" => p.install_package(&pkg_id).await.ok(),
+                "flatpakref" => p.install_flatpakref(&pkg_id).await.ok(),
+                "remove" => p.remove_package(&pkg_id).await.ok(),
+                "update" => p.update_package(&pkg_id).await.ok(),
+                _ => None,
+            },
+            None => None,
+        };
+
+        match tx_id_result {
+            Some(tx_id) => {
+                {
+                    let mut s = store.lock().unwrap();
+                    if let Some(e) = s.get_mut(entry_idx) {
+                        e.id = tx_id;
+                        e.status = TxStatus::Running;
+                    }
+                }
+                push_transactions_to_ui(&store, &app_weak);
+
+                let icon = load_icon_for_pkg(&pkg_id_for_icon, &name_for_icon).await;
+                {
+                    let mut s = store.lock().unwrap();
+                    if let Some(e) = s.get_mut(entry_idx) {
+                        e.icon = icon;
+                    }
+                }
+                push_transactions_to_ui(&store, &app_weak);
+            }
+            None => {
+                {
+                    let mut s = store.lock().unwrap();
+                    if let Some(e) = s.get_mut(entry_idx) {
+                        e.status = TxStatus::Failed;
+                        e.error = "Failed to connect to daemon".to_string();
+                    }
+                }
+                push_transactions_to_ui(&store, &app_weak);
+                let _ = app_weak.upgrade_in_event_loop(|app| {
+                    app.set_detail_busy(false);
+                });
+            }
+        }
+    });
+}
+
+async fn run_signal_listener(
+    proxy: ArcDaemonProxy<'static>,
+    store: TxStore,
+    app_weak: slint::Weak<AppWindow>,
+) {
+    let (mut progress_stream, mut finished_stream) = match tokio::join!(
+        proxy.receive_transaction_progress(),
+        proxy.receive_transaction_finished(),
+    ) {
+        (Ok(ps), Ok(fs)) => (ps, fs),
+        _ => return,
+    };
+
+    loop {
+        tokio::select! {
+            sig = progress_stream.next() => {
+                let Some(sig) = sig else { break; };
+                let Ok(args) = sig.args() else { continue; };
+                let tx_id = args.transaction_id().to_string();
+                let progress = *args.progress() as f32 / 100.0;
+                {
+                    let mut s = store.lock().unwrap();
+                    if let Some(e) = s.iter_mut().find(|e| e.id == tx_id) {
+                        e.progress = progress;
+                        if e.status == TxStatus::Pending {
+                            e.status = TxStatus::Running;
+                        }
+                    }
+                }
+                push_transactions_to_ui(&store, &app_weak);
+            }
+            sig = finished_stream.next() => {
+                let Some(sig) = sig else { break; };
+                let Ok(args) = sig.args() else { continue; };
+                let tx_id = args.transaction_id().to_string();
+                let success = *args.success();
+                let msg = args.message().to_string();
+
+                let side_effect = {
+                    let mut s = store.lock().unwrap();
+                    if let Some(e) = s.iter_mut().find(|e| e.id == tx_id) {
+                        if success {
+                            e.status = TxStatus::Completed;
+                            e.progress = 1.0;
+                        } else {
+                            e.status = TxStatus::Failed;
+                            e.error = msg;
+                        }
+                        Some((
+                            e.pkg_id.clone(),
+                            e.installed_after,
+                            e.refresh_detail,
+                            success,
+                            e.name.clone(),
+                            e.tx_type.clone(),
+                        ))
+                    } else {
+                        None
+                    }
+                };
+
+                push_transactions_to_ui(&store, &app_weak);
+
+                if let Some((pkg_id, installed_after, refresh_detail, ok, name, tx_type)) =
+                    side_effect
+                {
+                    let _ = app_weak.upgrade_in_event_loop(move |app| {
+                        if ok {
+                            update_package_installed(&app, &pkg_id, installed_after);
+                            let verb = match tx_type.as_str() {
+                                "remove" => "Removed",
+                                "update" => "Updated",
+                                _ => "Installed",
+                            };
+                            app.set_status_text(format!("{} {}.", verb, name).into());
+                            if refresh_detail && app.get_current_view() == "detail" {
+                                app.invoke_detail_requested(pkg_id.into());
+                            }
+                        } else {
+                            app.set_status_text("Operation failed.".into());
+                        }
+                        app.set_detail_busy(false);
+                    });
+                }
+            }
+        }
+    }
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
 fn parse_flatpakref(content: &str) -> (String, String, String) {
     let mut name = String::new();
@@ -63,19 +356,14 @@ fn pkg_name_from_filename(filename: &str) -> String {
     parts[..end].join("-")
 }
 
-// When Flatpak is preferred, both a Flatpak and a native package can match the same
-// app name. This collapses those duplicates by keeping only the preferred provider's
-// entry. Apps that only exist in one provider always pass through unchanged.
 fn dedup_by_preference(pkgs: Vec<libarc::Package>, settings: &Settings) -> Vec<libarc::Package> {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
-    // build name → flatpak id so we can check the preference list with the right id
     let flatpak_id_by_name: HashMap<String, String> = pkgs
         .iter()
         .filter(|p| p.provider == Provider::Flatpak)
         .map(|p| (p.name.to_lowercase(), p.id.clone()))
         .collect();
-    // let flatpak_names: HashSet<String> = flatpak_id_by_name.keys().cloned().collect();
     let native_names: HashSet<String> = pkgs
         .iter()
         .filter(|p| p.provider == Provider::Distrobox)
@@ -87,20 +375,16 @@ fn dedup_by_preference(pkgs: Vec<libarc::Package>, settings: &Settings) -> Vec<l
             let name = p.name.to_lowercase();
             match p.provider {
                 Provider::Flatpak => {
-                    // no native counterpart → always show
                     !native_names.contains(&name)
                         || settings.preferred_for(&p.id) == Provider::Flatpak
                 }
                 Provider::Distrobox => {
-                    // no flatpak counterpart (native-only app) → always show
                     let Some(flatpak_id) = flatpak_id_by_name.get(&name) else {
                         return true;
                     };
-                    // use the flatpak id for the preference lookup since the list uses those ids
                     settings.preferred_for(flatpak_id) == Provider::Distrobox
                 }
                 Provider::Lutris => {
-                    // no native counterpart → always show
                     !native_names.contains(&name)
                         || settings.preferred_for(&p.id) == Provider::Lutris
                 }
@@ -155,76 +439,34 @@ fn update_package_installed(app: &AppWindow, pkg_id: &str, installed: bool) {
     app.set_packages(items.as_slice().into());
 }
 
-async fn wait_for_transaction(
-    proxy_arc: Arc<Mutex<Option<ArcDaemonProxy<'static>>>>,
-    tx_id: String,
-    app_weak: slint::Weak<AppWindow>,
-    success_msg: String,
-    pkg_id: String,
-    installed_after: bool,
-    refresh_detail: bool,
-) {
-    let Some(p) = get_proxy(&proxy_arc) else {
-        return;
-    };
-
-    let (mut progress_stream, mut finished_stream) = match tokio::join!(
-        p.receive_transaction_progress(),
-        p.receive_transaction_finished(),
-    ) {
-        (Ok(ps), Ok(fs)) => (ps, fs),
-        _ => return,
-    };
-
-    loop {
-        tokio::select! {
-            sig = progress_stream.next() => {
-                if let Some(sig) = sig {
-                    if let Ok(args) = sig.args() {
-                        if *args.transaction_id() == tx_id {
-                            let progress = *args.progress() as f32 / 100.0;
-                            let _ = app_weak.upgrade_in_event_loop(move |app| {
-                                app.set_progress(progress);
-                            });
-                        }
-                    }
-                }
-            }
-            sig = finished_stream.next() => {
-                match sig {
-                    Some(sig) => {
-                        if let Ok(args) = sig.args() {
-                            if *args.transaction_id() == tx_id {
-                                if *args.success() {
-                                    let msg = success_msg.clone();
-                                    let pid = pkg_id.clone();
-                                    let _ = app_weak.upgrade_in_event_loop(move |app| {
-                                        update_package_installed(&app, &pid, installed_after);
-                                        app.set_status_text(msg.into());
-                                        app.set_progress(0.0);
-                                        app.set_detail_busy(false);
-                                        if refresh_detail && app.get_current_view() == "detail" {
-                                            app.invoke_detail_requested(pid.into());
-                                        }
-                                    });
-                                } else {
-                                    let msg = format!("Failed: {}", args.message());
-                                    let _ = app_weak.upgrade_in_event_loop(move |app| {
-                                        app.set_status_text(msg.into());
-                                        app.set_progress(0.0);
-                                        app.set_detail_busy(false);
-                                    });
-                                }
-                                break;
-                            }
-                        }
-                    }
-                    None => break,
-                }
+fn get_display_name(app: &AppWindow, pkg_id: &str) -> String {
+    let detail = app.get_detail_app();
+    if detail.flatpak_id.as_str() == pkg_id
+        || detail.native_id.as_str() == pkg_id
+        || detail.lutris_id.as_str() == pkg_id
+    {
+        return detail.name.to_string();
+    }
+    let model = app.get_packages();
+    for i in 0..model.row_count() {
+        if let Some(p) = model.row_data(i) {
+            if p.id.as_str() == pkg_id {
+                return p.name.to_string();
             }
         }
     }
+    let upd = app.get_available_updates();
+    for i in 0..upd.row_count() {
+        if let Some(p) = upd.row_data(i) {
+            if p.id.as_str() == pkg_id {
+                return p.name.to_string();
+            }
+        }
+    }
+    pkg_id.to_string()
 }
+
+// ── Data loading ──────────────────────────────────────────────────────────────
 
 struct RawCard {
     id: String,
@@ -234,7 +476,6 @@ struct RawCard {
     installed: bool,
 }
 
-// CachedAppInfo matches the daemon's icon_cache::AppInfo struct
 #[derive(serde::Deserialize, Clone)]
 #[allow(dead_code)]
 struct CachedAppInfo {
@@ -311,11 +552,9 @@ impl RawCard {
 
 async fn load_home(app_weak: slint::Weak<AppWindow>, proxy: Option<ArcDaemonProxy<'static>>) {
     let appstream_db = AppStreamDb::get_static();
-    // Load popular and recent apps from cached AppStream data
     let popular_apps: Vec<_> = appstream_db.get_popular_apps(10);
     let recent_apps: Vec<_> = appstream_db.get_recent_apps(20);
 
-    // Fetch installed Flatpak IDs to mark cards correctly
     let installed_ids: std::collections::HashSet<String> = if let Some(ref p) = proxy {
         p.list_installed()
             .await
@@ -329,7 +568,6 @@ async fn load_home(app_weak: slint::Weak<AppWindow>, proxy: Option<ArcDaemonProx
         std::collections::HashSet::new()
     };
 
-    // Load icons in parallel for popular apps
     let popular_tasks: Vec<_> = popular_apps
         .into_iter()
         .map(|app| {
@@ -362,7 +600,6 @@ async fn load_home(app_weak: slint::Weak<AppWindow>, proxy: Option<ArcDaemonProx
         }
     }
 
-    // Load icons in parallel for recent apps
     let recent_tasks: Vec<_> = recent_apps
         .into_iter()
         .map(|app| {
@@ -395,7 +632,6 @@ async fn load_home(app_weak: slint::Weak<AppWindow>, proxy: Option<ArcDaemonProx
         }
     }
 
-    // Use standard AppStream categories
     let categories = [
         ("AudioVideo", "Multimedia", "applications-multimedia"),
         ("Development", "Developer Tools", "applications-development"),
@@ -448,6 +684,46 @@ async fn load_home(app_weak: slint::Weak<AppWindow>, proxy: Option<ArcDaemonProx
     });
 }
 
+async fn load_package_icons(pkgs: Vec<libarc::Package>) -> Vec<RawPackage> {
+    let icon_futures: Vec<_> = pkgs
+        .iter()
+        .map(|pkg| async {
+            match pkg.provider {
+                Provider::Flatpak => {
+                    let id = pkg.id.clone();
+                    tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
+                        .await
+                        .unwrap_or(None)
+                }
+                Provider::Lutris => {
+                    if let Some(url) = &pkg.icon_url {
+                        let url = url.clone();
+                        tokio::spawn(async move { icons::load_lutris_icon(&url).await })
+                            .await
+                            .ok()
+                            .flatten()
+                    } else {
+                        None
+                    }
+                }
+                Provider::Distrobox => {
+                    let name = pkg.name.clone();
+                    tokio::task::spawn_blocking(move || icons::load_native_package_icon(&name))
+                        .await
+                        .unwrap_or(None)
+                }
+            }
+        })
+        .collect();
+    let icons_result: Vec<_> = join_all(icon_futures).await;
+    pkgs.into_iter()
+        .zip(icons_result)
+        .map(|(pkg, icon)| RawPackage { pkg, icon })
+        .collect()
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
 fn main() -> Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -498,13 +774,22 @@ fn main() -> Result<()> {
         app.set_settings_ignore_native_pref(s.ignore_native_preference);
     }
 
-    // Load AppStream DB in background while showing home page
+    // Transaction store shared across all handlers
+    let tx_store: TxStore = Arc::new(Mutex::new(Vec::new()));
+
+    // Spawn the global signal listener once if the daemon is available
+    if let Some(proxy) = get_proxy(&proxy_opt) {
+        let store = tx_store.clone();
+        let app_weak = app.as_weak();
+        rt.handle().spawn(run_signal_listener(proxy, store, app_weak));
+    }
+
+    // Load home in background
     {
         let app_weak = app.as_weak();
         let proxy = proxy_opt.lock().unwrap().clone();
         app.set_home_loading(true);
         rt.handle().spawn(async move {
-            // Warm the static AppStream DB cache, then load the home page using it
             tokio::task::spawn_blocking(AppStreamDb::get_static)
                 .await
                 .unwrap();
@@ -512,6 +797,31 @@ fn main() -> Result<()> {
         });
     }
 
+    // Silently check for updates on startup (no UI loading state)
+    if let Some(proxy) = proxy_opt.lock().unwrap().clone() {
+        let app_weak = app.as_weak();
+        rt.handle().spawn(async move {
+            let updates: Vec<libarc::Package> = proxy
+                .list_updates()
+                .await
+                .ok()
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default();
+            let count = updates.len();
+            if count == 0 {
+                return;
+            }
+            let raw_pkgs = load_package_icons(updates).await;
+            let _ = app_weak.upgrade_in_event_loop(move |app| {
+                let pkgs: Vec<PackageItem> =
+                    raw_pkgs.iter().map(|r| r.to_slint()).collect();
+                app.set_available_updates(pkgs.as_slice().into());
+                app.set_update_count(count as i32);
+            });
+        });
+    }
+
+    // ── Search ────────────────────────────────────────────────────────────────
     {
         let app_weak = app.as_weak();
         let proxy_arc = proxy_opt.clone();
@@ -538,52 +848,8 @@ fn main() -> Result<()> {
                     vec![]
                 };
 
-                // Use only daemon results which include AppStream data from Flatpak remotes
-                let all_pkgs = daemon_pkgs;
-
-                let all_pkgs = dedup_by_preference(all_pkgs, &s);
-
-                let icon_futures: Vec<_> = all_pkgs
-                    .iter()
-                    .map(|pkg| async {
-                        match pkg.provider {
-                            Provider::Flatpak => {
-                                let id = pkg.id.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    icons::load_local_flatpak_icon(&id)
-                                })
-                                .await
-                                .unwrap_or(None)
-                            }
-                            Provider::Lutris => {
-                                if let Some(url) = &pkg.icon_url {
-                                    let url = url.clone();
-                                    tokio::spawn(async move { icons::load_lutris_icon(&url).await })
-                                        .await
-                                        .ok()
-                                        .flatten()
-                                } else {
-                                    None
-                                }
-                            }
-                            Provider::Distrobox => {
-                                let name = pkg.name.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    icons::load_native_package_icon(&name)
-                                })
-                                .await
-                                .unwrap_or(None)
-                            }
-                        }
-                    })
-                    .collect();
-                let icons_result: Vec<_> = join_all(icon_futures).await;
-                let raw_pkgs: Vec<RawPackage> = all_pkgs
-                    .into_iter()
-                    .zip(icons_result)
-                    .map(|(pkg, icon)| RawPackage { pkg, icon })
-                    .collect();
-
+                let all_pkgs = dedup_by_preference(daemon_pkgs, &s);
+                let raw_pkgs = load_package_icons(all_pkgs).await;
                 let status = format!("Found {} result(s) for '{}'", raw_pkgs.len(), query_str);
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
                     let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
@@ -600,6 +866,7 @@ fn main() -> Result<()> {
         });
     }
 
+    // ── Installed list ────────────────────────────────────────────────────────
     {
         let app_weak = app.as_weak();
         let proxy_arc = proxy_opt.clone();
@@ -610,7 +877,6 @@ fn main() -> Result<()> {
             let proxy = get_proxy(&proxy_arc);
 
             rt_handle.spawn(async move {
-                // Query daemon for installed packages
                 let search_pkgs: Vec<libarc::Package> = if let Some(p) = &proxy {
                     p.list_installed()
                         .await
@@ -621,53 +887,7 @@ fn main() -> Result<()> {
                     vec![]
                 };
 
-                // Use cached AppStream DB (loaded once at startup)
-
-                // Load icons for each package in parallel
-                let icon_futures: Vec<_> = search_pkgs
-                    .iter()
-                    .map(|pkg| async {
-                        match pkg.provider {
-                            Provider::Flatpak => {
-                                // Use local AppStream icon
-                                let id = pkg.id.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    icons::load_local_flatpak_icon(&id)
-                                })
-                                .await
-                                .unwrap_or(None)
-                            }
-                            Provider::Distrobox => {
-                                // Use load_native_package_icon for native/Distrobox packages
-                                let name = pkg.name.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    icons::load_native_package_icon(&name)
-                                })
-                                .await
-                                .unwrap_or(None)
-                            }
-                            Provider::Lutris => {
-                                // Load Lutris icon from remote URL provided by Lutris API
-                                if let Some(icon_url) = &pkg.icon_url {
-                                    let url = icon_url.clone();
-                                    tokio::spawn(async move { icons::load_lutris_icon(&url).await })
-                                        .await
-                                        .ok()
-                                        .flatten()
-                                } else {
-                                    None
-                                }
-                            }
-                        }
-                    })
-                    .collect();
-                let icons_result: Vec<_> = join_all(icon_futures).await;
-                let raw_pkgs: Vec<RawPackage> = search_pkgs
-                    .into_iter()
-                    .zip(icons_result)
-                    .map(|(pkg, icon)| RawPackage { pkg, icon })
-                    .collect();
-
+                let raw_pkgs = load_package_icons(search_pkgs).await;
                 let status = format!("{} application(s) installed", raw_pkgs.len());
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
                     let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
@@ -684,116 +904,172 @@ fn main() -> Result<()> {
         });
     }
 
+    // ── Install ───────────────────────────────────────────────────────────────
     {
         let app_weak = app.as_weak();
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
+        let store = tx_store.clone();
 
         app.on_install_requested(move |pkg_id| {
             let pkg_id_str = pkg_id.to_string();
-            let app_weak2 = app_weak.clone();
-            let proxy_arc2 = proxy_arc.clone();
-
             let in_detail = app_weak
                 .upgrade()
                 .map(|a| a.get_current_view() == "detail")
                 .unwrap_or(false);
+            let display_name = app_weak
+                .upgrade()
+                .map(|a| get_display_name(&a, &pkg_id_str))
+                .unwrap_or_else(|| pkg_id_str.clone());
 
-            rt_handle.spawn(async move {
-                let result = if let Some(p) = get_or_connect(&proxy_arc2).await {
-                    p.install_package(&pkg_id_str).await.ok()
-                } else {
-                    None
-                };
-
-                match result {
-                    Some(tx_id) => {
-                        wait_for_transaction(
-                            proxy_arc2,
-                            tx_id,
-                            app_weak2,
-                            format!("Installed {}", pkg_id_str),
-                            pkg_id_str.clone(),
-                            true,
-                            in_detail,
-                        )
-                        .await;
-                    }
-                    None => {
-                        let _ = app_weak2.upgrade_in_event_loop(move |app| {
-                            app.set_detail_busy(false);
-                            app.set_status_text(
-                                format!("Failed to start install for {}", pkg_id_str).into(),
-                            );
-                        });
-                    }
+            if in_detail {
+                if let Some(a) = app_weak.upgrade() {
+                    a.set_detail_busy(true);
                 }
-            });
-
-            if let Some(app_ref) = app_weak.upgrade() {
-                if in_detail {
-                    app_ref.set_detail_busy(true);
-                }
-                app_ref.set_status_text(format!("Installing {}...", pkg_id).into());
             }
+
+            begin_transaction(
+                pkg_id_str,
+                display_name,
+                "install".to_string(),
+                true,
+                in_detail,
+                store.clone(),
+                proxy_arc.clone(),
+                app_weak.clone(),
+                rt_handle.clone(),
+            );
         });
     }
 
+    // ── Remove ────────────────────────────────────────────────────────────────
     {
         let app_weak = app.as_weak();
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
+        let store = tx_store.clone();
 
         app.on_remove_requested(move |pkg_id| {
             let pkg_id_str = pkg_id.to_string();
-            let app_weak2 = app_weak.clone();
-            let proxy_arc2 = proxy_arc.clone();
-
             let in_detail = app_weak
                 .upgrade()
                 .map(|a| a.get_current_view() == "detail")
                 .unwrap_or(false);
+            let display_name = app_weak
+                .upgrade()
+                .map(|a| get_display_name(&a, &pkg_id_str))
+                .unwrap_or_else(|| pkg_id_str.clone());
 
-            rt_handle.spawn(async move {
-                let result = if let Some(p) = get_or_connect(&proxy_arc2).await {
-                    p.remove_package(&pkg_id_str).await.ok()
-                } else {
-                    None
-                };
-
-                match result {
-                    Some(tx_id) => {
-                        wait_for_transaction(
-                            proxy_arc2,
-                            tx_id,
-                            app_weak2,
-                            format!("Removed {}", pkg_id_str),
-                            pkg_id_str.clone(),
-                            false,
-                            in_detail,
-                        )
-                        .await;
-                    }
-                    None => {
-                        let _ = app_weak2.upgrade_in_event_loop(move |app| {
-                            app.set_detail_busy(false);
-                            app.set_status_text(
-                                format!("Failed to start removal of {}", pkg_id_str).into(),
-                            );
-                        });
-                    }
+            if in_detail {
+                if let Some(a) = app_weak.upgrade() {
+                    a.set_detail_busy(true);
                 }
-            });
+            }
 
-            if let Some(app_ref) = app_weak.upgrade() {
-                if in_detail {
-                    app_ref.set_detail_busy(true);
+            begin_transaction(
+                pkg_id_str,
+                display_name,
+                "remove".to_string(),
+                false,
+                in_detail,
+                store.clone(),
+                proxy_arc.clone(),
+                app_weak.clone(),
+                rt_handle.clone(),
+            );
+        });
+    }
+
+    // ── Update (single) ───────────────────────────────────────────────────────
+    {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+        let store = tx_store.clone();
+
+        app.on_update_requested(move |pkg_id| {
+            let pkg_id_str = pkg_id.to_string();
+            let in_detail = app_weak
+                .upgrade()
+                .map(|a| a.get_current_view() == "detail")
+                .unwrap_or(false);
+            let display_name = app_weak
+                .upgrade()
+                .map(|a| get_display_name(&a, &pkg_id_str))
+                .unwrap_or_else(|| pkg_id_str.clone());
+
+            if in_detail {
+                if let Some(a) = app_weak.upgrade() {
+                    a.set_detail_busy(true);
                 }
-                app_ref.set_status_text(format!("Removing {}...", pkg_id).into());
+            }
+
+            begin_transaction(
+                pkg_id_str,
+                display_name,
+                "update".to_string(),
+                true,
+                in_detail,
+                store.clone(),
+                proxy_arc.clone(),
+                app_weak.clone(),
+                rt_handle.clone(),
+            );
+        });
+    }
+
+    // ── Update All ────────────────────────────────────────────────────────────
+    {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+        let store = tx_store.clone();
+
+        app.on_update_all_requested(move || {
+            let updates: Vec<(String, String)> = app_weak
+                .upgrade()
+                .map(|a| {
+                    let model = a.get_available_updates();
+                    (0..model.row_count())
+                        .filter_map(|i| model.row_data(i))
+                        .map(|p| (p.id.to_string(), p.name.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            for (pkg_id, name) in updates {
+                begin_transaction(
+                    pkg_id,
+                    name,
+                    "update".to_string(),
+                    true,
+                    false,
+                    store.clone(),
+                    proxy_arc.clone(),
+                    app_weak.clone(),
+                    rt_handle.clone(),
+                );
             }
         });
     }
 
+    // ── Clear completed ───────────────────────────────────────────────────────
+    {
+        let store = tx_store.clone();
+        let app_weak = app.as_weak();
+
+        app.on_clear_completed_requested(move || {
+            {
+                let mut s = store.lock().unwrap();
+                s.retain(|tx| {
+                    tx.status != TxStatus::Completed && tx.status != TxStatus::Failed
+                });
+            }
+            push_transactions_to_ui(&store, &app_weak);
+        });
+    }
+
+    // ── Category ──────────────────────────────────────────────────────────────
     {
         let app_weak = app.as_weak();
         let proxy_arc = proxy_opt.clone();
@@ -805,7 +1081,6 @@ fn main() -> Result<()> {
             let proxy = get_proxy(&proxy_arc);
 
             rt_handle.spawn(async move {
-                // Query daemon for category apps from AppStream data
                 let packages: Vec<libarc::Package> = if let Some(p) = &proxy {
                     p.search_category(&cat)
                         .await
@@ -816,49 +1091,7 @@ fn main() -> Result<()> {
                     vec![]
                 };
 
-                // Load icons for each package in parallel
-                let icon_futures: Vec<_> = packages
-                    .iter()
-                    .map(|pkg| async {
-                        match pkg.provider {
-                            Provider::Flatpak => {
-                                let id = pkg.id.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    icons::load_local_flatpak_icon(&id)
-                                })
-                                .await
-                                .unwrap_or(None)
-                            }
-                            Provider::Lutris => {
-                                // Load Lutris icon from remote URL
-                                if let Some(icon_url) = &pkg.icon_url {
-                                    let url = icon_url.clone();
-                                    tokio::spawn(async move { icons::load_lutris_icon(&url).await })
-                                        .await
-                                        .ok()
-                                        .flatten()
-                                } else {
-                                    None
-                                }
-                            }
-                            Provider::Distrobox => {
-                                let name = pkg.name.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    icons::load_native_package_icon(&name)
-                                })
-                                .await
-                                .unwrap_or(None)
-                            }
-                        }
-                    })
-                    .collect();
-                let icons_result: Vec<_> = join_all(icon_futures).await;
-                let raw_pkgs: Vec<RawPackage> = packages
-                    .into_iter()
-                    .zip(icons_result)
-                    .map(|(pkg, icon)| RawPackage { pkg, icon })
-                    .collect();
-
+                let raw_pkgs = load_package_icons(packages).await;
                 let status = format!("Category: {} ({} apps)", cat, raw_pkgs.len());
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
                     let slint_pkgs: Vec<PackageItem> =
@@ -878,6 +1111,7 @@ fn main() -> Result<()> {
         });
     }
 
+    // ── Refresh updates (populates download manager's Available section) ───────
     {
         let app_weak = app.as_weak();
         let proxy_arc = proxy_opt.clone();
@@ -899,130 +1133,34 @@ fn main() -> Result<()> {
                 };
 
                 let count = updates.len();
-
-                let icon_futures: Vec<_> = updates
-                    .iter()
-                    .map(|pkg| async {
-                        match pkg.provider {
-                            Provider::Flatpak => {
-                                let id = pkg.id.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    icons::load_local_flatpak_icon(&id)
-                                })
-                                .await
-                                .unwrap_or(None)
-                            }
-                            Provider::Lutris => {
-                                if let Some(url) = &pkg.icon_url {
-                                    let url = url.clone();
-                                    tokio::spawn(async move { icons::load_lutris_icon(&url).await })
-                                        .await
-                                        .ok()
-                                        .flatten()
-                                } else {
-                                    None
-                                }
-                            }
-                            Provider::Distrobox => {
-                                let name = pkg.name.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    icons::load_native_package_icon(&name)
-                                })
-                                .await
-                                .unwrap_or(None)
-                            }
-                        }
-                    })
-                    .collect();
-                let icons_result: Vec<_> = join_all(icon_futures).await;
-                let raw_pkgs: Vec<RawPackage> = updates
-                    .into_iter()
-                    .zip(icons_result)
-                    .map(|(pkg, icon)| RawPackage { pkg, icon })
-                    .collect();
-
-                let status = if count > 0 {
-                    format!("{} update(s) available", count)
-                } else {
-                    "Everything is up to date.".to_string()
-                };
+                let raw_pkgs = load_package_icons(updates).await;
 
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
                     let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
-                    app.set_packages(pkgs.as_slice().into());
+                    app.set_available_updates(pkgs.as_slice().into());
                     app.set_update_count(count as i32);
-                    app.set_status_text(status.into());
-                    app.set_is_loading(false);
+                    app.set_updates_loading(false);
+                    if count == 0 {
+                        app.set_status_text("Everything is up to date.".into());
+                    } else {
+                        app.set_status_text(format!("{} update(s) available.", count).into());
+                    }
                 });
             });
 
             if let Some(app_ref) = app_weak.upgrade() {
-                app_ref.set_is_loading(true);
+                app_ref.set_updates_loading(true);
                 app_ref.set_status_text("Checking for updates...".into());
             }
         });
     }
 
+    // ── Detail view ───────────────────────────────────────────────────────────
     {
         let app_weak = app.as_weak();
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
-
-        app.on_update_requested(move |pkg_id| {
-            let pkg_id_str = pkg_id.to_string();
-            let app_weak2 = app_weak.clone();
-            let proxy_arc2 = proxy_arc.clone();
-
-            let in_detail = app_weak
-                .upgrade()
-                .map(|a| a.get_current_view() == "detail")
-                .unwrap_or(false);
-
-            rt_handle.spawn(async move {
-                let result = if let Some(p) = get_or_connect(&proxy_arc2).await {
-                    p.update_package(&pkg_id_str).await.ok()
-                } else {
-                    None
-                };
-
-                match result {
-                    Some(tx_id) => {
-                        wait_for_transaction(
-                            proxy_arc2,
-                            tx_id,
-                            app_weak2,
-                            format!("Updated {}", pkg_id_str),
-                            pkg_id_str.clone(),
-                            true,
-                            in_detail,
-                        )
-                        .await;
-                    }
-                    None => {
-                        let _ = app_weak2.upgrade_in_event_loop(move |app| {
-                            app.set_detail_busy(false);
-                            app.set_status_text(
-                                format!("Failed to start update for {}", pkg_id_str).into(),
-                            );
-                        });
-                    }
-                }
-            });
-
-            if let Some(app_ref) = app_weak.upgrade() {
-                if in_detail {
-                    app_ref.set_detail_busy(true);
-                }
-                app_ref.set_status_text(format!("Updating {}...", pkg_id).into());
-            }
-        });
-    }
-
-    {
-        let app_weak = app.as_weak();
-        let proxy_arc = proxy_opt.clone();
         let settings = settings.clone();
-        let rt_handle = rt.handle().clone();
 
         app.on_detail_requested(move |id| {
             let app_id = id.to_string();
@@ -1033,13 +1171,11 @@ fn main() -> Result<()> {
             rt_handle.spawn(async move {
                 let appstream_db = AppStreamDb::get_static();
 
-                // Get app name from AppStream immediately (fast local lookup)
                 let app_name = appstream_db
                     .find_by_id(&id)
                     .map(|a| a.name.clone())
                     .unwrap_or_else(|| id.split(';').next().unwrap_or(&id).to_string());
 
-                // search + installed from daemon so we can find both providers
                 let (search_pkgs, installed_pkgs): (Vec<Package>, Vec<Package>) =
                     if let Some(ref p) = proxy {
                         tokio::join!(
@@ -1085,10 +1221,8 @@ fn main() -> Result<()> {
                         && (p.id == app_id.as_str() || p.name.to_lowercase() == name_lower)
                 });
 
-                // Use locally loaded AppStream DB for fast name/description/icon lookup
                 let appstream_info = appstream_db.find_by_id(&app_id);
 
-                // Determine verification status and developer name
                 let (developer, verified) = if let Some(fp_pkg) = &flatpak_pkg {
                     let remote = fp_pkg.remote.as_deref().unwrap_or("");
                     let dev_name = appstream_info
@@ -1097,10 +1231,8 @@ fn main() -> Result<()> {
                         .unwrap_or_else(|| fp_pkg.name.clone());
 
                     if remote == "blossomos" {
-                        // Always verified for blossomos remote
                         (dev_name, true)
                     } else if remote == "flathub" {
-                        // Check Flathub API for verification status
                         let app_id_for_api = fp_pkg.id.clone();
                         let api_verified = check_flathub_verification(&app_id_for_api).await;
                         (dev_name, api_verified)
@@ -1132,7 +1264,6 @@ fn main() -> Result<()> {
                 let native_installed = native_pkg.map(|p| p.installed).unwrap_or(false);
                 let lutris_installed = lutris_pkg.map(|p| p.installed).unwrap_or(false);
 
-                // Load icon in parallel with UI display
                 let icon = if !flatpak_id.is_empty() {
                     let fid = flatpak_id.clone();
                     tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&fid))
@@ -1161,7 +1292,6 @@ fn main() -> Result<()> {
                     None
                 };
 
-                // Load icon from AppStream data if no package icon found
                 let icon = icon.or_else(|| {
                     appstream_info.as_ref().and_then(|info| {
                         info.icon_url.as_ref().and_then(|url| {
@@ -1176,7 +1306,6 @@ fn main() -> Result<()> {
                     })
                 });
 
-                // Get name from packages or AppStream
                 let name = flatpak_pkg
                     .or(native_pkg)
                     .or(lutris_pkg)
@@ -1184,10 +1313,7 @@ fn main() -> Result<()> {
                     .or_else(|| appstream_info.as_ref().map(|a| a.name.clone()))
                     .unwrap_or_else(|| app_name.clone());
 
-                // Get description from packages or AppStream
-                // Skip description for Flatpaks since it duplicates the summary
                 let description = if flatpak_pkg.is_some() {
-                    // For Flatpaks, don't show description (it duplicates summary)
                     String::new()
                 } else {
                     native_pkg
@@ -1203,7 +1329,6 @@ fn main() -> Result<()> {
                     .map(|p| p.version.clone())
                     .unwrap_or_default();
 
-                // Collect screenshot URLs from the best matching package
                 let screenshot_urls: Vec<String> = flatpak_pkg
                     .or(lutris_pkg)
                     .or(native_pkg)
@@ -1272,7 +1397,6 @@ fn main() -> Result<()> {
                     app.set_detail_loading(false);
                 });
 
-                // Load screenshots in background after the detail view is shown
                 if !screenshot_urls.is_empty() {
                     let app_weak3 = app_weak2.clone();
                     tokio::spawn(async move {
@@ -1283,7 +1407,6 @@ fn main() -> Result<()> {
                                 tokio::spawn(async move { icons::load_screenshot(&url).await })
                             })
                             .collect();
-                        // Collect as RawIcon (Send), convert to slint::Image on the UI thread
                         let raw_shots: Vec<RawIcon> = join_all(futs)
                             .await
                             .into_iter()
@@ -1308,6 +1431,7 @@ fn main() -> Result<()> {
         });
     }
 
+    // ── Settings ──────────────────────────────────────────────────────────────
     {
         let settings = settings.clone();
         app.on_save_settings(move |preferred, ignore_native_pref| {
@@ -1322,10 +1446,12 @@ fn main() -> Result<()> {
         });
     }
 
+    // ── Deep-link / CLI args ──────────────────────────────────────────────────
     {
         let app_weak = app.as_weak();
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
+        let store = tx_store.clone();
         let manage_extensions = std::env::args().any(|a| a == "--manage-extensions");
         let initial_app = std::env::args()
             .find(|a| a.starts_with("appstream://") || a.starts_with("appstream:"))
@@ -1349,8 +1475,6 @@ fn main() -> Result<()> {
                 app_ref.invoke_detail_requested(app_id.into());
             }
         } else if let Some(url) = flatpakref_url {
-            // Download and parse the flatpakref so we can show the confirmation screen
-            // with the app name, ID, and repo URL before doing anything.
             let app_weak2 = app_weak.clone();
             let url2 = url.clone();
             rt_handle.spawn(async move {
@@ -1371,51 +1495,36 @@ fn main() -> Result<()> {
                 });
             });
 
-            // "Install" — call daemon to add the repo and install the app
             {
                 let app_weak3 = app_weak.clone();
                 let proxy_arc2 = proxy_arc.clone();
                 let rt_handle2 = rt_handle.clone();
+                let store2 = store.clone();
                 app.on_install_flatpakref_confirmed(move || {
                     let url3 = url.clone();
-                    let app_weak4 = app_weak3.clone();
-                    let proxy_arc3 = proxy_arc2.clone();
-                    rt_handle2.spawn(async move {
-                        let result = if let Some(p) = get_or_connect(&proxy_arc3).await {
-                            p.install_flatpakref(&url3).await.ok()
-                        } else {
-                            None
-                        };
-                        match result {
-                            Some(tx_id) => {
-                                wait_for_transaction(
-                                    proxy_arc3,
-                                    tx_id,
-                                    app_weak4,
-                                    "Installation complete.".to_string(),
-                                    url3,
-                                    true,
-                                    false,
-                                )
-                                .await;
-                            }
-                            None => {
-                                let _ = app_weak4.upgrade_in_event_loop(|app| {
-                                    app.set_status_text(
-                                        "Failed to connect to Arc daemon.".into(),
-                                    );
-                                });
-                            }
-                        }
-                    });
+                    let title = app_weak3
+                        .upgrade()
+                        .map(|a| a.get_install_flatpakref_name().to_string())
+                        .unwrap_or_else(|| url.clone());
+
+                    begin_transaction(
+                        url3,
+                        title,
+                        "flatpakref".to_string(),
+                        true,
+                        false,
+                        store2.clone(),
+                        proxy_arc2.clone(),
+                        app_weak3.clone(),
+                        rt_handle2.clone(),
+                    );
+
                     if let Some(app_ref) = app_weak3.upgrade() {
-                        app_ref.set_current_view("home".into());
-                        app_ref.set_status_text("Installing...".into());
+                        app_ref.set_current_view("downloads".into());
                     }
                 });
             }
 
-            // "Cancel"
             {
                 let app_weak3 = app_weak.clone();
                 app.on_install_flatpakref_cancelled(move || {
@@ -1427,11 +1536,12 @@ fn main() -> Result<()> {
         }
     }
 
-    // package file opened via file manager / MIME association
+    // ── Package file (MIME association) ───────────────────────────────────────
     {
         let app_weak = app.as_weak();
         let rt_handle = rt.handle().clone();
         let proxy_arc = proxy_opt.clone();
+        let store = tx_store.clone();
 
         let pkg_file = std::env::args().skip(1).find(|a| is_pkg_file(a));
 
@@ -1450,7 +1560,6 @@ fn main() -> Result<()> {
                 app_ref.set_current_view("install-file".into());
             }
 
-            // search daemon in background for a matching Flatpak app
             let app_weak2 = app_weak.clone();
             let proxy_search = get_proxy(&proxy_arc);
             rt_handle.spawn(async move {
@@ -1473,53 +1582,31 @@ fn main() -> Result<()> {
                 }
             });
 
-            // "Install via Distrobox" — pass the file path as the package_id
             {
                 let app_weak3 = app_weak.clone();
                 let proxy_arc2 = proxy_arc.clone();
                 let rt_handle2 = rt_handle.clone();
+                let store2 = store.clone();
                 let fp = file_path.clone();
+                let fn_ = file_name.clone();
                 app.on_install_file_distrobox_requested(move || {
-                    let fp2 = fp.clone();
-                    let app_weak4 = app_weak3.clone();
-                    let proxy_arc3 = proxy_arc2.clone();
-                    rt_handle2.spawn(async move {
-                        let result = if let Some(p) = get_proxy(&proxy_arc3) {
-                            p.install_package(&fp2).await.ok()
-                        } else {
-                            None
-                        };
-                        match result {
-                            Some(tx_id) => {
-                                wait_for_transaction(
-                                    proxy_arc3,
-                                    tx_id,
-                                    app_weak4.clone(),
-                                    format!("Installed {}", fp2),
-                                    fp2.clone(),
-                                    true,
-                                    false,
-                                )
-                                .await;
-                                let _ = app_weak4.upgrade_in_event_loop(|app| {
-                                    app.set_current_view("home".into());
-                                });
-                            }
-                            None => {
-                                let _ = app_weak4.upgrade_in_event_loop(|app| {
-                                    app.set_status_text("Failed to connect to Arc daemon.".into());
-                                });
-                            }
-                        }
-                    });
+                    begin_transaction(
+                        fp.clone(),
+                        fn_.clone(),
+                        "install".to_string(),
+                        true,
+                        false,
+                        store2.clone(),
+                        proxy_arc2.clone(),
+                        app_weak3.clone(),
+                        rt_handle2.clone(),
+                    );
                     if let Some(app_ref) = app_weak3.upgrade() {
-                        app_ref.set_current_view("home".into());
-                        app_ref.set_status_text("Installing package...".into());
+                        app_ref.set_current_view("downloads".into());
                     }
                 });
             }
 
-            // "Install from Flathub instead" — navigate to detail view
             {
                 let app_weak3 = app_weak.clone();
                 app.on_install_file_flatpak_requested(move || {
@@ -1530,7 +1617,6 @@ fn main() -> Result<()> {
                 });
             }
 
-            // "Cancel"
             {
                 let app_weak3 = app_weak.clone();
                 app.on_install_file_cancelled(move || {

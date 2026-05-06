@@ -4,13 +4,15 @@ import { Palette } from "std-widgets.slint";
 export component TopBar inherits Rectangle {
     in-out property <string> search-text;
     in property <int> update-count;
+    in property <int> active-transaction-count;
     in property <image> icon-home;
     in property <image> icon-search;
     in property <image> icon-settings;
 
     callback search-requested(string);
     callback installed-clicked();
-    callback updates-clicked();
+    callback downloads-clicked();
+    callback update-all-requested();
     callback home-clicked();
     callback settings-clicked();
 
@@ -105,10 +107,32 @@ export component TopBar inherits Rectangle {
                 }
             }
 
+            if root.update-count > 0: Rectangle {
+                width: upd-all-label.preferred-width + 24px;
+                height: 34px;
+                border-radius: 6px;
+                background: upd-all-ta.has-hover ? #3b82f6 : #2563eb;
+
+                upd-all-ta := TouchArea {
+                    clicked => { root.update-all-requested(); }
+                }
+
+                upd-all-label := Text {
+                    text: "Update All (" + root.update-count + ")";
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: white;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+
             Button {
-                text: root.update-count > 0 ? "Updates (" + root.update-count + ")" : "Updates";
+                text: root.active-transaction-count > 0
+                    ? "Downloads (" + root.active-transaction-count + ")"
+                    : "Downloads";
                 clicked => {
-                    root.updates-clicked();
+                    root.downloads-clicked();
                 }
             }
 

@@ -42,3 +42,13 @@ export struct CategoryItem {
     icon: image,
     bg-color: color,
 }
+
+export struct TransactionItem {
+    id: string,
+    name: string,
+    icon: image,
+    progress: float,
+    status: string,   // "pending" | "running" | "completed" | "failed"
+    tx-type: string,  // "install" | "remove" | "update" | "flatpakref"
+    error: string,
+}

@@ -1,16 +1,14 @@
-import { ProgressIndicator } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
 
 export component StatusBar inherits Rectangle {
     in property <string> status-text;
-    in property <float> progress;
 
-    height: 32px;
+    height: 28px;
 
     VerticalLayout {
         padding: 0px;
         spacing: 0px;
 
-        // Top edge rule matching the top bar's bottom rule
         Rectangle {
             height: 1px;
             background: #80808025;
@@ -19,20 +17,15 @@ export component StatusBar inherits Rectangle {
         HorizontalLayout {
             padding-left: 12px;
             padding-right: 12px;
-            padding-top: 6px;
-            padding-bottom: 6px;
-            spacing: 8px;
+            padding-top: 5px;
+            padding-bottom: 5px;
 
             Text {
                 text: root.status-text;
-                horizontal-stretch: 1;
                 vertical-alignment: center;
                 font-size: 11px;
-            }
-
-            if root.progress > 0.0 && root.progress < 1.0: ProgressIndicator {
-                width: 150px;
-                progress: root.progress;
+                color: Palette.foreground.transparentize(0.3);
+                overflow: elide;
             }
         }
     }

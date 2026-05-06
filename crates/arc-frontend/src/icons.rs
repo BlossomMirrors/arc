@@ -5,6 +5,7 @@ use resvg::{tiny_skia, usvg};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone)]
 pub struct RawIcon {
     pub width: u32,
     pub height: u32,

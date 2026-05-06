@@ -1,0 +1,251 @@
+import { Palette } from "std-widgets.slint";
+import { TransactionItem, PackageItem } from "../types.slint";
+import { TransactionRow } from "../components/transaction-row.slint";
+import { UpdateRow } from "../components/update-row.slint";
+
+export component DownloadManagerScreen inherits Rectangle {
+    in property <[TransactionItem]> active-transactions: [];
+    in property <[TransactionItem]> pending-transactions: [];
+    in property <[TransactionItem]> completed-transactions: [];
+    in property <[PackageItem]> available-updates: [];
+    in property <bool> updates-loading: false;
+
+    callback clear-completed-requested();
+    callback update-all-requested();
+    callback update-requested(string);
+    callback refresh-updates-requested();
+
+    private property <bool> has-content:
+        root.active-transactions.length > 0
+        || root.pending-transactions.length > 0
+        || root.completed-transactions.length > 0
+        || root.available-updates.length > 0;
+
+    Flickable {
+        width: parent.width;
+        height: parent.height;
+        viewport-width: parent.width;
+        viewport-height: content.preferred-height + 32px;
+
+        content := VerticalLayout {
+            spacing: 0px;
+            width: parent.width;
+
+            // Page header
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-top: 20px;
+                padding-bottom: 16px;
+                spacing: 12px;
+
+                Text {
+                    text: "Downloads";
+                    font-size: 20px;
+                    font-weight: 700;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+
+                check-btn := Rectangle {
+                    width: check-label.preferred-width + 24px;
+                    height: 32px;
+                    border-radius: 6px;
+                    background: check-ta.has-hover && !root.updates-loading ? #80808018 : #00000000;
+                    border-width: 1px;
+                    border-color: #80808030;
+
+                    check-ta := TouchArea {
+                        enabled: !root.updates-loading;
+                        clicked => { root.refresh-updates-requested(); }
+                    }
+
+                    check-label := Text {
+                        text: root.updates-loading ? "Checking..." : "Check for Updates";
+                        font-size: 12px;
+                        color: root.updates-loading
+                            ? Palette.foreground.transparentize(0.5)
+                            : Palette.foreground.transparentize(0.1);
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: #80808025;
+            }
+
+            // ── Active ────────────────────────────────────────────────────
+            if root.active-transactions.length > 0: VerticalLayout {
+                spacing: 0px;
+
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-top: 16px;
+                    padding-bottom: 8px;
+
+                    Text {
+                        text: "Active (" + root.active-transactions.length + ")";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: Palette.foreground.transparentize(0.4);
+                        vertical-alignment: center;
+                    }
+                }
+
+                for tx[i] in root.active-transactions: TransactionRow {
+                    item: tx;
+                }
+            }
+
+            // ── Pending ───────────────────────────────────────────────────
+            if root.pending-transactions.length > 0: VerticalLayout {
+                spacing: 0px;
+
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-top: 16px;
+                    padding-bottom: 8px;
+
+                    Text {
+                        text: "Pending (" + root.pending-transactions.length + ")";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: Palette.foreground.transparentize(0.4);
+                        vertical-alignment: center;
+                    }
+                }
+
+                for tx[i] in root.pending-transactions: TransactionRow {
+                    item: tx;
+                }
+            }
+
+            // ── Completed ─────────────────────────────────────────────────
+            if root.completed-transactions.length > 0: VerticalLayout {
+                spacing: 0px;
+
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-top: 16px;
+                    padding-bottom: 8px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "Completed (" + root.completed-transactions.length + ")";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: Palette.foreground.transparentize(0.4);
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+
+                    clr-btn := Rectangle {
+                        width: clr-label.preferred-width + 20px;
+                        height: 24px;
+                        border-radius: 5px;
+                        background: clr-ta.has-hover ? #80808020 : #00000000;
+                        border-width: 1px;
+                        border-color: #80808028;
+
+                        clr-ta := TouchArea {
+                            clicked => { root.clear-completed-requested(); }
+                        }
+
+                        clr-label := Text {
+                            text: "Clear All";
+                            font-size: 11px;
+                            color: Palette.foreground.transparentize(0.3);
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+                }
+
+                for tx[i] in root.completed-transactions: TransactionRow {
+                    item: tx;
+                }
+            }
+
+            // ── Updates Available ─────────────────────────────────────────
+            if root.available-updates.length > 0: VerticalLayout {
+                spacing: 0px;
+
+                Rectangle {
+                    height: 1px;
+                    background: #80808025;
+                }
+
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-top: 16px;
+                    padding-bottom: 8px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "Updates Available (" + root.available-updates.length + ")";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: Palette.foreground.transparentize(0.4);
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+
+                    upd-all-btn := Rectangle {
+                        width: upd-all-label.preferred-width + 24px;
+                        height: 24px;
+                        border-radius: 5px;
+                        background: upd-all-ta.has-hover ? #3b82f6 : #2563eb;
+
+                        upd-all-ta := TouchArea {
+                            clicked => { root.update-all-requested(); }
+                        }
+
+                        upd-all-label := Text {
+                            text: "Update All";
+                            font-size: 11px;
+                            font-weight: 600;
+                            color: white;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+                }
+
+                for pkg[i] in root.available-updates: UpdateRow {
+                    item: pkg;
+                    update-clicked(id) => { root.update-requested(id); }
+                }
+            }
+
+            // ── Empty state ───────────────────────────────────────────────
+            if !root.has-content: VerticalLayout {
+                alignment: center;
+                spacing: 8px;
+                padding-top: 80px;
+                padding-bottom: 80px;
+
+                Text {
+                    text: "No active downloads";
+                    font-size: 16px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    color: Palette.foreground.transparentize(0.4);
+                }
+
+                Text {
+                    text: "Installs and updates will appear here";
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                    color: Palette.foreground.transparentize(0.55);
+                }
+            }
+        }
+    }
+}

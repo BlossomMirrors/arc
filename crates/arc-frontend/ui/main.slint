@@ -9,14 +9,22 @@ import { DetailScreen } from "screens/detail-screen.slint";
 import { InstallFileScreen } from "screens/install-file-screen.slint";
 import { InstallFlatpakrefScreen } from "screens/install-flatpakref-screen.slint";
 import { SettingsScreen } from "screens/settings-screen.slint";
+import { DownloadManagerScreen } from "screens/download-manager-screen.slint";
 
 import {
     PackageItem,
     AppDetailData,
     AppCardData,
     CategoryItem,
+    TransactionItem,
 } from "types.slint";
-export { PackageItem, AppDetailData, AppCardData, CategoryItem } from "types.slint";
+export {
+    PackageItem,
+    AppDetailData,
+    AppCardData,
+    CategoryItem,
+    TransactionItem,
+} from "types.slint";
 
 export component AppWindow inherits Window {
     title: "Arc Software";
@@ -27,7 +35,6 @@ export component AppWindow inherits Window {
     in-out property <string> status-text: "Ready";
     in-out property <[PackageItem]> packages: [];
     in-out property <bool> is-loading: false;
-    in-out property <float> progress: 0.0;
     in-out property <string> current-view: "home";
 
     in-out property <[AppCardData]> popular-apps: [];
@@ -44,6 +51,14 @@ export component AppWindow inherits Window {
     in-out property <[image]> detail-screenshots: [];
     in-out property <bool> detail-busy: false;
     in-out property <int> update-count: 0;
+
+    // Download manager state
+    in-out property <[TransactionItem]> active-transactions: [];
+    in-out property <[TransactionItem]> pending-transactions: [];
+    in-out property <[TransactionItem]> completed-transactions: [];
+    in-out property <[PackageItem]> available-updates: [];
+    in-out property <int> active-transaction-count: 0;
+    in-out property <bool> updates-loading: false;
 
     in-out property <string> install-file-path: "";
     in-out property <string> install-file-name: "";
@@ -75,6 +90,8 @@ export component AppWindow inherits Window {
     callback install-flatpakref-confirmed();
     callback install-flatpakref-cancelled();
     callback open-url-requested(string);
+    callback clear-completed-requested();
+    callback update-all-requested();
 
     VerticalBox {
         padding: 0px;
@@ -83,6 +100,7 @@ export component AppWindow inherits Window {
         TopBar {
             search-text <=> root.search-text;
             update-count: root.update-count;
+            active-transaction-count: root.active-transaction-count;
             icon-home: root.icon-home;
             icon-search: root.icon-search;
             icon-settings: root.icon-settings;
@@ -94,9 +112,12 @@ export component AppWindow inherits Window {
                 root.current-view = "installed";
                 root.refresh-requested();
             }
-            updates-clicked => {
-                root.current-view = "updates";
+            downloads-clicked => {
+                root.current-view = "downloads";
                 root.refresh-updates-requested();
+            }
+            update-all-requested => {
+                root.update-all-requested();
             }
             home-clicked => {
                 root.current-view = "home";
@@ -128,7 +149,7 @@ export component AppWindow inherits Window {
             }
 
             PackageListScreen {
-                visible: root.current-view == "search" || root.current-view == "installed" || root.current-view == "updates";
+                visible: root.current-view == "search" || root.current-view == "installed";
                 width: parent.width;
                 height: parent.height;
                 packages: root.packages;
@@ -168,6 +189,28 @@ export component AppWindow inherits Window {
                 }
                 open-url-requested(url) => {
                     root.open-url-requested(url);
+                }
+            }
+
+            if root.current-view == "downloads": DownloadManagerScreen {
+                width: parent.width;
+                height: parent.height;
+                active-transactions: root.active-transactions;
+                pending-transactions: root.pending-transactions;
+                completed-transactions: root.completed-transactions;
+                available-updates: root.available-updates;
+                updates-loading: root.updates-loading;
+                clear-completed-requested => {
+                    root.clear-completed-requested();
+                }
+                update-all-requested => {
+                    root.update-all-requested();
+                }
+                update-requested(id) => {
+                    root.update-requested(id);
+                }
+                refresh-updates-requested => {
+                    root.refresh-updates-requested();
                 }
             }
 
@@ -218,7 +261,6 @@ export component AppWindow inherits Window {
 
         StatusBar {
             status-text: root.status-text;
-            progress: root.progress;
         }
     }
 }
