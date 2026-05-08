@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-PACKAGE_NAME=arc
+PACKAGE_NAME=blossom-arc
 VERSION=0.1.2
 RELEASE=1
 BUILDROOT=$(pwd)/rpmbuild
