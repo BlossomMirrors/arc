@@ -9,7 +9,7 @@ Terminal=false
 Categories=System;PackageManager;
 StartupNotify=true
 StartupWMClass=arc-frontend
-MimeType=application/x-deb;application/x-rpm;application/vnd.archlinux.pkg;x-scheme-handler/appstream;x-scheme-handler/flatpak+https;
+MimeType=application/x-deb;application/x-rpm;application/vnd.archlinux.pkg;application/x-appimage;x-scheme-handler/appstream;x-scheme-handler/flatpak+https;
 Actions=ManageExtensions;
 X-KDE-Protocols=appstream
 

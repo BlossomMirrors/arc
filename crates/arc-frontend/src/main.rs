@@ -6,7 +6,8 @@ mod transactions;
 
 use anyhow::Result;
 use helpers::{
-    get_display_name, get_proxy, is_pkg_file, parse_flatpakref, pkg_name_from_filename,
+    get_display_name, get_proxy, is_appimage, is_pkg_file, parse_flatpakref,
+    pkg_name_from_filename,
 };
 use libarc::{ArcDaemonProxy, Provider, Settings};
 use packages::{load_detail, load_home, load_package_icons, refresh_home_installed};
@@ -60,6 +61,7 @@ fn main() -> Result<()> {
                 Provider::Distrobox => "Native",
                 Provider::Flatpak => "Flatpak",
                 Provider::Lutris => "Lutris",
+                Provider::AppImage => "AppImage",
             }
             .into(),
         );
@@ -624,35 +626,49 @@ fn main() -> Result<()> {
                 .unwrap_or(&file_path)
                 .to_string();
             let pkg_name = pkg_name_from_filename(&file_name);
+            let file_is_appimage = is_appimage(&file_path);
 
             if let Some(app_ref) = app_weak.upgrade() {
                 app_ref.set_install_file_path(file_path.clone().into());
                 app_ref.set_install_file_name(file_name.clone().into());
                 app_ref.set_install_file_has_flatpak(false);
+                app_ref.set_install_file_flatpak_searched(file_is_appimage); // appimage: skip search
+                app_ref.set_install_file_is_appimage(file_is_appimage);
                 app_ref.set_current_view("install-file".into());
             }
 
-            let app_weak2 = app_weak.clone();
-            let proxy_search = get_proxy(&proxy_arc);
-            rt_handle.spawn(async move {
-                if let Some(p) = proxy_search {
-                    if let Ok(results) = p.search(&pkg_name).await {
-                        if let Ok(pkgs) = serde_json::from_str::<Vec<libarc::Package>>(&results) {
-                            if let Some(first) =
-                                pkgs.iter().find(|p| p.provider == Provider::Flatpak)
+            // search for a Flatpak alternative (for non-AppImage files)
+            if !file_is_appimage {
+                let app_weak2 = app_weak.clone();
+                let proxy_search = get_proxy(&proxy_arc);
+                rt_handle.spawn(async move {
+                    let flatpak_found = if let Some(p) = proxy_search {
+                        if let Ok(results) = p.search(&pkg_name).await {
+                            if let Ok(pkgs) =
+                                serde_json::from_str::<Vec<libarc::Package>>(&results)
                             {
-                                let id = first.id.clone();
-                                let name = first.name.clone();
-                                let _ = app_weak2.upgrade_in_event_loop(move |app| {
-                                    app.set_install_file_flatpak_id(id.into());
-                                    app.set_install_file_flatpak_name(name.into());
-                                    app.set_install_file_has_flatpak(true);
-                                });
+                                pkgs.iter().find(|p| p.provider == Provider::Flatpak).map(|first| {
+                                    (first.id.clone(), first.name.clone())
+                                })
+                            } else {
+                                None
                             }
+                        } else {
+                            None
                         }
-                    }
-                }
-            });
+                    } else {
+                        None
+                    };
+                    let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                        if let Some((id, name)) = flatpak_found {
+                            app.set_install_file_flatpak_id(id.into());
+                            app.set_install_file_flatpak_name(name.into());
+                            app.set_install_file_has_flatpak(true);
+                        }
+                        app.set_install_file_flatpak_searched(true);
+                    });
+                });
+            }
 
             {
                 let app_weak3 = app_weak.clone();
@@ -662,6 +678,31 @@ fn main() -> Result<()> {
                 let fp = file_path.clone();
                 let fn_ = file_name.clone();
                 app.on_install_file_distrobox_requested(move || {
+                    begin_transaction(
+                        fp.clone(),
+                        fn_.clone(),
+                        "install".to_string(),
+                        true,
+                        false,
+                        store2.clone(),
+                        proxy_arc2.clone(),
+                        app_weak3.clone(),
+                        rt_handle2.clone(),
+                    );
+                    if let Some(app_ref) = app_weak3.upgrade() {
+                        app_ref.set_current_view("downloads".into());
+                    }
+                });
+            }
+
+            {
+                let app_weak3 = app_weak.clone();
+                let proxy_arc2 = proxy_arc.clone();
+                let rt_handle2 = rt_handle.clone();
+                let store2 = store.clone();
+                let fp = file_path.clone();
+                let fn_ = file_name.clone();
+                app.on_install_file_appimage_requested(move || {
                     begin_transaction(
                         fp.clone(),
                         fn_.clone(),

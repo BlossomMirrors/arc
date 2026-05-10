@@ -28,6 +28,11 @@ pub fn is_pkg_file(path: &str) -> bool {
         || path.ends_with(".rpm")
         || path.ends_with(".pkg.tar.xz")
         || path.ends_with(".pkg.tar.zst")
+        || path.ends_with(".AppImage")
+}
+
+pub fn is_appimage(path: &str) -> bool {
+    path.ends_with(".AppImage")
 }
 
 pub fn pkg_name_from_filename(filename: &str) -> String {
@@ -87,6 +92,7 @@ pub fn dedup_by_preference(pkgs: Vec<Package>, settings: &Settings) -> Vec<Packa
                     !native_names.contains(&name)
                         || settings.preferred_for(&p.id) == Provider::Lutris
                 }
+                Provider::AppImage => true,
             }
         })
         .collect()

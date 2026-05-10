@@ -13,4 +13,9 @@
     <glob pattern="*.pkg.tar.xz"/>
     <glob pattern="*.pkg.tar.zst"/>
   </mime-type>
+  <mime-type type="application/x-appimage">
+    <comment>AppImage Application</comment>
+    <glob pattern="*.AppImage"/>
+    <glob pattern="*.appimage"/>
+  </mime-type>
 </mime-info>

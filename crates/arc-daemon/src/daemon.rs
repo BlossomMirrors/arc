@@ -1,4 +1,5 @@
 use crate::dbus_interface::ArcDaemonInterface;
+use crate::providers::appimage::AppImageProvider;
 use crate::providers::distrobox::DistroboxProvider;
 use crate::providers::flatpak::FlatpakProvider;
 use crate::providers::lutris::LutrisProvider;
@@ -19,8 +20,9 @@ impl Daemon {
         let native = DistroboxProvider::new();
         let flatpak = FlatpakProvider::new();
         let lutris = LutrisProvider::new();
+        let appimage = AppImageProvider::new();
 
-        let provider = Arc::new(MultiProvider::new(native, flatpak, lutris));
+        let provider = Arc::new(MultiProvider::new(native, flatpak, lutris, appimage));
 
         // load both flatpak and system packages into memory right away so the
         // first search request is fast instead of blocking on a cold provider
@@ -53,6 +55,17 @@ impl Daemon {
 
     pub async fn run(self) -> Result<()> {
         info!("Starting Arc Communication Daemon");
+
+        // scan ~/.appimages on startup to pick up any AppImages placed there manually
+        info!("Scanning AppImages directory...");
+        self.provider.appimage.scan_and_sync().await;
+
+        // start inotify watcher; keep it alive for the duration of the daemon
+        let _appimage_watcher =
+            AppImageProvider::start_watcher(Arc::clone(&self.provider.appimage));
+        if let Err(ref e) = _appimage_watcher {
+            warn!("AppImage watcher failed to start: {}", e);
+        }
 
         let interface = ArcDaemonInterface {
             provider: self.provider,

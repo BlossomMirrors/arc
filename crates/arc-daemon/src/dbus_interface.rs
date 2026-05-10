@@ -11,6 +11,9 @@ fn provider_from_id(package_id: &str) -> Provider {
     if package_id.starts_with("lutris:") {
         return Provider::Lutris;
     }
+    if package_id.starts_with("appimage:") || package_id.ends_with(".AppImage") {
+        return Provider::AppImage;
+    }
     let looks_like_flatpak = !package_id.contains('/')
         && !package_id.contains(';')
         && !package_id.starts_with("distrobox:")

@@ -68,6 +68,8 @@ export component AppWindow inherits Window {
     in-out property <string> install-file-flatpak-id: "";
     in-out property <string> install-file-flatpak-name: "";
     in-out property <bool> install-file-has-flatpak: false;
+    in-out property <bool> install-file-flatpak-searched: false;
+    in-out property <bool> install-file-is-appimage: false;
 
     in-out property <string> install-flatpakref-name: "";
     in-out property <string> install-flatpakref-app-id: "";
@@ -88,6 +90,7 @@ export component AppWindow inherits Window {
     callback app-selected(string);
     callback save-settings(string, bool);
     callback install-file-distrobox-requested();
+    callback install-file-appimage-requested();
     callback install-file-flatpak-requested();
     callback install-file-cancelled();
     callback install-flatpakref-confirmed();
@@ -229,9 +232,14 @@ export component AppWindow inherits Window {
                 height: parent.height;
                 install-file-name: root.install-file-name;
                 install-file-has-flatpak: root.install-file-has-flatpak;
+                install-file-flatpak-searched: root.install-file-flatpak-searched;
                 install-file-flatpak-name: root.install-file-flatpak-name;
+                install-file-is-appimage: root.install-file-is-appimage;
                 distrobox-requested => {
                     root.install-file-distrobox-requested();
+                }
+                appimage-requested => {
+                    root.install-file-appimage-requested();
                 }
                 flatpak-requested => {
                     root.install-file-flatpak-requested();

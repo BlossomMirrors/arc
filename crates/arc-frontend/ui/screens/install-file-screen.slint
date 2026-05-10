@@ -4,8 +4,11 @@ export component InstallFileScreen inherits Rectangle {
     in property <string> install-file-name;
     in property <bool> install-file-has-flatpak;
     in property <string> install-file-flatpak-name;
+    in property <bool> install-file-is-appimage;
+    in property <bool> install-file-flatpak-searched;
 
     callback distrobox-requested();
+    callback appimage-requested();
     callback flatpak-requested();
     callback cancelled();
 
@@ -15,7 +18,7 @@ export component InstallFileScreen inherits Rectangle {
         spacing: 20px;
 
         Text {
-            text: "Install Package";
+            text: root.install-file-is-appimage ? "Install AppImage" : "Install Package";
             font-size: 22px;
             font-weight: 700;
             horizontal-alignment: center;
@@ -29,7 +32,12 @@ export component InstallFileScreen inherits Rectangle {
             overflow: elide;
         }
 
-        Button {
+        if root.install-file-is-appimage: Button {
+            text: "Install as AppImage";
+            clicked => { root.appimage-requested(); }
+        }
+
+        if !root.install-file-is-appimage: Button {
             text: "Install via Distrobox";
             clicked => { root.distrobox-requested(); }
         }
@@ -39,7 +47,7 @@ export component InstallFileScreen inherits Rectangle {
             clicked => { root.flatpak-requested(); }
         }
 
-        if !root.install-file-has-flatpak: Text {
+        if !root.install-file-is-appimage && !root.install-file-has-flatpak && !root.install-file-flatpak-searched: Text {
             text: "Searching for Flathub alternative...";
             font-size: 11px;
             color: #888;

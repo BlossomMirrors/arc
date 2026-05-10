@@ -6,6 +6,7 @@ pub enum Provider {
     Flatpak,
     Distrobox,
     Lutris,
+    AppImage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
