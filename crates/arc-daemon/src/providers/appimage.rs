@@ -558,6 +558,12 @@ fn parse_desktop(content: &str) -> AppImageMeta {
             meta.categories = v.to_string();
         } else if let Some(v) = line.strip_prefix("X-AppImage-Update-Information=") {
             meta.update_info = v.to_string();
+        } else if let Some(v) = line.strip_prefix("X-AppImage-Version=") {
+            // Many AppImages set Version=1.0 (XDG spec version) and put the real
+            // app version in X-AppImage-Version instead.
+            if meta.version.is_empty() || meta.version == "1.0" {
+                meta.version = v.to_string();
+            }
         }
     }
     meta
@@ -717,18 +723,20 @@ impl PackageProvider for AppImageProvider {
 
     async fn list_updates(&self) -> Result<Vec<Package>, ArcError> {
         let installed = self.read_installed().await?;
-        let mut updates = Vec::new();
+
+        let mut with_info: Vec<(Package, PathBuf, String)> = Vec::new();
+        let mut no_info: Vec<(Package, PathBuf)> = Vec::new();
 
         for pkg in installed {
             let stem = pkg.id.strip_prefix("appimage:").unwrap_or("").to_string();
-            let info_content = match fs::read_to_string(self.info_file(&stem)).await {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
 
-            let stored_update_info: String = info_content
-                .lines()
-                .find_map(|l| l.strip_prefix("UPDATE_INFO=").map(|v| v.to_string()))
+            let stored_update_info = fs::read_to_string(self.info_file(&stem))
+                .await
+                .ok()
+                .and_then(|c| {
+                    c.lines()
+                        .find_map(|l| l.strip_prefix("UPDATE_INFO=").map(|v| v.to_string()))
+                })
                 .unwrap_or_default();
 
             let appimage_path = self.resolve_appimage_path(&stem).await;
@@ -736,35 +744,61 @@ impl PackageProvider for AppImageProvider {
                 continue;
             }
 
-            // If the .info file pre-dates ELF reading, fall back to reading the binary now
             let update_info = if !stored_update_info.is_empty() {
                 stored_update_info
             } else {
                 let p = appimage_path.clone();
-                tokio::task::spawn_blocking(move || {
-                    read_upd_info_from_elf(&p).unwrap_or_default()
-                })
-                .await
-                .unwrap_or_default()
+                tokio::task::spawn_blocking(move || read_upd_info_from_elf(&p).unwrap_or_default())
+                    .await
+                    .unwrap_or_default()
             };
 
-            if update_info.is_empty() {
-                continue;
+            if !update_info.is_empty() {
+                with_info.push((pkg, appimage_path, update_info));
+            } else {
+                // No embedded update info — fall back to GitHub search based on filename
+                no_info.push((pkg, appimage_path));
             }
+        }
 
-            let has_update = if let Some(gh) = parse_github_info(&update_info) {
-                match github_latest_release(&self.http, &gh.owner, &gh.repo, &gh.asset_glob).await {
+        let http = &self.http;
+
+        let known_futures = with_info.iter().map(|(pkg, appimage_path, update_info)| async move {
+            if let Some(gh) = parse_github_info(update_info) {
+                match github_latest_release(http, &gh.owner, &gh.repo, &gh.asset_glob).await {
                     Some((remote_tag, _)) => versions_differ(&pkg.version, &remote_tag),
                     None => false,
                 }
             } else {
-                check_update_available(&appimage_path).await
-            };
-
-            if has_update {
-                updates.push(pkg);
+                check_update_available(appimage_path).await
             }
-        }
+        });
+
+        let guess_futures = no_info.iter().map(|(pkg, _)| {
+            let stem = pkg.id.strip_prefix("appimage:").unwrap_or("").to_string();
+            let info_path = self.info_file(&stem);
+            let version = pkg.version.clone();
+            async move {
+                guess_github_update_available(http, &stem, &version, &info_path).await
+            }
+        });
+
+        let (known_results, guess_results) = tokio::join!(
+            futures_util::future::join_all(known_futures),
+            futures_util::future::join_all(guess_futures),
+        );
+
+        let updates = with_info
+            .into_iter()
+            .zip(known_results)
+            .filter_map(|((pkg, _, _), has_update)| if has_update { Some(pkg) } else { None })
+            .chain(
+                no_info
+                    .into_iter()
+                    .zip(guess_results)
+                    .filter_map(|((pkg, _), has_update)| if has_update { Some(pkg) } else { None }),
+            )
+            .collect();
 
         Ok(updates)
     }
@@ -779,12 +813,23 @@ impl PackageProvider for AppImageProvider {
             return Err(ArcError::PackageNotFound(package_id.to_string()));
         }
 
-        let update_info = match fs::read_to_string(self.info_file(stem)).await {
-            Ok(c) => c
-                .lines()
-                .find_map(|l| l.strip_prefix("UPDATE_INFO=").map(|v| v.to_string()))
-                .unwrap_or_default(),
-            Err(_) => String::new(),
+        let stored_update_info = fs::read_to_string(self.info_file(stem))
+            .await
+            .ok()
+            .and_then(|c| {
+                c.lines()
+                    .find_map(|l| l.strip_prefix("UPDATE_INFO=").map(|v| v.to_string()))
+            })
+            .unwrap_or_default();
+
+        // Same ELF fallback as list_updates — handles .info files written before ELF reading
+        let update_info = if !stored_update_info.is_empty() {
+            stored_update_info
+        } else {
+            let p = appimage_path.clone();
+            tokio::task::spawn_blocking(move || read_upd_info_from_elf(&p).unwrap_or_default())
+                .await
+                .unwrap_or_default()
         };
 
         let updated_via_github = if let Some(gh) = parse_github_info(&update_info) {
@@ -804,6 +849,21 @@ impl PackageProvider for AppImageProvider {
         };
 
         if !updated_via_github {
+            // For AppImages with no embedded update info, try GitHub repo search
+            if update_info.is_empty() {
+                let info_path = self.info_file(stem);
+                if let Some((owner, repo)) =
+                    get_github_repo_for_stem(&self.http, stem, &info_path).await
+                {
+                    if let Some((tag, dl_url)) =
+                        github_latest_release(&self.http, &owner, &repo, "*.appimage").await
+                    {
+                        info!("Downloading {} update via GitHub search ({}) — {}", stem, tag, dl_url);
+                        download_github_update(&self.http, &dl_url, &appimage_path).await?;
+                        return self.process_appimage(&appimage_path, stem).await;
+                    }
+                }
+            }
             // fall back to AppImageUpdate tool
             let status = Command::new("AppImageUpdate")
                 .arg(&appimage_path)
@@ -1093,4 +1153,148 @@ async fn check_update_available(appimage_path: &Path) -> bool {
     };
     // exit code 1 = update available, 0 = up to date
     output.status.code() == Some(1)
+}
+
+// GitHub search fallback for AppImages without embedded update info ───────────
+
+/// Parse an AppImage stem like `winboat-0.8.7-x86_64` into `("winboat", "0.8.7")`.
+fn parse_stem_name_version(stem: &str) -> Option<(String, String)> {
+    const ARCH: &[&str] = &[
+        "x86_64", "x86-64", "aarch64", "arm64", "i386", "i686",
+        "armhf", "armv7l", "armv7", "arm", "linux",
+    ];
+    let parts: Vec<&str> = stem.split('-').collect();
+    let mut name_parts: Vec<&str> = Vec::new();
+    let mut version = String::new();
+    for &part in &parts {
+        if version.is_empty() {
+            let pl = part.to_lowercase();
+            if ARCH.contains(&pl.as_str()) {
+                continue;
+            }
+            if part.chars().next().map_or(false, |c| c.is_ascii_digit()) && part.contains('.') {
+                version = part.to_string();
+            } else {
+                name_parts.push(part);
+            }
+        }
+        // after finding version, ignore remaining parts (arch suffixes, build IDs)
+    }
+    if name_parts.is_empty() {
+        return None;
+    }
+    Some((name_parts.join("-").to_lowercase(), version))
+}
+
+/// Search GitHub for a repository matching `name` that has AppImage release assets.
+/// Returns `(owner, repo)` for the first match found.
+async fn search_github_appimage_repo(http: &Client, name: &str) -> Option<(String, String)> {
+    if name.len() < 3 {
+        return None;
+    }
+    let resp = http
+        .get("https://api.github.com/search/repositories")
+        .query(&[("q", name), ("sort", "stars"), ("order", "desc"), ("per_page", "5")])
+        .header("User-Agent", "arc-daemon/1.0")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        debug!("GitHub repo search for '{}' returned {}", name, resp.status());
+        return None;
+    }
+    let json: serde_json::Value = resp.json().await.ok()?;
+    let items = json.get("items")?.as_array()?;
+
+    for item in items {
+        let repo_name = item.get("name")?.as_str()?;
+        let owner = item.get("owner")?.get("login")?.as_str()?;
+        // normalise both names (strip dashes/underscores) before comparing
+        let rn = repo_name.to_lowercase().replace(['-', '_'], "");
+        let nm = name.to_lowercase().replace(['-', '_'], "");
+        if !rn.contains(&nm) && !nm.contains(&rn) {
+            continue;
+        }
+        // verify the latest release actually has .AppImage assets
+        let url = format!("https://api.github.com/repos/{}/{}/releases/latest", owner, repo_name);
+        let rr = http.get(&url).header("User-Agent", "arc-daemon/1.0").send().await.ok()?;
+        if !rr.status().is_success() {
+            continue;
+        }
+        let rel: serde_json::Value = rr.json().await.ok()?;
+        let has_appimage = rel
+            .get("assets")?
+            .as_array()?
+            .iter()
+            .any(|a| {
+                a.get("name")
+                    .and_then(|n| n.as_str())
+                    .map(|n| n.to_lowercase().ends_with(".appimage"))
+                    .unwrap_or(false)
+            });
+        if has_appimage {
+            debug!("GitHub search matched {}/{} for stem name '{}'", owner, repo_name, name);
+            return Some((owner.to_string(), repo_name.to_string()));
+        }
+    }
+    None
+}
+
+/// Returns `(owner, repo)` for an AppImage stem, reading a cached `GITHUB_REPO=`
+/// line from its `.info` file or falling back to a GitHub API search.
+async fn get_github_repo_for_stem(
+    http: &Client,
+    stem: &str,
+    info_path: &Path,
+) -> Option<(String, String)> {
+    // Try cached value first to avoid burning rate-limit quota
+    if let Ok(content) = fs::read_to_string(info_path).await {
+        if let Some(v) = content
+            .lines()
+            .find_map(|l| l.strip_prefix("GITHUB_REPO=").map(|v| v.to_string()))
+            .filter(|s| !s.is_empty())
+        {
+            let mut p = v.splitn(2, '/');
+            let owner = p.next()?.to_string();
+            let repo = p.next()?.to_string();
+            if !owner.is_empty() && !repo.is_empty() {
+                return Some((owner, repo));
+            }
+        }
+    }
+    let (name, _) = parse_stem_name_version(stem)?;
+    let (owner, repo) = search_github_appimage_repo(http, &name).await?;
+    // Persist so future calls skip the search
+    if let Ok(mut content) = fs::read_to_string(info_path).await {
+        if !content.contains("GITHUB_REPO=") {
+            content.push_str(&format!("GITHUB_REPO={}/{}\n", owner, repo));
+            let _ = fs::write(info_path, content).await;
+        }
+    }
+    Some((owner, repo))
+}
+
+/// For AppImages without embedded update info: search GitHub for the repo and
+/// compare the latest release tag with the version embedded in the filename stem.
+async fn guess_github_update_available(
+    http: &Client,
+    stem: &str,
+    pkg_version: &str,
+    info_path: &Path,
+) -> bool {
+    let (_, stem_version) = parse_stem_name_version(stem).unwrap_or_default();
+    // Prefer the version extracted from the filename — many AppImages set
+    // `Version=1.0` (XDG spec version) in the desktop entry, not the real app version.
+    let local_version = if !stem_version.is_empty() { stem_version.as_str() } else { pkg_version };
+    if local_version.is_empty() {
+        return false;
+    }
+    let (owner, repo) = match get_github_repo_for_stem(http, stem, info_path).await {
+        Some(v) => v,
+        None => return false,
+    };
+    match github_latest_release(http, &owner, &repo, "*.appimage").await {
+        Some((tag, _)) => versions_differ(local_version, &tag),
+        None => false,
+    }
 }
