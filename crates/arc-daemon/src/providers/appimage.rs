@@ -117,14 +117,24 @@ impl AppImageProvider {
     }
 
     async fn extract_metadata(&self, path: &Path) -> AppImageMeta {
+        // Read .upd_info ELF section first — this is the canonical source per the AppImage
+        // spec and works without FUSE/extraction.
+        let p = path.to_path_buf();
+        let elf_update_info = tokio::task::spawn_blocking(move || {
+            read_upd_info_from_elf(&p).unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default();
+
         let extract_dir = std::env::temp_dir()
             .join(format!("arc-appimage-{}", Uuid::new_v4().simple()));
 
         if fs::create_dir_all(&extract_dir).await.is_err() {
-            return AppImageMeta::default_from_path(path);
+            let mut meta = AppImageMeta::default_from_path(path);
+            meta.update_info = elf_update_info;
+            return meta;
         }
 
-        // set executable before running --appimage-extract
         let path_for_extract = path.to_path_buf();
         tokio::task::spawn_blocking(move || {
             set_executable_permissions(&path_for_extract, false);
@@ -142,14 +152,20 @@ impl AppImageProvider {
 
         if !extract_ok {
             let _ = fs::remove_dir_all(&extract_dir).await;
-            return AppImageMeta::default_from_path(path);
+            let mut meta = AppImageMeta::default_from_path(path);
+            meta.update_info = elf_update_info;
+            return meta;
         }
 
         let squashfs = extract_dir.join("squashfs-root");
         let mut meta = Self::read_squashfs_meta(&squashfs, path).await;
 
-        // The icon path points inside extract_dir which is about to be deleted.
-        // Copy it out to a standalone temp file before cleanup.
+        // ELF section is canonical — override whatever the desktop file said
+        if !elf_update_info.is_empty() {
+            meta.update_info = elf_update_info;
+        }
+
+        // Copy icon out before the extraction dir is deleted
         if let Some(ref icon_src) = meta.icon_path.clone() {
             if icon_src.exists() {
                 let ext = icon_src.extension().and_then(|e| e.to_str()).unwrap_or("png");
@@ -710,17 +726,29 @@ impl PackageProvider for AppImageProvider {
                 Err(_) => continue,
             };
 
-            let update_info: String = info_content
+            let stored_update_info: String = info_content
                 .lines()
                 .find_map(|l| l.strip_prefix("UPDATE_INFO=").map(|v| v.to_string()))
                 .unwrap_or_default();
 
-            if update_info.is_empty() {
+            let appimage_path = self.resolve_appimage_path(&stem).await;
+            if !appimage_path.exists() {
                 continue;
             }
 
-            let appimage_path = self.resolve_appimage_path(&stem).await;
-            if !appimage_path.exists() {
+            // If the .info file pre-dates ELF reading, fall back to reading the binary now
+            let update_info = if !stored_update_info.is_empty() {
+                stored_update_info
+            } else {
+                let p = appimage_path.clone();
+                tokio::task::spawn_blocking(move || {
+                    read_upd_info_from_elf(&p).unwrap_or_default()
+                })
+                .await
+                .unwrap_or_default()
+            };
+
+            if update_info.is_empty() {
                 continue;
             }
 
@@ -812,6 +840,121 @@ impl PackageProvider for AppImageProvider {
         Ok(())
     }
 }
+
+// ELF integer readers -------------------------------------------------------
+
+fn elf_u16(buf: &[u8], off: usize, le: bool) -> u64 {
+    let b: [u8; 2] = buf[off..off + 2].try_into().unwrap_or([0; 2]);
+    (if le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) }) as u64
+}
+fn elf_u32(buf: &[u8], off: usize, le: bool) -> u64 {
+    let b: [u8; 4] = buf[off..off + 4].try_into().unwrap_or([0; 4]);
+    (if le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) }) as u64
+}
+fn elf_u64(buf: &[u8], off: usize, le: bool) -> u64 {
+    let b: [u8; 8] = buf[off..off + 8].try_into().unwrap_or([0; 8]);
+    if le { u64::from_le_bytes(b) } else { u64::from_be_bytes(b) }
+}
+
+/// Read the `.upd_info` ELF section from an AppImage binary.
+/// This is the canonical source of AppImage update information per the spec —
+/// it works without FUSE or extracting the squashfs payload.
+fn read_upd_info_from_elf(path: &Path) -> Option<String> {
+    use std::fs::File;
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut f = File::open(path).ok()?;
+
+    let mut ident = [0u8; 8];
+    f.read_exact(&mut ident).ok()?;
+    if &ident[..4] != b"\x7fELF" {
+        return None;
+    }
+
+    let is64 = ident[4] == 2;
+    let le = ident[5] == 1;
+    let ehdr_size: usize = if is64 { 64 } else { 52 };
+
+    f.seek(SeekFrom::Start(0)).ok()?;
+    let mut ehdr = vec![0u8; ehdr_size];
+    f.read_exact(&mut ehdr).ok()?;
+
+    let (e_shoff, e_shentsize, e_shnum, e_shstrndx) = if is64 {
+        (
+            elf_u64(&ehdr, 40, le),
+            elf_u16(&ehdr, 58, le),
+            elf_u16(&ehdr, 60, le),
+            elf_u16(&ehdr, 62, le),
+        )
+    } else {
+        (
+            elf_u32(&ehdr, 32, le),
+            elf_u16(&ehdr, 46, le),
+            elf_u16(&ehdr, 48, le),
+            elf_u16(&ehdr, 50, le),
+        )
+    };
+
+    if e_shoff == 0 || e_shnum == 0 || e_shstrndx >= e_shnum {
+        return None;
+    }
+
+    let sh_entry_size: usize = if is64 { 64 } else { 40 };
+
+    // Read section header string table
+    let strtab_shdr = e_shoff + e_shstrndx * e_shentsize;
+    f.seek(SeekFrom::Start(strtab_shdr)).ok()?;
+    let mut sh = vec![0u8; sh_entry_size];
+    f.read_exact(&mut sh).ok()?;
+    let (strtab_off, strtab_size) = if is64 {
+        (elf_u64(&sh, 24, le), elf_u64(&sh, 32, le))
+    } else {
+        (elf_u32(&sh, 16, le), elf_u32(&sh, 20, le))
+    };
+
+    f.seek(SeekFrom::Start(strtab_off)).ok()?;
+    let mut strtab = vec![0u8; strtab_size.min(1 << 20) as usize];
+    f.read_exact(&mut strtab).ok()?;
+
+    // Scan all section headers for .upd_info
+    for i in 0..e_shnum {
+        f.seek(SeekFrom::Start(e_shoff + i * e_shentsize)).ok()?;
+        sh.iter_mut().for_each(|b| *b = 0);
+        f.read_exact(&mut sh).ok()?;
+
+        let sh_name = elf_u32(&sh, 0, le) as usize;
+        if sh_name >= strtab.len() {
+            continue;
+        }
+        let name_end = strtab[sh_name..]
+            .iter()
+            .position(|&b| b == 0)
+            .map(|p| sh_name + p)
+            .unwrap_or(strtab.len());
+
+        if &strtab[sh_name..name_end] != b".upd_info" {
+            continue;
+        }
+
+        let (sec_off, sec_size) = if is64 {
+            (elf_u64(&sh, 24, le), elf_u64(&sh, 32, le))
+        } else {
+            (elf_u32(&sh, 16, le), elf_u32(&sh, 20, le))
+        };
+
+        f.seek(SeekFrom::Start(sec_off)).ok()?;
+        let mut content = vec![0u8; sec_size.min(2048) as usize];
+        f.read_exact(&mut content).ok()?;
+
+        let end = content.iter().position(|&b| b == 0).unwrap_or(content.len());
+        let s = std::str::from_utf8(&content[..end]).ok()?.trim().to_string();
+        return if s.is_empty() { None } else { Some(s) };
+    }
+
+    None
+}
+
+// GitHub update helpers -----------------------------------------------------
 
 struct GitHubInfo {
     owner: String,

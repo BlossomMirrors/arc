@@ -58,6 +58,15 @@ pub fn update_package_installed(app: &crate::AppWindow, pkg_id: &str, installed:
     app.set_packages(items.as_slice().into());
 }
 
+pub fn remove_from_packages_list(app: &crate::AppWindow, pkg_id: &str) {
+    let model = app.get_packages();
+    let items: Vec<crate::PackageItem> = (0..model.row_count())
+        .filter_map(|i| model.row_data(i))
+        .filter(|p| p.id.as_str() != pkg_id)
+        .collect();
+    app.set_packages(items.as_slice().into());
+}
+
 pub fn push_transactions_to_ui(store: TxStore, app_weak: &slint::Weak<crate::AppWindow>) {
     let (active, pending, completed) = {
         let s = store.lock().unwrap();
@@ -308,7 +317,11 @@ pub async fn run_signal_listener(
                     let store_for_closure = store.clone();
                     let _ = app_weak.upgrade_in_event_loop(move |app| {
                         if ok {
-                            update_package_installed(&app, &pkg_id, installed_after);
+                            if tx_type == "remove" && app.get_current_view() == "installed" {
+                                remove_from_packages_list(&app, &pkg_id);
+                            } else {
+                                update_package_installed(&app, &pkg_id, installed_after);
+                            }
                             let verb = match tx_type.as_str() {
                                 "remove" => "Removed",
                                 "update" => "Updated",
