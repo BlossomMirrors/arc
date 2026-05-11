@@ -1,13 +1,16 @@
 use super::PackageProvider;
 use anvil_appimage::{find_icons_in_dir, move_appimage, select_best_icon, set_executable_permissions};
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use libarc::{ArcError, Package, Provider};
 use notify::{
     event::{AccessKind, AccessMode},
     Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
+use reqwest::Client;
 use std::path::{Path, PathBuf};
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -16,6 +19,8 @@ pub struct AppImageProvider {
     pub appimages_dir: PathBuf,
     desktop_dir: PathBuf,
     data_dir: PathBuf,
+    home: PathBuf,
+    http: Client,
 }
 
 struct AppImageMeta {
@@ -34,7 +39,35 @@ impl AppImageProvider {
             appimages_dir: home.join(".appimages"),
             desktop_dir: home.join(".local/share/applications"),
             data_dir: home.join(".local/share/arc/appimages"),
+            home: home.clone(),
+            http: Client::new(),
         }
+    }
+
+    fn hicolor_icon_path(&self, stem: &str, ext: &str) -> PathBuf {
+        let size_dir = if ext == "svg" || ext == "svgz" { "scalable" } else { "256x256" };
+        self.home
+            .join(".local/share/icons/hicolor")
+            .join(size_dir)
+            .join("apps")
+            .join(format!("arc-appimage-{}.{}", stem, ext))
+    }
+
+    async fn install_icon_to_hicolor(&self, stem: &str, icon_src: &Path) -> Option<String> {
+        let ext = icon_src.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
+        let dest = self.hicolor_icon_path(stem, &ext);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).await.ok()?;
+        }
+        fs::copy(icon_src, &dest).await.ok()?;
+        let hicolor_root = self.home.join(".local/share/icons/hicolor");
+        let _ = Command::new("gtk-update-icon-cache")
+            .arg("-f")
+            .arg("-t")
+            .arg(&hicolor_root)
+            .status()
+            .await;
+        Some(format!("arc-appimage-{}", stem))
     }
 
     fn info_file(&self, stem: &str) -> PathBuf {
@@ -52,6 +85,25 @@ impl AppImageProvider {
 
     fn appimage_path(&self, stem: &str) -> PathBuf {
         self.appimages_dir.join(format!("{}.AppImage", stem))
+    }
+
+    /// Returns the actual on-disk path for an installed AppImage.
+    /// Reads the stored PATH= from the .info file so the extension case (.AppImage vs
+    /// .appimage) matches whatever was originally placed in the watch directory.
+    async fn resolve_appimage_path(&self, stem: &str) -> PathBuf {
+        if let Ok(content) = fs::read_to_string(self.info_file(stem)).await {
+            if let Some(p) = content
+                .lines()
+                .find_map(|l| l.strip_prefix("PATH=").map(|v| v.to_string()))
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+            {
+                if p.exists() {
+                    return p;
+                }
+            }
+        }
+        self.appimage_path(stem)
     }
 
     fn stem_from_path(path: &Path) -> Option<String> {
@@ -94,7 +146,25 @@ impl AppImageProvider {
         }
 
         let squashfs = extract_dir.join("squashfs-root");
-        let meta = Self::read_squashfs_meta(&squashfs, path).await;
+        let mut meta = Self::read_squashfs_meta(&squashfs, path).await;
+
+        // The icon path points inside extract_dir which is about to be deleted.
+        // Copy it out to a standalone temp file before cleanup.
+        if let Some(ref icon_src) = meta.icon_path.clone() {
+            if icon_src.exists() {
+                let ext = icon_src.extension().and_then(|e| e.to_str()).unwrap_or("png");
+                let icon_tmp = std::env::temp_dir()
+                    .join(format!("arc-icon-{}.{}", Uuid::new_v4().simple(), ext));
+                if fs::copy(icon_src, &icon_tmp).await.is_ok() {
+                    meta.icon_path = Some(icon_tmp);
+                } else {
+                    meta.icon_path = None;
+                }
+            } else {
+                meta.icon_path = None;
+            }
+        }
+
         let _ = fs::remove_dir_all(&extract_dir).await;
         meta
     }
@@ -192,25 +262,31 @@ impl AppImageProvider {
 
         let meta = self.extract_metadata(path).await;
 
-        // copy icon to stable location, preserving the source extension
+        // copy icon to stable data location, preserving the source extension
         let icon_dest = if let Some(ref icon_src) = meta.icon_path {
             let ext = icon_src
                 .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or("png");
             let dest = self.data_dir.join("icons").join(format!("{}.{}", stem, ext));
-            if fs::copy(icon_src, &dest).await.is_ok() {
-                Some(dest)
-            } else {
-                None
-            }
+            let ok = fs::copy(icon_src, &dest).await.is_ok();
+            let _ = fs::remove_file(icon_src).await; // remove the temp copy
+            if ok { Some(dest) } else { None }
         } else {
             None
         };
 
-        let icon_str = icon_dest
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string())
+        // install into hicolor so GNOME Shell / app launchers pick it up
+        let hicolor_name = if let Some(ref src) = icon_dest {
+            self.install_icon_to_hicolor(stem, src).await
+        } else {
+            None
+        };
+
+        // prefer hicolor theme name for .desktop Icon= (better integration); fall back to full path
+        let icon_str = hicolor_name
+            .clone()
+            .or_else(|| icon_dest.as_ref().map(|p| p.to_string_lossy().to_string()))
             .unwrap_or_else(|| "application-x-executable".to_string());
 
         // write .desktop file
@@ -343,15 +419,31 @@ impl AppImageProvider {
         };
 
         let _ = fs::remove_file(self.desktop_file(stem)).await;
-        if let Some(path) = icon_path {
-            let _ = fs::remove_file(&path).await;
+        if let Some(ref path) = icon_path {
+            let _ = fs::remove_file(path).await;
         } else {
             // legacy fallback for info files written before ICON_PATH was added
             let _ = fs::remove_file(self.icon_file(stem)).await;
         }
+
+        // remove hicolor icons (try all known extensions)
+        for ext in ["svg", "svgz", "png"] {
+            let p = self.hicolor_icon_path(stem, ext);
+            if p.exists() {
+                let _ = fs::remove_file(&p).await;
+            }
+        }
+
         let _ = fs::remove_file(self.info_file(stem)).await;
         let _ = Command::new("update-desktop-database")
             .arg(self.desktop_dir.to_str().unwrap_or(""))
+            .status()
+            .await;
+        let hicolor_root = self.home.join(".local/share/icons/hicolor");
+        let _ = Command::new("gtk-update-icon-cache")
+            .arg("-f")
+            .arg("-t")
+            .arg(&hicolor_root)
             .status()
             .await;
     }
@@ -601,7 +693,7 @@ impl PackageProvider for AppImageProvider {
             .strip_prefix("appimage:")
             .ok_or_else(|| ArcError::ProviderError(format!("Invalid AppImage id: {}", package_id)))?;
 
-        let appimage = self.appimage_path(stem);
+        let appimage = self.resolve_appimage_path(stem).await;
         let _ = fs::remove_file(&appimage).await;
         self.cleanup_stem(stem).await;
         Ok(())
@@ -627,13 +719,20 @@ impl PackageProvider for AppImageProvider {
                 continue;
             }
 
-            let appimage_path = self.appimage_path(&stem);
+            let appimage_path = self.resolve_appimage_path(&stem).await;
             if !appimage_path.exists() {
                 continue;
             }
 
-            // use AppImageUpdate if available to check
-            let has_update = check_update_available(&appimage_path).await;
+            let has_update = if let Some(gh) = parse_github_info(&update_info) {
+                match github_latest_release(&self.http, &gh.owner, &gh.repo, &gh.asset_glob).await {
+                    Some((remote_tag, _)) => versions_differ(&pkg.version, &remote_tag),
+                    None => false,
+                }
+            } else {
+                check_update_available(&appimage_path).await
+            };
+
             if has_update {
                 updates.push(pkg);
             }
@@ -647,26 +746,49 @@ impl PackageProvider for AppImageProvider {
             .strip_prefix("appimage:")
             .ok_or_else(|| ArcError::ProviderError(format!("Invalid AppImage id: {}", package_id)))?;
 
-        let appimage_path = self.appimage_path(stem);
+        let appimage_path = self.resolve_appimage_path(stem).await;
         if !appimage_path.exists() {
             return Err(ArcError::PackageNotFound(package_id.to_string()));
         }
 
-        // try AppImageUpdate tool
-        let status = Command::new("AppImageUpdate")
-            .arg(&appimage_path)
-            .status()
-            .await
-            .map_err(|_| {
-                ArcError::ProviderError(
-                    "AppImageUpdate not found. Install it to enable AppImage updates.".to_string(),
-                )
-            })?;
+        let update_info = match fs::read_to_string(self.info_file(stem)).await {
+            Ok(c) => c
+                .lines()
+                .find_map(|l| l.strip_prefix("UPDATE_INFO=").map(|v| v.to_string()))
+                .unwrap_or_default(),
+            Err(_) => String::new(),
+        };
 
-        if !status.success() {
-            return Err(ArcError::ProviderError(
-                "AppImageUpdate failed".to_string(),
-            ));
+        let updated_via_github = if let Some(gh) = parse_github_info(&update_info) {
+            match github_latest_release(&self.http, &gh.owner, &gh.repo, &gh.asset_glob).await {
+                Some((tag, download_url)) => {
+                    info!("Downloading {} update from GitHub ({}) — {}", stem, tag, download_url);
+                    download_github_update(&self.http, &download_url, &appimage_path).await?;
+                    true
+                }
+                None => {
+                    warn!("GitHub release lookup failed for {}", stem);
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        if !updated_via_github {
+            // fall back to AppImageUpdate tool
+            let status = Command::new("AppImageUpdate")
+                .arg(&appimage_path)
+                .status()
+                .await
+                .map_err(|_| {
+                    ArcError::ProviderError(
+                        "AppImageUpdate not found. Install it to enable AppImage updates.".to_string(),
+                    )
+                })?;
+            if !status.success() {
+                return Err(ArcError::ProviderError("AppImageUpdate failed".to_string()));
+            }
         }
 
         // re-process metadata (version may have changed)
@@ -678,7 +800,7 @@ impl PackageProvider for AppImageProvider {
             .strip_prefix("appimage:")
             .ok_or_else(|| ArcError::ProviderError(format!("Invalid AppImage id: {}", package_id)))?;
 
-        let appimage_path = self.appimage_path(stem);
+        let appimage_path = self.resolve_appimage_path(stem).await;
         if !appimage_path.exists() {
             return Err(ArcError::PackageNotFound(package_id.to_string()));
         }
@@ -689,6 +811,132 @@ impl PackageProvider for AppImageProvider {
 
         Ok(())
     }
+}
+
+struct GitHubInfo {
+    owner: String,
+    repo: String,
+    asset_glob: String,
+}
+
+fn parse_github_info(update_info: &str) -> Option<GitHubInfo> {
+    let parts: Vec<&str> = update_info.splitn(5, '|').collect();
+    if parts.len() >= 5 && parts[0] == "gh-releases-zsync" {
+        let glob = parts[4].strip_suffix(".zsync").unwrap_or(parts[4]).to_string();
+        return Some(GitHubInfo {
+            owner: parts[1].to_string(),
+            repo: parts[2].to_string(),
+            asset_glob: glob,
+        });
+    }
+    if parts.len() >= 2 && parts[0] == "zsync" {
+        let url = parts[1];
+        if url.contains("github.com") {
+            // https://github.com/{owner}/{repo}/releases/...
+            let stripped = url.trim_start_matches("https://github.com/").trim_start_matches("http://github.com/");
+            let url_parts: Vec<&str> = stripped.splitn(3, '/').collect();
+            if url_parts.len() >= 2 {
+                let filename = url.rsplit('/').next().unwrap_or("*.AppImage");
+                let glob = filename.strip_suffix(".zsync").unwrap_or(filename).to_string();
+                return Some(GitHubInfo {
+                    owner: url_parts[0].to_string(),
+                    repo: url_parts[1].to_string(),
+                    asset_glob: glob,
+                });
+            }
+        }
+    }
+    None
+}
+
+fn glob_matches(pattern: &str, name: &str) -> bool {
+    let parts: Vec<&str> = pattern.split('*').collect();
+    if parts.len() == 1 {
+        return pattern == name;
+    }
+    let mut pos = 0usize;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if i == 0 {
+            if !name.starts_with(part) {
+                return false;
+            }
+            pos = part.len();
+        } else if i == parts.len() - 1 {
+            return name[pos..].ends_with(part);
+        } else if let Some(found) = name[pos..].find(part) {
+            pos += found + part.len();
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+fn versions_differ(local: &str, remote_tag: &str) -> bool {
+    let norm = |s: &str| s.trim_start_matches('v').to_lowercase();
+    norm(local) != norm(remote_tag)
+}
+
+async fn github_latest_release(
+    http: &Client,
+    owner: &str,
+    repo: &str,
+    asset_glob: &str,
+) -> Option<(String, String)> {
+    let url = format!("https://api.github.com/repos/{}/{}/releases/latest", owner, repo);
+    let resp = http
+        .get(&url)
+        .header("User-Agent", "arc-daemon/1.0")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json: serde_json::Value = resp.json().await.ok()?;
+    let tag = json.get("tag_name")?.as_str()?.to_string();
+    let assets = json.get("assets")?.as_array()?;
+    let glob_lower = asset_glob.to_lowercase();
+    for asset in assets {
+        let name = asset.get("name")?.as_str()?;
+        if glob_matches(&glob_lower, &name.to_lowercase()) {
+            let dl = asset.get("browser_download_url")?.as_str()?.to_string();
+            return Some((tag, dl));
+        }
+    }
+    None
+}
+
+async fn download_github_update(http: &Client, url: &str, dest: &Path) -> Result<(), ArcError> {
+    let resp = http
+        .get(url)
+        .header("User-Agent", "arc-daemon/1.0")
+        .send()
+        .await
+        .map_err(|e| ArcError::ProviderError(format!("Download request failed: {}", e)))?;
+    if !resp.status().is_success() {
+        return Err(ArcError::ProviderError(format!("Download HTTP {}", resp.status())));
+    }
+    let tmp = dest.with_extension("download.tmp");
+    let mut file = tokio::fs::File::create(&tmp)
+        .await
+        .map_err(|e| ArcError::ProviderError(format!("Failed to create temp file: {}", e)))?;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| ArcError::ProviderError(format!("Download stream error: {}", e)))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| ArcError::ProviderError(format!("Write error: {}", e)))?;
+    }
+    file.flush().await.ok();
+    drop(file);
+    tokio::fs::rename(&tmp, dest)
+        .await
+        .map_err(|e| ArcError::ProviderError(format!("Failed to place downloaded file: {}", e)))?;
+    Ok(())
 }
 
 async fn check_update_available(appimage_path: &Path) -> bool {
