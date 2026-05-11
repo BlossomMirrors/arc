@@ -7,6 +7,7 @@ use crate::providers::MultiProvider;
 use crate::transaction_manager::TransactionManager;
 use anyhow::Result;
 use std::sync::Arc;
+use tokio::process::Command;
 use tracing::{info, warn};
 use zbus::connection::Builder as ConnectionBuilder;
 
@@ -17,6 +18,13 @@ pub struct Daemon {
 
 impl Daemon {
     pub async fn new() -> Result<Self> {
+        info!("Refreshing AppStream data...");
+        match Command::new("flatpak").args(["update", "--appstream"]).status().await {
+            Ok(status) if status.success() => info!("AppStream data refreshed"),
+            Ok(status) => warn!("flatpak update --appstream exited with {}", status),
+            Err(e) => warn!("Failed to run flatpak update --appstream: {}", e),
+        }
+
         let native = DistroboxProvider::new();
         let flatpak = FlatpakProvider::new();
         let lutris = LutrisProvider::new();
