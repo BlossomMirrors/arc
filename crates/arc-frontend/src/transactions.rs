@@ -129,6 +129,12 @@ pub async fn load_icon_for_pkg(pkg_id: &str, name: &str) -> Option<RawIcon> {
     if pkg_id.starts_with("lutris:") {
         return None;
     }
+    if pkg_id.starts_with("appimage:") {
+        let stem = pkg_id.trim_start_matches("appimage:").to_string();
+        return tokio::task::spawn_blocking(move || icons::load_appimage_icon(None, &stem))
+            .await
+            .unwrap_or(None);
+    }
     let is_flatpak = !pkg_id.contains('/')
         && !pkg_id.contains(';')
         && !pkg_id.starts_with("distrobox:")

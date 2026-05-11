@@ -1,11 +1,15 @@
 use super::PackageProvider;
+use anvil_appimage::{find_icons_in_dir, move_appimage, select_best_icon, set_executable_permissions};
 use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider};
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{
+    event::{AccessKind, AccessMode},
+    Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::process::Command;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 pub struct AppImageProvider {
@@ -52,7 +56,12 @@ impl AppImageProvider {
 
     fn stem_from_path(path: &Path) -> Option<String> {
         let name = path.file_name()?.to_str()?;
-        name.strip_suffix(".AppImage").map(|s| s.to_string())
+        // case-insensitive: handles .AppImage, .appimage, .APPIMAGE, etc.
+        if name.to_lowercase().ends_with(".appimage") {
+            Some(name[..name.len() - ".appimage".len()].to_string())
+        } else {
+            None
+        }
     }
 
     async fn extract_metadata(&self, path: &Path) -> AppImageMeta {
@@ -63,11 +72,13 @@ impl AppImageProvider {
             return AppImageMeta::default_from_path(path);
         }
 
-        // set executable before running
-        let _ = Command::new("chmod")
-            .args(["+x", path.to_str().unwrap_or("")])
-            .status()
-            .await;
+        // set executable before running --appimage-extract
+        let path_for_extract = path.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            set_executable_permissions(&path_for_extract, false);
+        })
+        .await
+        .ok();
 
         let extract_ok = Command::new(path)
             .current_dir(&extract_dir)
@@ -104,8 +115,14 @@ impl AppImageProvider {
             }
         }
 
-        // extract icon: prefer root-level PNG (AppImage convention), then hicolor
-        meta.icon_path = Self::find_icon(squashfs).await;
+        // use anvil-appimage to find and select the best icon from the extracted contents
+        let sq = squashfs.to_path_buf();
+        meta.icon_path = tokio::task::spawn_blocking(move || {
+            let icons = find_icons_in_dir(&sq);
+            select_best_icon(icons)
+        })
+        .await
+        .unwrap_or(None);
 
         meta
     }
@@ -151,35 +168,6 @@ impl AppImageProvider {
         None
     }
 
-    async fn find_icon(squashfs: &Path) -> Option<PathBuf> {
-        // root-level PNG (AppImage convention)
-        if let Ok(mut entries) = fs::read_dir(squashfs).await {
-            while let Ok(Some(entry)) = entries.next_entry().await {
-                let p = entry.path();
-                if p.extension().and_then(|e| e.to_str()) == Some("png") {
-                    return Some(p);
-                }
-            }
-        }
-        // hicolor 256x256 or 128x128
-        for size in &["256x256", "128x128", "64x64"] {
-            let icon_dir = squashfs
-                .join("usr/share/icons/hicolor")
-                .join(size)
-                .join("apps");
-            if let Ok(mut entries) = fs::read_dir(&icon_dir).await {
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    let p = entry.path();
-                    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-                    if ext == "png" || ext == "svg" {
-                        return Some(p);
-                    }
-                }
-            }
-        }
-        None
-    }
-
     async fn process_appimage(&self, path: &Path, stem: &str) -> Result<(), ArcError> {
         fs::create_dir_all(&self.appimages_dir)
             .await
@@ -194,26 +182,38 @@ impl AppImageProvider {
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
 
-        // make executable
-        let _ = Command::new("chmod")
-            .args(["+x", path.to_str().unwrap_or("")])
-            .status()
-            .await;
+        // make executable using anvil-appimage
+        let path_for_perms = path.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            set_executable_permissions(&path_for_perms, false);
+        })
+        .await
+        .ok();
 
         let meta = self.extract_metadata(path).await;
 
-        // copy icon to stable location
-        let icon_dest = self.icon_file(stem);
-        if let Some(ref icon_src) = meta.icon_path {
-            let _ = fs::copy(icon_src, &icon_dest).await;
-        }
+        // copy icon to stable location, preserving the source extension
+        let icon_dest = if let Some(ref icon_src) = meta.icon_path {
+            let ext = icon_src
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("png");
+            let dest = self.data_dir.join("icons").join(format!("{}.{}", stem, ext));
+            if fs::copy(icon_src, &dest).await.is_ok() {
+                Some(dest)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let icon_str = icon_dest
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "application-x-executable".to_string());
 
         // write .desktop file
-        let icon_str = if icon_dest.exists() {
-            icon_dest.to_string_lossy().to_string()
-        } else {
-            "application-x-executable".to_string()
-        };
         let desktop = format!(
             "[Desktop Entry]\n\
              Type=Application\n\
@@ -238,15 +238,19 @@ impl AppImageProvider {
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
 
-        // write .info file
+        // write .info file — ICON_PATH lets the frontend and cleanup find the icon
         let info = format!(
-            "STEM={}\nNAME={}\nVERSION={}\nDESCRIPTION={}\nPATH={}\nUPDATE_INFO={}\n",
+            "STEM={}\nNAME={}\nVERSION={}\nDESCRIPTION={}\nPATH={}\nUPDATE_INFO={}\nICON_PATH={}\n",
             stem,
             meta.name,
             meta.version,
             meta.description,
             path.display(),
             meta.update_info,
+            icon_dest
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default(),
         );
         fs::write(self.info_file(stem), &info)
             .await
@@ -329,8 +333,22 @@ impl AppImageProvider {
     }
 
     async fn cleanup_stem(&self, stem: &str) {
+        // read icon path before deleting the .info file
+        let icon_path = match fs::read_to_string(self.info_file(stem)).await {
+            Ok(content) => content
+                .lines()
+                .find_map(|l| l.strip_prefix("ICON_PATH=").map(|v| v.to_string()))
+                .filter(|s| !s.is_empty()),
+            Err(_) => None,
+        };
+
         let _ = fs::remove_file(self.desktop_file(stem)).await;
-        let _ = fs::remove_file(self.icon_file(stem)).await;
+        if let Some(path) = icon_path {
+            let _ = fs::remove_file(&path).await;
+        } else {
+            // legacy fallback for info files written before ICON_PATH was added
+            let _ = fs::remove_file(self.icon_file(stem)).await;
+        }
         let _ = fs::remove_file(self.info_file(stem)).await;
         let _ = Command::new("update-desktop-database")
             .arg(self.desktop_dir.to_str().unwrap_or(""))
@@ -363,31 +381,45 @@ impl AppImageProvider {
     }
 }
 
+fn is_appimage_path(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.to_lowercase().ends_with(".appimage"))
+        .unwrap_or(false)
+}
+
+async fn process_if_new(provider: &AppImageProvider, path: &std::path::Path) {
+    if let Some(stem) = AppImageProvider::stem_from_path(path) {
+        if path.exists() && !provider.info_file(&stem).exists() {
+            info!("AppImage detected in watch dir: {}", stem);
+            if let Err(e) = provider.process_appimage(path, &stem).await {
+                warn!("Failed to process {}: {}", stem, e);
+            }
+        }
+    }
+}
+
 async fn handle_watch_event(provider: &AppImageProvider, event: Event) {
     match event.kind {
+        // IN_MOVED_TO (mv same-fs) arrives as Create — file is complete immediately
         EventKind::Create(_) => {
             for path in event.paths {
-                if path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .map(|n| n.ends_with(".AppImage"))
-                    .unwrap_or(false)
-                {
-                    // small delay: file may still be written
-                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                    if let Some(stem) = AppImageProvider::stem_from_path(&path) {
-                        if path.exists() && !provider.info_file(&stem).exists() {
-                            info!("AppImage dropped into watch dir: {}", stem);
-                            if let Err(e) = provider.process_appimage(&path, &stem).await {
-                                warn!("Failed to process {}: {}", stem, e);
-                            }
-                        }
-                    }
+                if is_appimage_path(&path) {
+                    process_if_new(provider, &path).await;
+                }
+            }
+        }
+        // IN_CLOSE_WRITE fires when a cp/download finishes writing — file is complete
+        EventKind::Access(AccessKind::Close(AccessMode::Write)) => {
+            for path in event.paths {
+                if is_appimage_path(&path) {
+                    process_if_new(provider, &path).await;
                 }
             }
         }
         EventKind::Remove(_) => {
             for path in event.paths {
+                debug!("Remove event: {:?}", path);
                 if let Some(stem) = AppImageProvider::stem_from_path(&path) {
                     info!("AppImage removed from watch dir: {}", stem);
                     provider.cleanup_stem(&stem).await;
@@ -463,6 +495,7 @@ fn parse_info(content: &str) -> Option<Package> {
     let mut version = String::new();
     let mut description = String::new();
     let mut path = String::new();
+    let mut icon_path = String::new();
 
     for line in content.lines() {
         if let Some(v) = line.strip_prefix("STEM=") {
@@ -475,6 +508,8 @@ fn parse_info(content: &str) -> Option<Package> {
             description = v.to_string();
         } else if let Some(v) = line.strip_prefix("PATH=") {
             path = v.to_string();
+        } else if let Some(v) = line.strip_prefix("ICON_PATH=") {
+            icon_path = v.to_string();
         }
     }
 
@@ -496,7 +531,7 @@ fn parse_info(content: &str) -> Option<Package> {
         description: desc,
         provider: Provider::AppImage,
         installed: std::path::Path::new(&path).exists(),
-        icon_url: None,
+        icon_url: if icon_path.is_empty() { None } else { Some(icon_path) },
         remote: None,
         screenshots: vec![],
     })
@@ -543,9 +578,20 @@ impl PackageProvider for AppImageProvider {
             return self.process_appimage(&dest, &stem).await;
         }
 
-        fs::copy(&src, &dest)
-            .await
-            .map_err(|e| ArcError::ProviderError(format!("copy AppImage: {}", e)))?;
+        // use anvil-appimage for a cross-device-safe move (rename, fallback to copy+delete)
+        // destination is the full target file path, not a directory
+        let src_str = src.to_str().unwrap_or("").to_string();
+        let dest_path = dest.clone();
+        let file_name = dest.file_name().unwrap_or_default().to_os_string();
+        let moved = tokio::task::spawn_blocking(move || {
+            move_appimage(&src_str, &dest_path, &file_name, false)
+        })
+        .await
+        .unwrap_or(false);
+
+        if !moved {
+            return Err(ArcError::ProviderError("Failed to move AppImage to install directory".to_string()));
+        }
 
         self.process_appimage(&dest, &stem).await
     }

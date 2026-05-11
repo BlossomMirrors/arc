@@ -399,6 +399,29 @@ fn load_icon_by_name_variations(app_id: &str) -> Option<RawIcon> {
     None
 }
 
+pub fn load_appimage_icon(icon_url: Option<&str>, stem: &str) -> Option<RawIcon> {
+    // Try the stored path first (set by the daemon on install, may be PNG or SVG)
+    if let Some(path_str) = icon_url {
+        let p = Path::new(path_str);
+        if p.exists() {
+            if let Some(icon) = load_icon_from_path(p, 64) {
+                return Some(icon);
+            }
+        }
+    }
+    // Fall back to stem-based scan of the icons directory (covers legacy installs)
+    let icons_dir = home_dir().join(".local/share/arc/appimages/icons");
+    for ext in ["png", "svg", "svgz"] {
+        let p = icons_dir.join(format!("{}.{}", stem, ext));
+        if p.exists() {
+            if let Some(icon) = load_icon_from_path(&p, 64) {
+                return Some(icon);
+            }
+        }
+    }
+    None
+}
+
 pub fn load_ui_icon(icon_name: &str) -> Option<RawIcon> {
     find_system_icon(icon_name, 16).and_then(|path| load_icon_from_path(&path, 16))
 }

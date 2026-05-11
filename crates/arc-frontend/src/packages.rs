@@ -287,7 +287,16 @@ pub async fn load_package_icons(pkgs: Vec<libarc::Package>) -> Vec<RawPackage> {
                         None
                     }
                 }
-                Provider::Distrobox | Provider::AppImage => {
+                Provider::AppImage => {
+                    let stem = pkg.id.strip_prefix("appimage:").unwrap_or(&pkg.id).to_string();
+                    let icon_url = pkg.icon_url.clone();
+                    tokio::task::spawn_blocking(move || {
+                        icons::load_appimage_icon(icon_url.as_deref(), &stem)
+                    })
+                    .await
+                    .unwrap_or(None)
+                }
+                Provider::Distrobox => {
                     let name = pkg.name.clone();
                     tokio::task::spawn_blocking(move || icons::load_native_package_icon(&name))
                         .await

@@ -24,15 +24,16 @@ pub fn parse_flatpakref(content: &str) -> (String, String, String) {
 }
 
 pub fn is_pkg_file(path: &str) -> bool {
-    path.ends_with(".deb")
-        || path.ends_with(".rpm")
-        || path.ends_with(".pkg.tar.xz")
-        || path.ends_with(".pkg.tar.zst")
-        || path.ends_with(".AppImage")
+    let lower = path.to_lowercase();
+    lower.ends_with(".deb")
+        || lower.ends_with(".rpm")
+        || lower.ends_with(".pkg.tar.xz")
+        || lower.ends_with(".pkg.tar.zst")
+        || lower.ends_with(".appimage")
 }
 
 pub fn is_appimage(path: &str) -> bool {
-    path.ends_with(".AppImage")
+    path.to_lowercase().ends_with(".appimage")
 }
 
 pub fn pkg_name_from_filename(filename: &str) -> String {

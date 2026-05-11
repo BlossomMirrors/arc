@@ -55,7 +55,7 @@ impl MultiProvider {
     }
 
     fn is_appimage_id(id: &str) -> bool {
-        id.starts_with("appimage:") || id.ends_with(".AppImage")
+        id.starts_with("appimage:") || id.to_lowercase().ends_with(".appimage")
     }
 
     // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no semicolons).
