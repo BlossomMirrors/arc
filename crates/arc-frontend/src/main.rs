@@ -14,7 +14,8 @@ use packages::{load_detail, load_home, load_package_icons, refresh_home_installe
 use slint::Model;
 use std::sync::{Arc, Mutex};
 use transactions::{
-    begin_transaction, push_transactions_to_ui, run_signal_listener, TxStatus, TxStore,
+    add_to_available_updates, begin_transaction, push_transactions_to_ui, run_signal_listener,
+    SavedPkgData, TxStatus, TxStore,
 };
 
 slint::include_modules!();
@@ -264,6 +265,7 @@ fn main() -> Result<()> {
                 "install".to_string(),
                 true,
                 in_detail,
+                None,
                 store.clone(),
                 proxy_arc.clone(),
                 app_weak.clone(),
@@ -295,6 +297,7 @@ fn main() -> Result<()> {
                 "remove".to_string(),
                 false,
                 in_detail,
+                None,
                 store.clone(),
                 proxy_arc.clone(),
                 app_weak.clone(),
@@ -319,6 +322,19 @@ fn main() -> Result<()> {
                 .upgrade()
                 .map(|a| get_display_name(&a, &pkg_id_str))
                 .unwrap_or_else(|| pkg_id_str.clone());
+            let saved_pkg = app_weak.upgrade().and_then(|a| {
+                let model = a.get_available_updates();
+                (0..model.row_count())
+                    .filter_map(|i| model.row_data(i))
+                    .find(|p| p.id.as_str() == pkg_id_str.as_str())
+                    .map(|p| SavedPkgData {
+                        id: p.id.to_string(),
+                        name: p.name.to_string(),
+                        version: p.version.to_string(),
+                        description: p.description.to_string(),
+                        installed: p.installed,
+                    })
+            });
 
             begin_transaction(
                 pkg_id_str,
@@ -326,6 +342,7 @@ fn main() -> Result<()> {
                 "update".to_string(),
                 true,
                 in_detail,
+                saved_pkg,
                 store.clone(),
                 proxy_arc.clone(),
                 app_weak.clone(),
@@ -341,13 +358,19 @@ fn main() -> Result<()> {
         let store = tx_store.clone();
 
         app.on_update_all_requested(move || {
-            let updates: Vec<(String, String)> = app_weak
+            let updates: Vec<SavedPkgData> = app_weak
                 .upgrade()
                 .map(|a| {
                     let model = a.get_available_updates();
                     (0..model.row_count())
                         .filter_map(|i| model.row_data(i))
-                        .map(|p| (p.id.to_string(), p.name.to_string()))
+                        .map(|p| SavedPkgData {
+                            id: p.id.to_string(),
+                            name: p.name.to_string(),
+                            version: p.version.to_string(),
+                            description: p.description.to_string(),
+                            installed: p.installed,
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
@@ -358,13 +381,16 @@ fn main() -> Result<()> {
                 }
             }
 
-            for (pkg_id, name) in updates {
+            for pkg in updates {
+                let pkg_id = pkg.id.clone();
+                let name = pkg.name.clone();
                 begin_transaction(
                     pkg_id,
                     name,
                     "update".to_string(),
                     true,
                     false,
+                    Some(pkg),
                     store.clone(),
                     proxy_arc.clone(),
                     app_weak.clone(),
@@ -404,15 +430,26 @@ fn main() -> Result<()> {
                 if let Some(p) = proxy {
                     let cancelled = p.cancel_transaction(&tx_id).await.unwrap_or(false);
                     if cancelled {
-                        let mut s = store.lock().unwrap();
-                        if let Some(tx) = s.iter_mut().find(|t| t.id == tx_id) {
-                            tx.status = TxStatus::Failed;
-                            tx.error = "Cancelled".to_string();
-                        }
-                        drop(s);
+                        let (saved_pkg, saved_icon) = {
+                            let mut s = store.lock().unwrap();
+                            let mut saved = None;
+                            let mut icon = None;
+                            if let Some(tx) = s.iter_mut().find(|t| t.id == tx_id) {
+                                tx.status = TxStatus::Failed;
+                                tx.error = "Cancelled".to_string();
+                                if tx.tx_type == "update" {
+                                    saved = tx.saved_pkg.clone();
+                                    icon = tx.icon.clone();
+                                }
+                            }
+                            (saved, icon)
+                        };
                         push_transactions_to_ui(store.clone(), &app_weak);
-                        let _ = app_weak.upgrade_in_event_loop(|app| {
+                        let _ = app_weak.upgrade_in_event_loop(move |app| {
                             app.set_updates_all_queued(false);
+                            if let Some(pkg) = saved_pkg {
+                                add_to_available_updates(&app, pkg, saved_icon.as_ref());
+                            }
                         });
                     }
                 }
@@ -463,10 +500,12 @@ fn main() -> Result<()> {
         let app_weak = app.as_weak();
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
+        let store = tx_store.clone();
 
         app.on_refresh_updates_requested(move || {
             let app_weak2 = app_weak.clone();
             let proxy = get_proxy(&proxy_arc);
+            let store2 = store.clone();
 
             rt_handle.spawn(async move {
                 let updates: Vec<libarc::Package> = if let Some(p) = &proxy {
@@ -479,17 +518,45 @@ fn main() -> Result<()> {
                     vec![]
                 };
 
-                let count = updates.len();
                 let raw_pkgs = load_package_icons(updates).await;
 
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
-                    let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
-                    app.set_available_updates(pkgs.as_slice().into());
-                    app.set_update_count(count as i32);
-                    app.set_updates_loading(false);
-                    if count == 0 {
-                    } else {
+                    let mut pkgs: Vec<PackageItem> =
+                        raw_pkgs.iter().map(|r| r.to_slint()).collect();
+
+                    // Re-add packages whose update transactions are still in flight
+                    // but were not returned by the daemon in this refresh.
+                    {
+                        let s = store2.lock().unwrap();
+                        for tx in s.iter() {
+                            if tx.tx_type == "update"
+                                && (tx.status == TxStatus::Pending
+                                    || tx.status == TxStatus::Running)
+                            {
+                                if let Some(saved) = &tx.saved_pkg {
+                                    if !pkgs.iter().any(|p| p.id.as_str() == saved.id.as_str()) {
+                                        pkgs.push(PackageItem {
+                                            id: saved.id.clone().into(),
+                                            name: saved.name.clone().into(),
+                                            version: saved.version.clone().into(),
+                                            description: saved.description.clone().into(),
+                                            installed: saved.installed,
+                                            icon: tx
+                                                .icon
+                                                .as_ref()
+                                                .map(|r| r.to_slint_image())
+                                                .unwrap_or_default(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
                     }
+
+                    let count = pkgs.len() as i32;
+                    app.set_available_updates(pkgs.as_slice().into());
+                    app.set_update_count(count);
+                    app.set_updates_loading(false);
                 });
             });
 
@@ -696,6 +763,7 @@ fn main() -> Result<()> {
                         "flatpakref".to_string(),
                         true,
                         false,
+                        None,
                         store2.clone(),
                         proxy_arc2.clone(),
                         app_weak3.clone(),
@@ -836,6 +904,7 @@ fn main() -> Result<()> {
                         "install".to_string(),
                         true,
                         false,
+                        None,
                         store2.clone(),
                         proxy_arc2.clone(),
                         app_weak3.clone(),
@@ -861,6 +930,7 @@ fn main() -> Result<()> {
                         "install".to_string(),
                         true,
                         false,
+                        None,
                         store2.clone(),
                         proxy_arc2.clone(),
                         app_weak3.clone(),
@@ -886,6 +956,7 @@ fn main() -> Result<()> {
                         "bundle".to_string(),
                         true,
                         false,
+                        None,
                         store2.clone(),
                         proxy_arc2.clone(),
                         app_weak3.clone(),

@@ -13,6 +13,15 @@ pub enum TxStatus {
 }
 
 #[derive(Clone)]
+pub struct SavedPkgData {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub installed: bool,
+}
+
+#[derive(Clone)]
 pub struct TrackedTx {
     pub id: String,
     pub pkg_id: String,
@@ -24,6 +33,7 @@ pub struct TrackedTx {
     pub error: String,
     pub installed_after: bool,
     pub refresh_detail: bool,
+    pub saved_pkg: Option<SavedPkgData>,
 }
 
 pub type TxStore = Arc<Mutex<Vec<TrackedTx>>>;
@@ -33,6 +43,29 @@ pub fn has_ongoing_transaction_for_package(store: &TxStore, pkg_id: &str) -> boo
     s.iter().any(|tx| {
         tx.pkg_id == pkg_id && (tx.status == TxStatus::Pending || tx.status == TxStatus::Running)
     })
+}
+
+pub fn add_to_available_updates(
+    app: &crate::AppWindow,
+    pkg: SavedPkgData,
+    icon: Option<&RawIcon>,
+) {
+    let model = app.get_available_updates();
+    let mut items: Vec<crate::PackageItem> =
+        (0..model.row_count()).filter_map(|i| model.row_data(i)).collect();
+    if !items.iter().any(|p| p.id.as_str() == pkg.id.as_str()) {
+        items.push(crate::PackageItem {
+            id: pkg.id.into(),
+            name: pkg.name.into(),
+            version: pkg.version.into(),
+            description: pkg.description.into(),
+            installed: pkg.installed,
+            icon: icon.map(|r| r.to_slint_image()).unwrap_or_default(),
+        });
+        let count = items.len() as i32;
+        app.set_available_updates(items.as_slice().into());
+        app.set_update_count(count);
+    }
 }
 
 pub fn remove_from_available_updates(app: &crate::AppWindow, pkg_id: &str) {
@@ -151,6 +184,7 @@ pub fn begin_transaction(
     tx_type: String,
     installed_after: bool,
     refresh_detail: bool,
+    saved_pkg: Option<SavedPkgData>,
     store: TxStore,
     proxy_arc: Arc<Mutex<Option<ArcDaemonProxy<'static>>>>,
     app_weak: slint::Weak<crate::AppWindow>,
@@ -178,6 +212,7 @@ pub fn begin_transaction(
             error: String::new(),
             installed_after,
             refresh_detail,
+            saved_pkg,
         });
         s.len() - 1
     };
