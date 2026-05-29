@@ -240,6 +240,10 @@ export component AppWindow inherits Window {
                 cancel-requested(id) => {
                     root.cancel-requested(id);
                 }
+                detail-requested(id) => {
+                    root.prev-view = "downloads";
+                    root.detail-requested(id);
+                }
             }
 
             if root.current-view == "install-file": InstallFileScreen {

@@ -48,38 +48,70 @@ export component TopBar inherits Rectangle {
                 }
             }
 
-            LineEdit {
-                horizontal-stretch: 1;
-                placeholder-text: "Search for applications...";
-                text <=> root.search-text;
-                accepted(text) => {
-                    if (text != "") {
-                        root.search-requested(text);
-                    }
-                }
-            }
-
             Rectangle {
-                width: 34px;
+                horizontal-stretch: 1;
+                height: 36px;
                 border-radius: 6px;
-                background: search-ta.has-hover ? #80808018 : #00000000;
+                border-width: 1.5px;
+                border-color: search-input.has-focus ? Palette.selection-background : Palette.border;
+                background: Palette.control-background;
+                clip: true;
 
-                search-ta := TouchArea {
-                    clicked => {
-                        if (root.search-text != "") {
-                            root.search-requested(root.search-text);
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 4px;
+                    spacing: 0px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        clip: true;
+
+                        search-input := TextInput {
+                            width: parent.width;
+                            height: parent.height;
+                            vertical-alignment: center;
+                            font-size: 14px;
+                            color: Palette.foreground;
+                            text <=> root.search-text;
+                            accepted => {
+                                if (root.search-text != "") {
+                                    root.search-requested(root.search-text);
+                                }
+                            }
+                        }
+
+                        if root.search-text == "": Text {
+                            x: 0;
+                            y: (parent.height - self.height) / 2;
+                            text: "Search for applications...";
+                            font-size: 14px;
+                            color: Palette.foreground.transparentize(0.5);
                         }
                     }
-                }
 
-                Image {
-                    width: 16px;
-                    height: 16px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    source: root.icon-search;
-                    colorize: Palette.foreground;
-                    image-fit: contain;
+                    Rectangle {
+                        width: 32px;
+                        border-radius: 4px;
+                        background: search-icon-ta.has-hover ? #80808018 : #00000000;
+
+                        search-icon-ta := TouchArea {
+                            clicked => {
+                                if (root.search-text != "") {
+                                    root.search-requested(root.search-text);
+                                }
+                            }
+                        }
+
+                        Image {
+                            width: 16px;
+                            height: 16px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            source: root.icon-search;
+                            colorize: Palette.foreground.transparentize(0.3);
+                            image-fit: contain;
+                        }
+                    }
                 }
             }
 

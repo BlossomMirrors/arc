@@ -383,7 +383,7 @@ impl FlatpakProvider {
                 }
             }
 
-            // Run the install transaction — add_install_flatpakref resolves the
+            // Run the install transaction, add_install_flatpakref resolves the
             // exact ref (name + branch) and handles the RuntimeRepo if needed.
             let glib_bytes = glib::Bytes::from(bytes.as_ref());
             let tx = libflatpak::Transaction::for_installation(&inst, cancel)
@@ -452,7 +452,11 @@ impl FlatpakProvider {
                 let url = remote.url().map(|s| s.to_string()).unwrap_or_default();
                 if seen.insert(name.clone()) {
                     let protected = Self::PROTECTED_REMOTES.contains(&name.as_str());
-                    out.push(RemoteInfo { name, url, protected });
+                    out.push(RemoteInfo {
+                        name,
+                        url,
+                        protected,
+                    });
                 }
             }
         }
@@ -469,7 +473,10 @@ impl FlatpakProvider {
             .iter()
             .any(|r| r.name().map(|n| n == name).unwrap_or(false));
         if already {
-            return Err(ArcError::ProviderError(format!("remote '{}' already exists", name)));
+            return Err(ArcError::ProviderError(format!(
+                "remote '{}' already exists",
+                name
+            )));
         }
         let remote = libflatpak::Remote::new(name);
         remote.set_url(url);
@@ -479,7 +486,10 @@ impl FlatpakProvider {
 
     pub fn remove_remote(name: &str) -> Result<(), ArcError> {
         if Self::PROTECTED_REMOTES.contains(&name) {
-            return Err(ArcError::ProviderError(format!("'{}' is a protected repository and cannot be removed", name)));
+            return Err(ArcError::ProviderError(format!(
+                "'{}' is a protected repository and cannot be removed",
+                name
+            )));
         }
         let cancel = libflatpak::gio::Cancellable::NONE;
         for inst in all_installations() {
@@ -494,7 +504,10 @@ impl FlatpakProvider {
                     .map_err(|e: glib::Error| ArcError::ProviderError(e.to_string()));
             }
         }
-        Err(ArcError::ProviderError(format!("remote '{}' not found", name)))
+        Err(ArcError::ProviderError(format!(
+            "remote '{}' not found",
+            name
+        )))
     }
 
     pub fn add_remote_from_flatpakrepo(content: &str) -> Result<(), ArcError> {
@@ -512,13 +525,20 @@ impl FlatpakProvider {
             }
         }
         if url.is_empty() {
-            return Err(ArcError::ProviderError("No Url= found in .flatpakrepo".into()));
+            return Err(ArcError::ProviderError(
+                "No Url= found in .flatpakrepo".into(),
+            ));
         }
         // Derive a safe remote name from the title
         let name = if title.is_empty() {
             "imported-repo".to_string()
         } else {
-            title.to_lowercase().replace(' ', "-").chars().filter(|c| c.is_alphanumeric() || *c == '-').collect()
+            title
+                .to_lowercase()
+                .replace(' ', "-")
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '-')
+                .collect()
         };
         let cancel = libflatpak::gio::Cancellable::NONE;
         let inst = libflatpak::Installation::new_user(cancel)

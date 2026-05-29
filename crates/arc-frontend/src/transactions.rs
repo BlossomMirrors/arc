@@ -123,6 +123,7 @@ pub fn push_transactions_to_ui(store: TxStore, app_weak: &slint::Weak<crate::App
             txs.into_iter()
                 .map(|tx| crate::TransactionItem {
                     id: tx.id.into(),
+                    pkg_id: tx.pkg_id.into(),
                     name: tx.name.into(),
                     icon: tx.icon.map(|r| r.to_slint_image()).unwrap_or_default(),
                     progress: tx.progress,

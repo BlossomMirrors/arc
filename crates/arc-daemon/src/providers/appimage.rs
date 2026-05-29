@@ -1,5 +1,7 @@
 use super::PackageProvider;
-use anvil_appimage::{find_icons_in_dir, move_appimage, select_best_icon, set_executable_permissions};
+use anvil_appimage::{
+    find_icons_in_dir, move_appimage, select_best_icon, set_executable_permissions,
+};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use libarc::{ArcError, Package, Provider};
@@ -45,7 +47,11 @@ impl AppImageProvider {
     }
 
     fn hicolor_icon_path(&self, stem: &str, ext: &str) -> PathBuf {
-        let size_dir = if ext == "svg" || ext == "svgz" { "scalable" } else { "256x256" };
+        let size_dir = if ext == "svg" || ext == "svgz" {
+            "scalable"
+        } else {
+            "256x256"
+        };
         self.home
             .join(".local/share/icons/hicolor")
             .join(size_dir)
@@ -54,7 +60,11 @@ impl AppImageProvider {
     }
 
     async fn install_icon_to_hicolor(&self, stem: &str, icon_src: &Path) -> Option<String> {
-        let ext = icon_src.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
+        let ext = icon_src
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("png")
+            .to_string();
         let dest = self.hicolor_icon_path(stem, &ext);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).await.ok()?;
@@ -117,17 +127,16 @@ impl AppImageProvider {
     }
 
     async fn extract_metadata(&self, path: &Path) -> AppImageMeta {
-        // Read .upd_info ELF section first — this is the canonical source per the AppImage
+        // Read .upd_info ELF section first, this is the canonical source per the AppImage
         // spec and works without FUSE/extraction.
         let p = path.to_path_buf();
-        let elf_update_info = tokio::task::spawn_blocking(move || {
-            read_upd_info_from_elf(&p).unwrap_or_default()
-        })
-        .await
-        .unwrap_or_default();
+        let elf_update_info =
+            tokio::task::spawn_blocking(move || read_upd_info_from_elf(&p).unwrap_or_default())
+                .await
+                .unwrap_or_default();
 
-        let extract_dir = std::env::temp_dir()
-            .join(format!("arc-appimage-{}", Uuid::new_v4().simple()));
+        let extract_dir =
+            std::env::temp_dir().join(format!("arc-appimage-{}", Uuid::new_v4().simple()));
 
         if fs::create_dir_all(&extract_dir).await.is_err() {
             let mut meta = AppImageMeta::default_from_path(path);
@@ -168,9 +177,15 @@ impl AppImageProvider {
         // Copy icon out before the extraction dir is deleted
         if let Some(ref icon_src) = meta.icon_path.clone() {
             if icon_src.exists() {
-                let ext = icon_src.extension().and_then(|e| e.to_str()).unwrap_or("png");
-                let icon_tmp = std::env::temp_dir()
-                    .join(format!("arc-icon-{}.{}", Uuid::new_v4().simple(), ext));
+                let ext = icon_src
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("png");
+                let icon_tmp = std::env::temp_dir().join(format!(
+                    "arc-icon-{}.{}",
+                    Uuid::new_v4().simple(),
+                    ext
+                ));
                 if fs::copy(icon_src, &icon_tmp).await.is_ok() {
                     meta.icon_path = Some(icon_tmp);
                 } else {
@@ -284,10 +299,17 @@ impl AppImageProvider {
                 .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or("png");
-            let dest = self.data_dir.join("icons").join(format!("{}.{}", stem, ext));
+            let dest = self
+                .data_dir
+                .join("icons")
+                .join(format!("{}.{}", stem, ext));
             let ok = fs::copy(icon_src, &dest).await.is_ok();
             let _ = fs::remove_file(icon_src).await; // remove the temp copy
-            if ok { Some(dest) } else { None }
+            if ok {
+                Some(dest)
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -321,7 +343,11 @@ impl AppImageProvider {
             meta.description,
             path.display(),
             icon_str,
-            if meta.categories.is_empty() { "Utility;" } else { &meta.categories },
+            if meta.categories.is_empty() {
+                "Utility;"
+            } else {
+                &meta.categories
+            },
             meta.version,
             path.display(),
             meta.update_info,
@@ -330,7 +356,7 @@ impl AppImageProvider {
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
 
-        // write .info file — ICON_PATH lets the frontend and cleanup find the icon
+        // write .info file, ICON_PATH lets the frontend and cleanup find the icon
         let info = format!(
             "STEM={}\nNAME={}\nVERSION={}\nDESCRIPTION={}\nPATH={}\nUPDATE_INFO={}\nICON_PATH={}\n",
             stem,
@@ -509,7 +535,7 @@ async fn process_if_new(provider: &AppImageProvider, path: &std::path::Path) {
 
 async fn handle_watch_event(provider: &AppImageProvider, event: Event) {
     match event.kind {
-        // IN_MOVED_TO (mv same-fs) arrives as Create — file is complete immediately
+        // IN_MOVED_TO (mv same-fs) arrives as Create, file is complete immediately
         EventKind::Create(_) => {
             for path in event.paths {
                 if is_appimage_path(&path) {
@@ -517,7 +543,7 @@ async fn handle_watch_event(provider: &AppImageProvider, event: Event) {
                 }
             }
         }
-        // IN_CLOSE_WRITE fires when a cp/download finishes writing — file is complete
+        // IN_CLOSE_WRITE fires when a cp/download finishes writing, file is complete
         EventKind::Access(AccessKind::Close(AccessMode::Write)) => {
             for path in event.paths {
                 if is_appimage_path(&path) {
@@ -576,7 +602,11 @@ fn extract_appstream_summary(xml: &str) -> Option<String> {
     let start = xml.find(tag)? + tag.len();
     let end = xml[start..].find(end_tag)?;
     let summary = xml[start..start + end].trim().to_string();
-    if summary.is_empty() { None } else { Some(summary) }
+    if summary.is_empty() {
+        None
+    } else {
+        Some(summary)
+    }
 }
 
 impl AppImageMeta {
@@ -645,7 +675,11 @@ fn parse_info(content: &str) -> Option<Package> {
         description: desc,
         provider: Provider::AppImage,
         installed: std::path::Path::new(&path).exists(),
-        icon_url: if icon_path.is_empty() { None } else { Some(icon_path) },
+        icon_url: if icon_path.is_empty() {
+            None
+        } else {
+            Some(icon_path)
+        },
         remote: None,
         screenshots: vec![],
     })
@@ -704,16 +738,18 @@ impl PackageProvider for AppImageProvider {
         .unwrap_or(false);
 
         if !moved {
-            return Err(ArcError::ProviderError("Failed to move AppImage to install directory".to_string()));
+            return Err(ArcError::ProviderError(
+                "Failed to move AppImage to install directory".to_string(),
+            ));
         }
 
         self.process_appimage(&dest, &stem).await
     }
 
     async fn remove(&self, package_id: &str) -> Result<(), ArcError> {
-        let stem = package_id
-            .strip_prefix("appimage:")
-            .ok_or_else(|| ArcError::ProviderError(format!("Invalid AppImage id: {}", package_id)))?;
+        let stem = package_id.strip_prefix("appimage:").ok_or_else(|| {
+            ArcError::ProviderError(format!("Invalid AppImage id: {}", package_id))
+        })?;
 
         let appimage = self.resolve_appimage_path(stem).await;
         let _ = fs::remove_file(&appimage).await;
@@ -756,31 +792,31 @@ impl PackageProvider for AppImageProvider {
             if !update_info.is_empty() {
                 with_info.push((pkg, appimage_path, update_info));
             } else {
-                // No embedded update info — fall back to GitHub search based on filename
+                // No embedded update info, fall back to GitHub search based on filename
                 no_info.push((pkg, appimage_path));
             }
         }
 
         let http = &self.http;
 
-        let known_futures = with_info.iter().map(|(pkg, appimage_path, update_info)| async move {
-            if let Some(gh) = parse_github_info(update_info) {
-                match github_latest_release(http, &gh.owner, &gh.repo, &gh.asset_glob).await {
-                    Some((remote_tag, _)) => versions_differ(&pkg.version, &remote_tag),
-                    None => false,
+        let known_futures = with_info
+            .iter()
+            .map(|(pkg, appimage_path, update_info)| async move {
+                if let Some(gh) = parse_github_info(update_info) {
+                    match github_latest_release(http, &gh.owner, &gh.repo, &gh.asset_glob).await {
+                        Some((remote_tag, _)) => versions_differ(&pkg.version, &remote_tag),
+                        None => false,
+                    }
+                } else {
+                    check_update_available(appimage_path).await
                 }
-            } else {
-                check_update_available(appimage_path).await
-            }
-        });
+            });
 
         let guess_futures = no_info.iter().map(|(pkg, _)| {
             let stem = pkg.id.strip_prefix("appimage:").unwrap_or("").to_string();
             let info_path = self.info_file(&stem);
             let version = pkg.version.clone();
-            async move {
-                guess_github_update_available(http, &stem, &version, &info_path).await
-            }
+            async move { guess_github_update_available(http, &stem, &version, &info_path).await }
         });
 
         let (known_results, guess_results) = tokio::join!(
@@ -804,9 +840,9 @@ impl PackageProvider for AppImageProvider {
     }
 
     async fn update(&self, package_id: &str) -> Result<(), ArcError> {
-        let stem = package_id
-            .strip_prefix("appimage:")
-            .ok_or_else(|| ArcError::ProviderError(format!("Invalid AppImage id: {}", package_id)))?;
+        let stem = package_id.strip_prefix("appimage:").ok_or_else(|| {
+            ArcError::ProviderError(format!("Invalid AppImage id: {}", package_id))
+        })?;
 
         let appimage_path = self.resolve_appimage_path(stem).await;
         if !appimage_path.exists() {
@@ -822,7 +858,7 @@ impl PackageProvider for AppImageProvider {
             })
             .unwrap_or_default();
 
-        // Same ELF fallback as list_updates — handles .info files written before ELF reading
+        // Same ELF fallback as list_updates, handles .info files written before ELF reading
         let update_info = if !stored_update_info.is_empty() {
             stored_update_info
         } else {
@@ -835,7 +871,10 @@ impl PackageProvider for AppImageProvider {
         let updated_via_github = if let Some(gh) = parse_github_info(&update_info) {
             match github_latest_release(&self.http, &gh.owner, &gh.repo, &gh.asset_glob).await {
                 Some((tag, download_url)) => {
-                    info!("Downloading {} update from GitHub ({}) — {}", stem, tag, download_url);
+                    info!(
+                        "Downloading {} update from GitHub ({}) — {}",
+                        stem, tag, download_url
+                    );
                     download_github_update(&self.http, &download_url, &appimage_path).await?;
                     true
                 }
@@ -858,7 +897,10 @@ impl PackageProvider for AppImageProvider {
                     if let Some((tag, dl_url)) =
                         github_latest_release(&self.http, &owner, &repo, "*.appimage").await
                     {
-                        info!("Downloading {} update via GitHub search ({}) — {}", stem, tag, dl_url);
+                        info!(
+                            "Downloading {} update via GitHub search ({}) — {}",
+                            stem, tag, dl_url
+                        );
                         download_github_update(&self.http, &dl_url, &appimage_path).await?;
                         return self.process_appimage(&appimage_path, stem).await;
                     }
@@ -871,7 +913,8 @@ impl PackageProvider for AppImageProvider {
                 .await
                 .map_err(|_| {
                     ArcError::ProviderError(
-                        "AppImageUpdate not found. Install it to enable AppImage updates.".to_string(),
+                        "AppImageUpdate not found. Install it to enable AppImage updates."
+                            .to_string(),
                     )
                 })?;
             if !status.success() {
@@ -884,9 +927,9 @@ impl PackageProvider for AppImageProvider {
     }
 
     async fn run(&self, package_id: &str) -> Result<(), ArcError> {
-        let stem = package_id
-            .strip_prefix("appimage:")
-            .ok_or_else(|| ArcError::ProviderError(format!("Invalid AppImage id: {}", package_id)))?;
+        let stem = package_id.strip_prefix("appimage:").ok_or_else(|| {
+            ArcError::ProviderError(format!("Invalid AppImage id: {}", package_id))
+        })?;
 
         let appimage_path = self.resolve_appimage_path(stem).await;
         if !appimage_path.exists() {
@@ -905,15 +948,27 @@ impl PackageProvider for AppImageProvider {
 
 fn elf_u16(buf: &[u8], off: usize, le: bool) -> u64 {
     let b: [u8; 2] = buf[off..off + 2].try_into().unwrap_or([0; 2]);
-    (if le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) }) as u64
+    (if le {
+        u16::from_le_bytes(b)
+    } else {
+        u16::from_be_bytes(b)
+    }) as u64
 }
 fn elf_u32(buf: &[u8], off: usize, le: bool) -> u64 {
     let b: [u8; 4] = buf[off..off + 4].try_into().unwrap_or([0; 4]);
-    (if le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) }) as u64
+    (if le {
+        u32::from_le_bytes(b)
+    } else {
+        u32::from_be_bytes(b)
+    }) as u64
 }
 fn elf_u64(buf: &[u8], off: usize, le: bool) -> u64 {
     let b: [u8; 8] = buf[off..off + 8].try_into().unwrap_or([0; 8]);
-    if le { u64::from_le_bytes(b) } else { u64::from_be_bytes(b) }
+    if le {
+        u64::from_le_bytes(b)
+    } else {
+        u64::from_be_bytes(b)
+    }
 }
 
 /// Read the `.upd_info` ELF section from an AppImage binary.
@@ -1006,8 +1061,14 @@ fn read_upd_info_from_elf(path: &Path) -> Option<String> {
         let mut content = vec![0u8; sec_size.min(2048) as usize];
         f.read_exact(&mut content).ok()?;
 
-        let end = content.iter().position(|&b| b == 0).unwrap_or(content.len());
-        let s = std::str::from_utf8(&content[..end]).ok()?.trim().to_string();
+        let end = content
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(content.len());
+        let s = std::str::from_utf8(&content[..end])
+            .ok()?
+            .trim()
+            .to_string();
         return if s.is_empty() { None } else { Some(s) };
     }
 
@@ -1025,7 +1086,10 @@ struct GitHubInfo {
 fn parse_github_info(update_info: &str) -> Option<GitHubInfo> {
     let parts: Vec<&str> = update_info.splitn(5, '|').collect();
     if parts.len() >= 5 && parts[0] == "gh-releases-zsync" {
-        let glob = parts[4].strip_suffix(".zsync").unwrap_or(parts[4]).to_string();
+        let glob = parts[4]
+            .strip_suffix(".zsync")
+            .unwrap_or(parts[4])
+            .to_string();
         return Some(GitHubInfo {
             owner: parts[1].to_string(),
             repo: parts[2].to_string(),
@@ -1036,11 +1100,16 @@ fn parse_github_info(update_info: &str) -> Option<GitHubInfo> {
         let url = parts[1];
         if url.contains("github.com") {
             // https://github.com/{owner}/{repo}/releases/...
-            let stripped = url.trim_start_matches("https://github.com/").trim_start_matches("http://github.com/");
+            let stripped = url
+                .trim_start_matches("https://github.com/")
+                .trim_start_matches("http://github.com/");
             let url_parts: Vec<&str> = stripped.splitn(3, '/').collect();
             if url_parts.len() >= 2 {
                 let filename = url.rsplit('/').next().unwrap_or("*.AppImage");
-                let glob = filename.strip_suffix(".zsync").unwrap_or(filename).to_string();
+                let glob = filename
+                    .strip_suffix(".zsync")
+                    .unwrap_or(filename)
+                    .to_string();
                 return Some(GitHubInfo {
                     owner: url_parts[0].to_string(),
                     repo: url_parts[1].to_string(),
@@ -1089,7 +1158,10 @@ async fn github_latest_release(
     repo: &str,
     asset_glob: &str,
 ) -> Option<(String, String)> {
-    let url = format!("https://api.github.com/repos/{}/{}/releases/latest", owner, repo);
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/releases/latest",
+        owner, repo
+    );
     let resp = http
         .get(&url)
         .header("User-Agent", "arc-daemon/1.0")
@@ -1121,7 +1193,10 @@ async fn download_github_update(http: &Client, url: &str, dest: &Path) -> Result
         .await
         .map_err(|e| ArcError::ProviderError(format!("Download request failed: {}", e)))?;
     if !resp.status().is_success() {
-        return Err(ArcError::ProviderError(format!("Download HTTP {}", resp.status())));
+        return Err(ArcError::ProviderError(format!(
+            "Download HTTP {}",
+            resp.status()
+        )));
     }
     let tmp = dest.with_extension("download.tmp");
     let mut file = tokio::fs::File::create(&tmp)
@@ -1129,7 +1204,8 @@ async fn download_github_update(http: &Client, url: &str, dest: &Path) -> Result
         .map_err(|e| ArcError::ProviderError(format!("Failed to create temp file: {}", e)))?;
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| ArcError::ProviderError(format!("Download stream error: {}", e)))?;
+        let chunk =
+            chunk.map_err(|e| ArcError::ProviderError(format!("Download stream error: {}", e)))?;
         file.write_all(&chunk)
             .await
             .map_err(|e| ArcError::ProviderError(format!("Write error: {}", e)))?;
@@ -1155,13 +1231,13 @@ async fn check_update_available(appimage_path: &Path) -> bool {
     output.status.code() == Some(1)
 }
 
-// GitHub search fallback for AppImages without embedded update info ───────────
+// GitHub search fallback for AppImages without embedded update info
 
 /// Parse an AppImage stem like `winboat-0.8.7-x86_64` into `("winboat", "0.8.7")`.
 fn parse_stem_name_version(stem: &str) -> Option<(String, String)> {
     const ARCH: &[&str] = &[
-        "x86_64", "x86-64", "aarch64", "arm64", "i386", "i686",
-        "armhf", "armv7l", "armv7", "arm", "linux",
+        "x86_64", "x86-64", "aarch64", "arm64", "i386", "i686", "armhf", "armv7l", "armv7", "arm",
+        "linux",
     ];
     let parts: Vec<&str> = stem.split('-').collect();
     let mut name_parts: Vec<&str> = Vec::new();
@@ -1194,13 +1270,22 @@ async fn search_github_appimage_repo(http: &Client, name: &str) -> Option<(Strin
     }
     let resp = http
         .get("https://api.github.com/search/repositories")
-        .query(&[("q", name), ("sort", "stars"), ("order", "desc"), ("per_page", "5")])
+        .query(&[
+            ("q", name),
+            ("sort", "stars"),
+            ("order", "desc"),
+            ("per_page", "5"),
+        ])
         .header("User-Agent", "arc-daemon/1.0")
         .send()
         .await
         .ok()?;
     if !resp.status().is_success() {
-        debug!("GitHub repo search for '{}' returned {}", name, resp.status());
+        debug!(
+            "GitHub repo search for '{}' returned {}",
+            name,
+            resp.status()
+        );
         return None;
     }
     let json: serde_json::Value = resp.json().await.ok()?;
@@ -1216,24 +1301,31 @@ async fn search_github_appimage_repo(http: &Client, name: &str) -> Option<(Strin
             continue;
         }
         // verify the latest release actually has .AppImage assets
-        let url = format!("https://api.github.com/repos/{}/{}/releases/latest", owner, repo_name);
-        let rr = http.get(&url).header("User-Agent", "arc-daemon/1.0").send().await.ok()?;
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/releases/latest",
+            owner, repo_name
+        );
+        let rr = http
+            .get(&url)
+            .header("User-Agent", "arc-daemon/1.0")
+            .send()
+            .await
+            .ok()?;
         if !rr.status().is_success() {
             continue;
         }
         let rel: serde_json::Value = rr.json().await.ok()?;
-        let has_appimage = rel
-            .get("assets")?
-            .as_array()?
-            .iter()
-            .any(|a| {
-                a.get("name")
-                    .and_then(|n| n.as_str())
-                    .map(|n| n.to_lowercase().ends_with(".appimage"))
-                    .unwrap_or(false)
-            });
+        let has_appimage = rel.get("assets")?.as_array()?.iter().any(|a| {
+            a.get("name")
+                .and_then(|n| n.as_str())
+                .map(|n| n.to_lowercase().ends_with(".appimage"))
+                .unwrap_or(false)
+        });
         if has_appimage {
-            debug!("GitHub search matched {}/{} for stem name '{}'", owner, repo_name, name);
+            debug!(
+                "GitHub search matched {}/{} for stem name '{}'",
+                owner, repo_name, name
+            );
             return Some((owner.to_string(), repo_name.to_string()));
         }
     }
@@ -1283,9 +1375,13 @@ async fn guess_github_update_available(
     info_path: &Path,
 ) -> bool {
     let (_, stem_version) = parse_stem_name_version(stem).unwrap_or_default();
-    // Prefer the version extracted from the filename — many AppImages set
+    // Prefer the version extracted from the filename, many AppImages set
     // `Version=1.0` (XDG spec version) in the desktop entry, not the real app version.
-    let local_version = if !stem_version.is_empty() { stem_version.as_str() } else { pkg_version };
+    let local_version = if !stem_version.is_empty() {
+        stem_version.as_str()
+    } else {
+        pkg_version
+    };
     if local_version.is_empty() {
         return false;
     }

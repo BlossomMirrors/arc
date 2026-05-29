@@ -14,7 +14,7 @@ use packages::{load_detail, load_home, load_package_icons, refresh_home_installe
 use slint::Model;
 use std::sync::{Arc, Mutex};
 use transactions::{
-    add_to_available_updates, begin_transaction, push_transactions_to_ui, run_signal_listener,
+    add_to_available_updates, begin_transaction, push_transactions_to_ui, remove_from_available_updates, run_signal_listener,
     SavedPkgData, TxStatus, TxStore,
 };
 
@@ -337,7 +337,7 @@ fn main() -> Result<()> {
             });
 
             begin_transaction(
-                pkg_id_str,
+                pkg_id_str.clone(),
                 display_name,
                 "update".to_string(),
                 true,
@@ -348,6 +348,9 @@ fn main() -> Result<()> {
                 app_weak.clone(),
                 rt_handle.clone(),
             );
+            if let Some(a) = app_weak.upgrade() {
+                remove_from_available_updates(&a, &pkg_id_str);
+            }
         });
     }
 
@@ -396,6 +399,10 @@ fn main() -> Result<()> {
                     app_weak.clone(),
                     rt_handle.clone(),
                 );
+            }
+            if let Some(a) = app_weak.upgrade() {
+                a.set_available_updates(Default::default());
+                a.set_update_count(0);
             }
         });
     }

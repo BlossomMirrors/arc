@@ -157,7 +157,7 @@ impl LutrisProvider {
             .select(&selector)
             .filter_map(|el| {
                 el.value().attr("href").map(|href| {
-                    // protocol-relative URLs — make them absolute
+                    // protocol-relative URLs, make them absolute
                     if href.starts_with("//") {
                         format!("https:{}", href)
                     } else {
