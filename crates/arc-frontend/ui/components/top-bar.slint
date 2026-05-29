@@ -1,9 +1,10 @@
-import { Button, LineEdit } from "std-widgets.slint";
+import { LineEdit } from "std-widgets.slint";
 import { Palette } from "std-widgets.slint";
 
 export component TopBar inherits Rectangle {
     in-out property <string> search-text;
     in property <int> update-count;
+    in property <string> current-view;
     in property <image> icon-home;
     in property <image> icon-search;
     in property <image> icon-settings;
@@ -33,9 +34,7 @@ export component TopBar inherits Rectangle {
                 background: home-ta.has-hover ? #80808018 : #00000000;
 
                 home-ta := TouchArea {
-                    clicked => {
-                        root.home-clicked();
-                    }
+                    clicked => { root.home-clicked(); }
                 }
 
                 Image {
@@ -84,53 +83,86 @@ export component TopBar inherits Rectangle {
                 }
             }
 
-            Button {
-                text: "Installed";
-                clicked => {
-                    root.installed-clicked();
-                }
-            }
-
+            // Button group
             Rectangle {
-                width: dl-row.preferred-width + 20px;
-                border-radius: 6px;
-                background: dl-ta.has-hover ? #80808018 : #00000000;
+                width: group-layout.preferred-width + 4px;
+                height: 36px;
+                border-radius: 8px;
                 border-width: 1px;
                 border-color: #80808030;
+                background: #80808010;
+                clip: true;
 
-                dl-ta := TouchArea {
-                    clicked => {
-                        root.downloads-clicked();
+                group-layout := HorizontalLayout {
+                    padding: 2px;
+                    spacing: 0px;
+
+                    // Installed segment
+                    Rectangle {
+                        width: installed-label.preferred-width + 20px;
+                        border-radius: 6px;
+                        background: root.current-view == "installed"
+                            ? #ffffff30
+                            : (installed-ta.has-hover ? #80808020 : #00000000);
+
+                        installed-ta := TouchArea {
+                            clicked => { root.installed-clicked(); }
+                        }
+
+                        installed-label := Text {
+                            text: "Installed";
+                            font-size: 12px;
+                            color: root.current-view == "installed"
+                                ? Palette.foreground
+                                : #808080;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
                     }
-                }
 
-                dl-row := HorizontalLayout {
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    spacing: 5px;
-                    alignment: center;
+                    // Downloads & Updates segment
+                    Rectangle {
+                        width: dl-row.preferred-width + 20px;
+                        border-radius: 6px;
+                        background: root.current-view == "downloads"
+                            ? #ffffff30
+                            : (dl-ta.has-hover ? #80808020 : #00000000);
 
-                    Text {
-                        text: "Downloads & Updates";
-                        font-size: 12px;
-                        color: Palette.foreground;
-                        vertical-alignment: center;
-                    }
+                        dl-ta := TouchArea {
+                            clicked => { root.downloads-clicked(); }
+                        }
 
-                    if root.update-count > 0: Rectangle {
-                        width: max(bubble-n.preferred-width + 8px, 16px);
-                        height: 16px;
-                        border-radius: 8px;
-                        background: #ef4444;
-                        y: (parent.height - self.height) / 2;
-
-                        bubble-n := Text {
-                            text: root.update-count;
-                            font-size: 9px;
-                            font-weight: 700;
-                            color: white;
+                        dl-row := HorizontalLayout {
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
+                            spacing: 5px;
+                            alignment: center;
+
+                            Text {
+                                text: "Downloads & Updates";
+                                font-size: 12px;
+                                    color: root.current-view == "downloads"
+                                    ? Palette.foreground
+                                    : #808080;
+                                vertical-alignment: center;
+                            }
+
+                            if root.update-count > 0: Rectangle {
+                                width: max(bubble-n.preferred-width + 8px, 16px);
+                                height: 16px;
+                                border-radius: 8px;
+                                background: #ef4444;
+                                y: (parent.height - self.height) / 2;
+
+                                bubble-n := Text {
+                                    text: root.update-count;
+                                    font-size: 9px;
+                                    font-weight: 700;
+                                    color: white;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                            }
                         }
                     }
                 }
@@ -142,9 +174,7 @@ export component TopBar inherits Rectangle {
                 background: settings-ta.has-hover ? #80808018 : #00000000;
 
                 settings-ta := TouchArea {
-                    clicked => {
-                        root.settings-clicked();
-                    }
+                    clicked => { root.settings-clicked(); }
                 }
 
                 Image {
