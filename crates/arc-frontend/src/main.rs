@@ -907,9 +907,10 @@ fn main() -> Result<()> {
             if !file_is_appimage && !file_is_bundle {
                 let app_weak2 = app_weak.clone();
                 let proxy_search = get_proxy(&proxy_arc);
+                let pkg_name_for_search = pkg_name.clone();
                 rt_handle.spawn(async move {
                     let flatpak_found = if let Some(p) = proxy_search {
-                        if let Ok(results) = p.search(&pkg_name).await {
+                        if let Ok(results) = p.search(&pkg_name_for_search).await {
                             if let Ok(pkgs) = serde_json::from_str::<Vec<libarc::Package>>(&results)
                             {
                                 pkgs.iter()
@@ -967,11 +968,11 @@ fn main() -> Result<()> {
                 let rt_handle2 = rt_handle.clone();
                 let store2 = store.clone();
                 let fp = file_path.clone();
-                let fn_ = file_name.clone();
+                let pn = pkg_name.clone();
                 app.on_install_file_appimage_requested(move || {
                     begin_transaction(
                         fp.clone(),
-                        fn_.clone(),
+                        pn.clone(),
                         "install".to_string(),
                         true,
                         false,

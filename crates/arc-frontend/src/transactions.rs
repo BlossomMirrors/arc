@@ -362,6 +362,23 @@ pub async fn run_signal_listener(
                 if let Some((pkg_id, installed_after, refresh_detail, ok, _name, tx_type)) =
                     side_effect
                 {
+                    // Detect completed AppImage installs so we can patch the transaction
+                    // entry with the real name/icon extracted by the daemon.
+                    let appimage_stem = if ok && tx_type == "install" {
+                        std::path::Path::new(&pkg_id)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .and_then(|name| {
+                                if name.to_lowercase().ends_with(".appimage") {
+                                    Some(name[..name.len() - ".appimage".len()].to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                    } else {
+                        None
+                    };
+
                     let store_for_closure = store.clone();
                     let _ = app_weak.upgrade_in_event_loop(move |app| {
                         if ok {
@@ -382,7 +399,12 @@ pub async fn run_signal_listener(
                         if tx_type == "update" {
                             app.set_updates_all_queued(false);
                         }
-                        let current_detail_pkg = app.get_detail_app().flatpak_id.to_string();
+                        let detail = app.get_detail_app();
+                        let current_detail_pkg = if !detail.flatpak_id.is_empty() {
+                            detail.flatpak_id.to_string()
+                        } else {
+                            detail.appimage_id.to_string()
+                        };
                         if !current_detail_pkg.is_empty() {
                             let is_busy = has_ongoing_transaction_for_package(
                                 &store_for_closure,
@@ -393,6 +415,56 @@ pub async fn run_signal_listener(
                             app.set_detail_progress(progress);
                         }
                     });
+
+                    // After a successful AppImage install, patch the completed
+                    // transaction entry with the real name and icon from the .info file.
+                    if let Some(stem) = appimage_stem {
+                        let tx_id_for_update = tx_id.clone();
+                        let store_for_update = store.clone();
+                        let app_weak_for_update = app_weak.clone();
+                        tokio::spawn(async move {
+                            let home = std::env::var("HOME")
+                                .unwrap_or_else(|_| "/root".to_string());
+                            let info_path = std::path::PathBuf::from(home)
+                                .join(".local/share/arc/appimages")
+                                .join(format!("{}.info", stem));
+
+                            let (real_name, icon_url) = tokio::fs::read_to_string(&info_path)
+                                .await
+                                .ok()
+                                .map(|content| {
+                                    let name = content.lines()
+                                        .find_map(|l| l.strip_prefix("NAME=").map(|v| v.to_string()))
+                                        .filter(|n| !n.is_empty());
+                                    let icon = content.lines()
+                                        .find_map(|l| l.strip_prefix("ICON_PATH=").map(|v| v.to_string()))
+                                        .filter(|p| !p.is_empty());
+                                    (name, icon)
+                                })
+                                .unwrap_or((None, None));
+
+                            let stem_for_icon = stem.clone();
+                            let new_icon = tokio::task::spawn_blocking(move || {
+                                icons::load_appimage_icon(icon_url.as_deref(), &stem_for_icon)
+                            })
+                            .await
+                            .unwrap_or(None);
+
+                            {
+                                let mut s = store_for_update.lock().unwrap();
+                                if let Some(e) = s.iter_mut().find(|e| e.id == tx_id_for_update) {
+                                    e.pkg_id = format!("appimage:{}", stem);
+                                    if let Some(name) = real_name {
+                                        e.name = name;
+                                    }
+                                    if let Some(icon_data) = new_icon {
+                                        e.icon = Some(icon_data);
+                                    }
+                                }
+                            }
+                            push_transactions_to_ui(store_for_update, &app_weak_for_update);
+                        });
+                    }
                 }
             }
         }
