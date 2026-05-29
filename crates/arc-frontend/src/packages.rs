@@ -41,9 +41,11 @@ pub struct RawDetailData {
     pub flatpak_id: String,
     pub native_id: String,
     pub lutris_id: String,
+    pub appimage_id: String,
     pub flatpak_installed: bool,
     pub native_installed: bool,
     pub lutris_installed: bool,
+    pub appimage_installed: bool,
     pub verified: bool,
     pub license: String,
     pub homepage_url: String,
@@ -384,9 +386,16 @@ pub async fn load_detail(
             && (p.id == app_id.as_str() || p.name.to_lowercase() == name_lower)
     });
 
+    let appimage_pkg = all_pkgs.iter().copied().find(|p| {
+        p.provider == Provider::AppImage
+            && (p.id == app_id.as_str() || p.name.to_lowercase() == name_lower)
+    });
+
     let appstream_info = appstream_db.find_by_id(&app_id);
 
-    let (developer, verified) = if let Some(fp_pkg) = &flatpak_pkg {
+    let (developer, verified) = if appimage_pkg.is_some() {
+        (String::new(), false)
+    } else if let Some(fp_pkg) = &flatpak_pkg {
         let remote = fp_pkg.remote.as_deref().unwrap_or("");
         let dev_name = appstream_info
             .as_ref()
@@ -411,7 +420,13 @@ pub async fn load_detail(
     };
 
     let flatpak_id = flatpak_pkg.map(|p| p.id.clone()).unwrap_or_else(|| {
-        if app_id.contains('.') && !app_id.contains(';') {
+        // Only infer a Flatpak ID from the raw app_id if it looks like a reverse-DNS
+        // Flatpak identifier. Exclude AppImage/Lutris IDs which also contain dots.
+        if app_id.contains('.')
+            && !app_id.contains(';')
+            && !app_id.starts_with("appimage:")
+            && !app_id.starts_with("lutris:")
+        {
             app_id.to_string()
         } else {
             String::new()
@@ -426,6 +441,8 @@ pub async fn load_detail(
             .any(|p| p.provider == Provider::Flatpak && p.id == flatpak_id);
     let native_installed = native_pkg.map(|p| p.installed).unwrap_or(false);
     let lutris_installed = lutris_pkg.map(|p| p.installed).unwrap_or(false);
+    let appimage_id = appimage_pkg.map(|p| p.id.clone()).unwrap_or_default();
+    let appimage_installed = appimage_pkg.map(|p| p.installed).unwrap_or(false);
 
     let icon = if !flatpak_id.is_empty() {
         let fid = flatpak_id.clone();
@@ -451,6 +468,12 @@ pub async fn load_detail(
         tokio::task::spawn_blocking(move || icons::load_native_package_icon(&name))
             .await
             .unwrap_or(None)
+    } else if !appimage_id.is_empty() {
+        let stem = appimage_id.strip_prefix("appimage:").unwrap_or(&appimage_id).to_string();
+        let icon_url = appimage_pkg.and_then(|p| p.icon_url.clone());
+        tokio::task::spawn_blocking(move || icons::load_appimage_icon(icon_url.as_deref(), &stem))
+            .await
+            .unwrap_or(None)
     } else {
         None
     };
@@ -472,6 +495,7 @@ pub async fn load_detail(
     let name = flatpak_pkg
         .or(native_pkg)
         .or(lutris_pkg)
+        .or(appimage_pkg)
         .map(|p| p.name.clone())
         .or_else(|| appstream_info.as_ref().map(|a| a.name.clone()))
         .unwrap_or_else(|| app_name.clone());
@@ -481,6 +505,7 @@ pub async fn load_detail(
     } else {
         native_pkg
             .or(lutris_pkg)
+            .or(appimage_pkg)
             .map(|p| p.description.clone())
             .or_else(|| appstream_info.as_ref().map(|a| a.summary.clone()))
             .unwrap_or_default()
@@ -489,6 +514,7 @@ pub async fn load_detail(
     let version = flatpak_pkg
         .or(native_pkg)
         .or(lutris_pkg)
+        .or(appimage_pkg)
         .map(|p| p.version.clone())
         .unwrap_or_default();
 
@@ -511,9 +537,11 @@ pub async fn load_detail(
         flatpak_id,
         native_id,
         lutris_id,
+        appimage_id,
         flatpak_installed,
         native_installed,
         lutris_installed,
+        appimage_installed,
         verified,
         license: appstream_info
             .as_ref()
@@ -529,7 +557,11 @@ pub async fn load_detail(
             .unwrap_or_default(),
     };
 
-    let pkg_id_for_busy_check = raw.flatpak_id.clone();
+    let pkg_id_for_busy_check = if !raw.flatpak_id.is_empty() {
+        raw.flatpak_id.clone()
+    } else {
+        raw.appimage_id.clone()
+    };
     let _ = app_weak.upgrade_in_event_loop(move |app| {
         app.set_detail_screenshots([].as_slice().into());
         app.set_detail_app(crate::AppDetailData {
@@ -547,10 +579,12 @@ pub async fn load_detail(
             flatpak_id: raw.flatpak_id.into(),
             native_id: raw.native_id.into(),
             lutris_id: raw.lutris_id.into(),
+            appimage_id: raw.appimage_id.into(),
             flatpak_installed: raw.flatpak_installed,
             native_installed: raw.native_installed,
             lutris_installed: raw.lutris_installed,
-            installed: raw.flatpak_installed || raw.native_installed || raw.lutris_installed,
+            appimage_installed: raw.appimage_installed,
+            installed: raw.flatpak_installed || raw.native_installed || raw.lutris_installed || raw.appimage_installed,
             verified: raw.verified,
             license: raw.license.into(),
             homepage_url: raw.homepage_url.into(),

@@ -160,7 +160,12 @@ pub fn push_transactions_to_ui(store: TxStore, app_weak: &slint::Weak<crate::App
         app.set_pending_transactions(to_slint_items(pending).as_slice().into());
         app.set_completed_transactions(to_slint_items(completed).as_slice().into());
         app.set_active_transaction_count(active_count);
-        let current_detail_pkg = app.get_detail_app().flatpak_id.to_string();
+        let detail = app.get_detail_app();
+        let current_detail_pkg = if !detail.flatpak_id.is_empty() {
+            detail.flatpak_id.to_string()
+        } else {
+            detail.appimage_id.to_string()
+        };
         if !current_detail_pkg.is_empty() {
             let is_busy = has_ongoing_transaction_for_package(&store, &current_detail_pkg);
             let progress = progress_for_package(&store, &current_detail_pkg);

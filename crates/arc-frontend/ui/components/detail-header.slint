@@ -18,10 +18,11 @@ export component DetailHeader inherits Rectangle {
 
     private property <length> shared-btn-width: 90px;
     private property <length> shared-btn-height: 36px;
-    private property <bool> btn-is-lutris: root.detail-app.lutris-id != "" && (root.settings-preferred == "Lutris" || (root.detail-app.flatpak-id == "" && root.detail-app.native-id == ""));
-    private property <bool> btn-is-native: root.detail-app.native-id != "" && (root.settings-preferred == "Native" || (root.detail-app.flatpak-id == "" && root.detail-app.lutris-id == ""));
-    private property <bool> btn-is-installed: root.btn-is-lutris ? root.detail-app.lutris-installed : (root.btn-is-native ? root.detail-app.native-installed : root.detail-app.flatpak-installed);
-    private property <string> btn-active-id: root.btn-is-lutris ? root.detail-app.lutris-id : (root.btn-is-native ? root.detail-app.native-id : root.detail-app.flatpak-id);
+    private property <bool> btn-is-appimage: root.detail-app.appimage-id != "";
+    private property <bool> btn-is-lutris: !root.btn-is-appimage && root.detail-app.lutris-id != "" && (root.settings-preferred == "Lutris" || (root.detail-app.flatpak-id == "" && root.detail-app.native-id == ""));
+    private property <bool> btn-is-native: !root.btn-is-appimage && root.detail-app.native-id != "" && (root.settings-preferred == "Native" || (root.detail-app.flatpak-id == "" && root.detail-app.lutris-id == ""));
+    private property <bool> btn-is-installed: root.btn-is-appimage ? root.detail-app.appimage-installed : (root.btn-is-lutris ? root.detail-app.lutris-installed : (root.btn-is-native ? root.detail-app.native-installed : root.detail-app.flatpak-installed));
+    private property <string> btn-active-id: root.btn-is-appimage ? root.detail-app.appimage-id : (root.btn-is-lutris ? root.detail-app.lutris-id : (root.btn-is-native ? root.detail-app.native-id : root.detail-app.flatpak-id));
 
     VerticalLayout {
         spacing: 0px;
@@ -165,7 +166,7 @@ export component DetailHeader inherits Rectangle {
                     spacing: 8px;
                     alignment: end;
 
-                    action-btn := Button {
+                    if !root.btn-is-appimage || root.btn-is-installed: Button {
                         min-width: root.shared-btn-width;
                         horizontal-stretch: 0;
                         text: root.btn-is-installed ? "Remove" : "Install";
@@ -200,7 +201,7 @@ export component DetailHeader inherits Rectangle {
                     }
                 }
 
-                if root.detail-busy && root.detail-app.flatpak-id != "": Rectangle {
+                if root.detail-busy && (root.detail-app.flatpak-id != "" || root.detail-app.appimage-id != ""): Rectangle {
                     width: cancel-detail-label.preferred-width + 24px;
                     height: root.shared-btn-height;
                     border-radius: 8px;
@@ -220,7 +221,7 @@ export component DetailHeader inherits Rectangle {
                     }
                 }
 
-                if root.detail-busy && root.detail-app.flatpak-id == "": Text {
+                if root.detail-busy && root.detail-app.flatpak-id == "" && root.detail-app.appimage-id == "": Text {
                     text: "Working...";
                     font-size: 13px;
                     color: Palette.foreground.transparentize(0.4);

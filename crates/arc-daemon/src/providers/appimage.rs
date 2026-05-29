@@ -201,7 +201,6 @@ impl AppImageProvider {
     }
 
     async fn read_squashfs_meta(squashfs: &Path, appimage_path: &Path) -> AppImageMeta {
-        // find the .desktop file: first at squashfs root, then in usr/share/applications/
         let desktop_content = Self::find_desktop_content(squashfs).await;
         let mut meta = if let Some(ref content) = desktop_content {
             parse_desktop(content)
@@ -209,16 +208,29 @@ impl AppImageProvider {
             AppImageMeta::default_from_path(appimage_path)
         };
 
-        // look for appstream metadata for better description
         if let Some(appstream) = Self::find_appstream(squashfs).await {
             if meta.description.is_empty() {
                 meta.description = appstream;
             }
         }
 
-        // use anvil-appimage to find and select the best icon from the extracted contents
+        // Prefer the icon referenced by the desktop file's Icon= field so we get
+        // the actual application icon, not a bundled library icon.
+        let icon_name = desktop_content
+            .as_deref()
+            .and_then(|c| {
+                c.lines()
+                    .find_map(|l| l.strip_prefix("Icon=").map(|v| v.trim().to_string()))
+            })
+            .filter(|s| !s.is_empty() && !s.contains('/'));
+
         let sq = squashfs.to_path_buf();
         meta.icon_path = tokio::task::spawn_blocking(move || {
+            if let Some(ref name) = icon_name {
+                if let Some(path) = find_named_icon(&sq, name) {
+                    return Some(path);
+                }
+            }
             let icons = find_icons_in_dir(&sq);
             select_best_icon(icons)
         })
@@ -229,22 +241,52 @@ impl AppImageProvider {
     }
 
     async fn find_desktop_content(squashfs: &Path) -> Option<String> {
-        // check root level first (AppImage convention)
+        // Collect all .desktop files at the squashfs root (AppImage convention).
+        let mut candidates: Vec<String> = Vec::new();
         if let Ok(mut entries) = fs::read_dir(squashfs).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
                 let p = entry.path();
                 if p.extension().and_then(|e| e.to_str()) == Some("desktop") {
-                    return fs::read_to_string(&p).await.ok();
+                    if let Ok(content) = fs::read_to_string(&p).await {
+                        candidates.push(content);
+                    }
                 }
             }
         }
-        // fallback: usr/share/applications/
+
+        // Pick the best candidate: skip hidden/secondary entries (NoDisplay, "Quit …", etc.)
+        let is_primary = |c: &str| {
+            let hidden = c.lines().any(|l| l == "NoDisplay=true" || l == "Hidden=true");
+            if hidden {
+                return false;
+            }
+            let name = c
+                .lines()
+                .find_map(|l| l.strip_prefix("Name="))
+                .unwrap_or("")
+                .to_lowercase();
+            !name.starts_with("quit") && !name.ends_with(" quit")
+                && !name.starts_with("tray") && !name.ends_with(" tray")
+        };
+
+        if let Some(primary) = candidates.iter().find(|c| is_primary(c)) {
+            return Some(primary.clone());
+        }
+        if let Some(first) = candidates.into_iter().next() {
+            return Some(first);
+        }
+
+        // Fallback: usr/share/applications/
         let apps_dir = squashfs.join("usr/share/applications");
         if let Ok(mut entries) = fs::read_dir(&apps_dir).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
                 let p = entry.path();
                 if p.extension().and_then(|e| e.to_str()) == Some("desktop") {
-                    return fs::read_to_string(&p).await.ok();
+                    if let Ok(content) = fs::read_to_string(&p).await {
+                        if is_primary(&content) {
+                            return Some(content);
+                        }
+                    }
                 }
             }
         }
@@ -397,12 +439,8 @@ impl AppImageProvider {
                 let path = entry.path();
                 if let Some(stem) = Self::stem_from_path(&path) {
                     found_stems.push(stem.clone());
-                    // if no .info → process it
-                    if !self.info_file(&stem).exists() {
-                        info!("New AppImage discovered: {}", stem);
-                        if let Err(e) = self.process_appimage(&path, &stem).await {
-                            warn!("Failed to process AppImage {}: {}", stem, e);
-                        }
+                    if let Err(e) = self.process_appimage(&path, &stem).await {
+                        warn!("Failed to process AppImage {}: {}", stem, e);
                     }
                 }
             }
@@ -564,6 +602,36 @@ async fn handle_watch_event(provider: &AppImageProvider, event: Event) {
     }
 }
 
+/// Look for an icon by name in the standard locations inside a squashfs root.
+/// Returns the first match found, preferring larger sizes.
+fn find_named_icon(squashfs: &Path, icon_name: &str) -> Option<PathBuf> {
+    // Root level (e.g. myapp.png beside the .desktop file)
+    for ext in ["svg", "svgz", "png", "xpm"] {
+        let p = squashfs.join(format!("{}.{}", icon_name, ext));
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    // hicolor theme, largest sizes first
+    let hicolor = squashfs.join("usr/share/icons/hicolor");
+    for size in ["512x512", "256x256", "128x128", "64x64", "48x48", "scalable", "32x32"] {
+        for ext in ["png", "svg", "svgz", "xpm"] {
+            let p = hicolor.join(size).join("apps").join(format!("{}.{}", icon_name, ext));
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+    // pixmaps fallback
+    for ext in ["png", "svg", "svgz", "xpm"] {
+        let p = squashfs.join("usr/share/pixmaps").join(format!("{}.{}", icon_name, ext));
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
 fn parse_desktop(content: &str) -> AppImageMeta {
     let mut meta = AppImageMeta {
         name: String::new(),
@@ -573,7 +641,18 @@ fn parse_desktop(content: &str) -> AppImageMeta {
         update_info: String::new(),
         icon_path: None,
     };
+    // Only parse the [Desktop Entry] section — action sections like
+    // [Desktop Action quit] have their own Name= lines that must be ignored.
+    let mut in_entry_section = false;
     for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_entry_section = trimmed == "[Desktop Entry]";
+            continue;
+        }
+        if !in_entry_section {
+            continue;
+        }
         if let Some(v) = line.strip_prefix("Name=") {
             meta.name = v.to_string();
         } else if let Some(v) = line.strip_prefix("Version=") {
@@ -585,8 +664,6 @@ fn parse_desktop(content: &str) -> AppImageMeta {
         } else if let Some(v) = line.strip_prefix("X-AppImage-Update-Information=") {
             meta.update_info = v.to_string();
         } else if let Some(v) = line.strip_prefix("X-AppImage-Version=") {
-            // Many AppImages set Version=1.0 (XDG spec version) and put the real
-            // app version in X-AppImage-Version instead.
             if meta.version.is_empty() || meta.version == "1.0" {
                 meta.version = v.to_string();
             }
