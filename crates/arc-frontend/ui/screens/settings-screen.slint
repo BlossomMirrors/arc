@@ -1,10 +1,4 @@
-import {
-    VerticalBox,
-    HorizontalBox,
-    Button,
-    CheckBox,
-    LineEdit,
-} from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, Button, CheckBox, LineEdit, ScrollView } from "std-widgets.slint";
 import { Palette } from "std-widgets.slint";
 import { RemoteItem } from "../types.slint";
 
@@ -42,24 +36,20 @@ export component SettingsScreen inherits Rectangle {
     property <string> new-repo-name: "";
     property <string> new-repo-url: "";
 
-    init => {
-        root.load-remotes();
-    }
-    clip: true;
+    init => { root.load-remotes(); }
 
-    Flickable {
+    ScrollView {
         width: parent.width;
         height: parent.height;
-        viewport-height: inner.preferred-height + 20px;
 
-        inner := VerticalBox {
-            width: root.width;
+        VerticalBox {
+            width: parent.width;
             padding: 20px;
             spacing: 0px;
 
+            // ── Header ──────────────────────────────────────────────
             HorizontalBox {
-                padding-left: 0;
-                padding-right: 0;
+                padding-left: 0; padding-right: 0;
                 padding-bottom: 16px;
                 spacing: 12px;
                 alignment: start;
@@ -71,23 +61,15 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
-            SectionLabel {
-                text: "GENERAL";
-            }
+            // ── GENERAL ─────────────────────────────────────────────
+            SectionLabel { text: "GENERAL"; }
 
             HorizontalBox {
-                padding: 10px;
-                padding-left: 0;
-                padding-right: 0;
+                padding: 10px; padding-left: 0; padding-right: 0;
                 spacing: 12px;
                 VerticalBox {
-                    spacing: 2px;
-                    padding: 0;
-                    horizontal-stretch: 1;
-                    Text {
-                        text: "Auto-updates";
-                    }
-
+                    spacing: 2px; padding: 0; horizontal-stretch: 1;
+                    Text { text: "Auto-updates"; }
                     Text {
                         text: "Automatically update installed apps in the background";
                         font-size: 11px;
@@ -95,7 +77,6 @@ export component SettingsScreen inherits Rectangle {
                         wrap: word-wrap;
                     }
                 }
-
                 VerticalBox {
                     alignment: center;
                     padding: 0;
@@ -110,113 +91,75 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
-            SectionLabel {
-                text: "DOWNLOADS";
-                padding-bottom: 0px;
-            }
+            // ── DOWNLOADS ───────────────────────────────────────────
+            SectionLabel { text: "DOWNLOADS"; padding-bottom: 0px; }
 
             HorizontalBox {
-                padding: 10px;
-                padding-left: 0;
-                padding-right: 0;
+                padding: 10px; padding-left: 0; padding-right: 0;
                 spacing: 12px;
                 VerticalBox {
-                    spacing: 2px;
-                    padding: 0;
-                    horizontal-stretch: 1;
-                    Text {
-                        text: "Concurrent downloads";
-                    }
-
+                    spacing: 2px; padding: 0; horizontal-stretch: 1;
+                    Text { text: "Concurrent downloads"; }
                     Text {
                         text: "Maximum number of simultaneous downloads (1–10)";
                         font-size: 11px;
                         color: Palette.foreground.transparentize(0.4);
                     }
                 }
-
                 HorizontalBox {
                     spacing: 4px;
                     alignment: end;
 
                     Rectangle {
-                        width: 28px;
-                        height: 28px;
-                        border-radius: 5px;
-                        border-width: 1px;
-                        border-color: Palette.border;
+                        width: 28px; height: 28px;
+                        border-radius: 5px; border-width: 1px; border-color: Palette.border;
                         background: dec-ta.has-hover ? Palette.background.darker(8%) : transparent;
                         dec-ta := TouchArea {
                             clicked => {
-                                if root.settings-concurrent-downloads > 1 {
-                                    root.settings-concurrent-downloads -= 1;
-                                }
+                                if root.settings-concurrent-downloads > 1 { root.settings-concurrent-downloads -= 1; }
                                 root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads);
                             }
                         }
-
-                        Text {
-                            text: "−";
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            font-size: 14px;
-                        }
+                        Text { text: "−"; horizontal-alignment: center; vertical-alignment: center; font-size: 14px; }
                     }
 
                     Rectangle {
-                        width: 32px;
-                        height: 28px;
+                        width: 32px; height: 28px;
                         Text {
                             text: root.settings-concurrent-downloads;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            font-size: 14px;
-                            font-weight: 600;
+                            horizontal-alignment: center; vertical-alignment: center;
+                            font-size: 14px; font-weight: 600;
                         }
                     }
 
                     Rectangle {
-                        width: 28px;
-                        height: 28px;
-                        border-radius: 5px;
-                        border-width: 1px;
-                        border-color: Palette.border;
+                        width: 28px; height: 28px;
+                        border-radius: 5px; border-width: 1px; border-color: Palette.border;
                         background: inc-ta.has-hover ? Palette.background.darker(8%) : transparent;
                         inc-ta := TouchArea {
                             clicked => {
-                                if root.settings-concurrent-downloads < 10 {
-                                    root.settings-concurrent-downloads += 1;
-                                }
+                                if root.settings-concurrent-downloads < 10 { root.settings-concurrent-downloads += 1; }
                                 root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads);
                             }
                         }
-
-                        Text {
-                            text: "+";
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            font-size: 14px;
-                        }
+                        Text { text: "+"; horizontal-alignment: center; vertical-alignment: center; font-size: 14px; }
                     }
                 }
             }
 
+            // ── REPOSITORIES ────────────────────────────────────────
             HorizontalBox {
-                padding-left: 0;
-                padding-right: 0;
-                padding-top: 20px;
-                padding-bottom: 6px;
+                padding-left: 0; padding-right: 0;
+                padding-top: 20px; padding-bottom: 6px;
                 alignment: start;
                 Text {
                     text: "REPOSITORIES";
-                    font-size: 10px;
-                    font-weight: 700;
+                    font-size: 10px; font-weight: 700;
                     color: Palette.foreground.transparentize(0.45);
                     letter-spacing: 0.8px;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
                 }
-
                 if root.settings-remotes-loading: Text {
                     text: "Loading…";
                     font-size: 11px;
@@ -226,21 +169,12 @@ export component SettingsScreen inherits Rectangle {
             }
 
             for repo in root.settings-remotes: HorizontalBox {
-                padding: 8px;
-                padding-left: 0;
-                padding-right: 0;
+                padding: 8px; padding-left: 0; padding-right: 0;
                 spacing: 12px;
                 VerticalBox {
-                    spacing: 2px;
-                    padding: 0;
-                    horizontal-stretch: 1;
+                    spacing: 2px; padding: 0; horizontal-stretch: 1;
                     alignment: center;
-                    Text {
-                        text: repo.name;
-                        font-weight: 600;
-                        overflow: elide;
-                    }
-
+                    Text { text: repo.name; font-weight: 600; overflow: elide; }
                     Text {
                         text: repo.url;
                         font-size: 11px;
@@ -248,53 +182,36 @@ export component SettingsScreen inherits Rectangle {
                         overflow: elide;
                     }
                 }
-
                 if repo.protected: VerticalBox {
-                    alignment: center;
-                    padding: 0;
-                    horizontal-stretch: 0;
+                    alignment: center; padding: 0; horizontal-stretch: 0;
                     Rectangle {
-                        width: 72px;
-                        height: 24px;
+                        width: 72px; height: 24px;
                         border-radius: 4px;
                         background: Palette.foreground.transparentize(0.88);
                         Text {
                             text: "Protected";
                             font-size: 10px;
                             color: Palette.foreground.transparentize(0.4);
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                            horizontal-alignment: center; vertical-alignment: center;
                         }
                     }
                 }
                 if !repo.protected: VerticalBox {
-                    alignment: center;
-                    padding: 0;
-                    horizontal-stretch: 0;
+                    alignment: center; padding: 0; horizontal-stretch: 0;
                     Button {
                         text: "Remove";
-                        clicked => {
-                            root.remove-remote(repo.name);
-                        }
+                        clicked => { root.remove-remote(repo.name); }
                     }
                 }
             }
 
-            SectionLabel {
-                text: "ADD REPOSITORY";
-            }
+            // ── ADD REPOSITORY ──────────────────────────────────────
+            SectionLabel { text: "ADD REPOSITORY"; }
 
             HorizontalBox {
-                padding: 8px;
-                padding-left: 0;
-                padding-right: 0;
+                padding: 8px; padding-left: 0; padding-right: 0;
                 spacing: 12px;
-                Text {
-                    text: "Name";
-                    vertical-alignment: center;
-                    min-width: 48px;
-                }
-
+                Text { text: "Name"; vertical-alignment: center; min-width: 48px; }
                 LineEdit {
                     horizontal-stretch: 1;
                     placeholder-text: "my-repo";
@@ -303,16 +220,9 @@ export component SettingsScreen inherits Rectangle {
             }
 
             HorizontalBox {
-                padding: 8px;
-                padding-left: 0;
-                padding-right: 0;
+                padding: 8px; padding-left: 0; padding-right: 0;
                 spacing: 12px;
-                Text {
-                    text: "URL";
-                    vertical-alignment: center;
-                    min-width: 48px;
-                }
-
+                Text { text: "URL"; vertical-alignment: center; min-width: 48px; }
                 LineEdit {
                     horizontal-stretch: 1;
                     placeholder-text: "https://example.com/repo";
@@ -321,10 +231,8 @@ export component SettingsScreen inherits Rectangle {
             }
 
             HorizontalBox {
-                padding-left: 0;
-                padding-right: 0;
-                padding-top: 8px;
-                padding-bottom: 4px;
+                padding-left: 0; padding-right: 0;
+                padding-top: 8px; padding-bottom: 4px;
                 alignment: start;
                 Button {
                     text: "Add Repository";

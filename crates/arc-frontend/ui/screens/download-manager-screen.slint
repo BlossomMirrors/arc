@@ -1,4 +1,4 @@
-import { Palette } from "std-widgets.slint";
+import { Palette, ScrollView } from "std-widgets.slint";
 import { TransactionItem, PackageItem } from "../types.slint";
 import { TransactionRow } from "../components/transaction-row.slint";
 import { UpdateRow } from "../components/update-row.slint";
@@ -20,13 +20,11 @@ export component DownloadManagerScreen inherits Rectangle {
     private property <bool> has-content:
         root.active-transactions.length > 0 || root.pending-transactions.length > 0 || root.completed-transactions.length > 0 || root.available-updates.length > 0;
 
-    Flickable {
+    ScrollView {
         width: parent.width;
         height: parent.height;
-        viewport-width: parent.width;
-        viewport-height: content.preferred-height + 32px;
 
-        content := VerticalLayout {
+        VerticalLayout {
             spacing: 0px;
             width: parent.width;
 
@@ -56,9 +54,7 @@ export component DownloadManagerScreen inherits Rectangle {
 
                     check-ta := TouchArea {
                         enabled: !root.updates-loading;
-                        clicked => {
-                            root.refresh-updates-requested();
-                        }
+                        clicked => { root.refresh-updates-requested(); }
                     }
 
                     check-label := Text {
@@ -71,19 +67,17 @@ export component DownloadManagerScreen inherits Rectangle {
                 }
             }
 
+            // ── Active ───────────────────────────────────────────────────
             if root.active-transactions.length > 0: VerticalLayout {
                 spacing: 0px;
 
                 HorizontalLayout {
-                    padding-left: 20px;
-                    padding-right: 20px;
-                    padding-top: 16px;
-                    padding-bottom: 8px;
+                    padding-left: 20px; padding-right: 20px;
+                    padding-top: 16px; padding-bottom: 8px;
 
                     Text {
                         text: "Active (" + root.active-transactions.length + ")";
-                        font-size: 11px;
-                        font-weight: 700;
+                        font-size: 11px; font-weight: 700;
                         color: Palette.foreground.transparentize(0.4);
                         vertical-alignment: center;
                     }
@@ -91,25 +85,21 @@ export component DownloadManagerScreen inherits Rectangle {
 
                 for tx[i] in root.active-transactions: TransactionRow {
                     item: tx;
-                    cancel-clicked(id) => {
-                        root.cancel-requested(id);
-                    }
+                    cancel-clicked(id) => { root.cancel-requested(id); }
                 }
             }
 
+            // ── Pending ──────────────────────────────────────────────────
             if root.pending-transactions.length > 0: VerticalLayout {
                 spacing: 0px;
 
                 HorizontalLayout {
-                    padding-left: 20px;
-                    padding-right: 20px;
-                    padding-top: 16px;
-                    padding-bottom: 8px;
+                    padding-left: 20px; padding-right: 20px;
+                    padding-top: 16px; padding-bottom: 8px;
 
                     Text {
                         text: "Pending (" + root.pending-transactions.length + ")";
-                        font-size: 11px;
-                        font-weight: 700;
+                        font-size: 11px; font-weight: 700;
                         color: Palette.foreground.transparentize(0.4);
                         vertical-alignment: center;
                     }
@@ -117,26 +107,22 @@ export component DownloadManagerScreen inherits Rectangle {
 
                 for tx[i] in root.pending-transactions: TransactionRow {
                     item: tx;
-                    cancel-clicked(id) => {
-                        root.cancel-requested(id);
-                    }
+                    cancel-clicked(id) => { root.cancel-requested(id); }
                 }
             }
 
+            // ── Completed ────────────────────────────────────────────────
             if root.completed-transactions.length > 0: VerticalLayout {
                 spacing: 0px;
 
                 HorizontalLayout {
-                    padding-left: 20px;
-                    padding-right: 20px;
-                    padding-top: 16px;
-                    padding-bottom: 8px;
+                    padding-left: 20px; padding-right: 20px;
+                    padding-top: 16px; padding-bottom: 8px;
                     spacing: 12px;
 
                     Text {
                         text: "Completed (" + root.completed-transactions.length + ")";
-                        font-size: 11px;
-                        font-weight: 700;
+                        font-size: 11px; font-weight: 700;
                         color: Palette.foreground.transparentize(0.4);
                         horizontal-stretch: 1;
                         vertical-alignment: center;
@@ -151,9 +137,7 @@ export component DownloadManagerScreen inherits Rectangle {
                         border-color: #80808028;
 
                         clr-ta := TouchArea {
-                            clicked => {
-                                root.clear-completed-requested();
-                            }
+                            clicked => { root.clear-completed-requested(); }
                         }
 
                         clr-label := Text {
@@ -166,30 +150,21 @@ export component DownloadManagerScreen inherits Rectangle {
                     }
                 }
 
-                for tx[i] in root.completed-transactions: TransactionRow {
-                    item: tx;
-                }
+                for tx[i] in root.completed-transactions: TransactionRow { item: tx; }
             }
 
+            // ── Updates Available ────────────────────────────────────────
             if root.available-updates.length > 0: VerticalLayout {
                 spacing: 0px;
 
-                Rectangle {
-                    height: 1px;
-                    background: #80808025;
-                }
-
                 HorizontalLayout {
-                    padding-left: 20px;
-                    padding-right: 20px;
-                    padding-top: 16px;
-                    padding-bottom: 8px;
+                    padding-left: 20px; padding-right: 20px;
+                    padding-top: 16px; padding-bottom: 8px;
                     spacing: 12px;
 
                     Text {
                         text: "Updates Available (" + root.available-updates.length + ")";
-                        font-size: 11px;
-                        font-weight: 700;
+                        font-size: 11px; font-weight: 700;
                         color: Palette.foreground.transparentize(0.4);
                         horizontal-stretch: 1;
                         vertical-alignment: center;
@@ -203,15 +178,12 @@ export component DownloadManagerScreen inherits Rectangle {
 
                         upd-all-ta := TouchArea {
                             enabled: !root.updates-all-queued;
-                            clicked => {
-                                root.update-all-requested();
-                            }
+                            clicked => { root.update-all-requested(); }
                         }
 
                         upd-all-label := Text {
                             text: "Update All";
-                            font-size: 11px;
-                            font-weight: 600;
+                            font-size: 11px; font-weight: 600;
                             color: root.updates-all-queued ? #ffffff80 : white;
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
@@ -221,12 +193,11 @@ export component DownloadManagerScreen inherits Rectangle {
 
                 for pkg[i] in root.available-updates: UpdateRow {
                     item: pkg;
-                    update-clicked(id) => {
-                        root.update-requested(id);
-                    }
+                    update-clicked(id) => { root.update-requested(id); }
                 }
             }
 
+            // ── Empty state ──────────────────────────────────────────────
             if !root.has-content: VerticalLayout {
                 alignment: center;
                 spacing: 8px;
@@ -235,8 +206,7 @@ export component DownloadManagerScreen inherits Rectangle {
 
                 Text {
                     text: "No active downloads";
-                    font-size: 16px;
-                    font-weight: 600;
+                    font-size: 16px; font-weight: 600;
                     horizontal-alignment: center;
                     color: Palette.foreground.transparentize(0.4);
                 }

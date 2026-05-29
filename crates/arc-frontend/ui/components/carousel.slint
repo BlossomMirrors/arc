@@ -5,21 +5,27 @@ export component Carousel inherits Rectangle {
     in property <[AppCardData]> items;
     callback item-clicked(string);
 
-    private property <length> scroll-x: 0px;
-    private property <length> max-scroll: max(0px, root.items.length * 192px - root.width);
-
-    animate scroll-x { duration: 250ms; easing: ease-in-out; }
-
     height: 192px;
     clip: true;
+    preferred-width: 0px;
 
-    for app[i] in root.items: AppCard {
-        x: i * 192px + root.scroll-x;
-        y: 0px;
-        width: 180px;
-        height: 192px;
-        card: app;
-        clicked(id) => { root.item-clicked(id); }
+    flickable := Flickable {
+        width: parent.width;
+        height: parent.height;
+        viewport-width: root.items.length * 192px;
+        viewport-height: parent.height;
+        interactive: false;
+
+        animate viewport-x { duration: 250ms; easing: ease-in-out; }
+
+        for app[i] in root.items: AppCard {
+            x: i * 192px;
+            y: 0px;
+            width: 180px;
+            height: 192px;
+            card: app;
+            clicked(id) => { root.item-clicked(id); }
+        }
     }
 
     // Left button
@@ -30,13 +36,13 @@ export component Carousel inherits Rectangle {
         height: 48px;
         border-radius: 8px;
         background: #000000bb;
-        opacity: root.scroll-x < 0px ? 1.0 : 0.0;
+        opacity: flickable.viewport-x < 0px ? 1.0 : 0.0;
         animate opacity { duration: 150ms; }
 
         TouchArea {
-            enabled: root.scroll-x < 0px;
+            enabled: flickable.viewport-x < 0px;
             clicked => {
-                root.scroll-x = min(0px, root.scroll-x + 3 * 192px);
+                flickable.viewport-x = min(0px, flickable.viewport-x + 3 * 192px);
             }
         }
 
@@ -57,13 +63,13 @@ export component Carousel inherits Rectangle {
         height: 48px;
         border-radius: 8px;
         background: #000000bb;
-        opacity: root.scroll-x > -root.max-scroll ? 1.0 : 0.0;
+        opacity: flickable.viewport-x > -(flickable.viewport-width - flickable.width) ? 1.0 : 0.0;
         animate opacity { duration: 150ms; }
 
         TouchArea {
-            enabled: root.scroll-x > -root.max-scroll;
+            enabled: flickable.viewport-x > -(flickable.viewport-width - flickable.width);
             clicked => {
-                root.scroll-x = max(-root.max-scroll, root.scroll-x - 3 * 192px);
+                flickable.viewport-x = max(-(flickable.viewport-width - flickable.width), flickable.viewport-x - 3 * 192px);
             }
         }
 

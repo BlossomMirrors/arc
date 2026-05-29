@@ -196,7 +196,6 @@ fn main() -> Result<()> {
 
                 let all_pkgs = helpers::dedup_by_preference(all_pkgs, &s);
                 let raw_pkgs = load_package_icons(all_pkgs).await;
-                let status = format!("Found {} result(s) for '{}'", raw_pkgs.len(), query_str);
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
                     let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
                     app.set_packages(pkgs.as_slice().into());
@@ -228,7 +227,6 @@ fn main() -> Result<()> {
                 };
 
                 let raw_pkgs = load_package_icons(search_pkgs).await;
-                let status = format!("{} application(s) installed", raw_pkgs.len());
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
                     let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
                     app.set_packages(pkgs.as_slice().into());
@@ -444,7 +442,6 @@ fn main() -> Result<()> {
                 };
 
                 let raw_pkgs = load_package_icons(packages).await;
-                let status = format!("Category: {} ({} apps)", cat, raw_pkgs.len());
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
                     let slint_pkgs: Vec<PackageItem> =
                         raw_pkgs.iter().map(|r| r.to_slint()).collect();

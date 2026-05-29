@@ -296,7 +296,7 @@ pub async fn run_signal_listener(
 
                 push_transactions_to_ui(store.clone(), &app_weak);
 
-                if let Some((pkg_id, installed_after, refresh_detail, ok, name, tx_type)) =
+                if let Some((pkg_id, installed_after, refresh_detail, ok, _name, tx_type)) =
                     side_effect
                 {
                     let store_for_closure = store.clone();
@@ -307,12 +307,6 @@ pub async fn run_signal_listener(
                             } else {
                                 update_package_installed(&app, &pkg_id, installed_after);
                             }
-                            let verb = match tx_type.as_str() {
-                                "remove" => "Removed",
-                                "update" => "Updated",
-                                _ => "Installed",
-                            };
-
                             if refresh_detail && app.get_current_view() == "detail" {
                                 app.invoke_detail_requested(pkg_id.clone().into());
                             }

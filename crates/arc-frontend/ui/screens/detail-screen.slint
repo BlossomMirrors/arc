@@ -1,4 +1,4 @@
-import { Palette, HorizontalBox } from "std-widgets.slint";
+import { Palette, HorizontalBox, ScrollView } from "std-widgets.slint";
 import { AppDetailData } from "../types.slint";
 import { DetailHeader } from "../components/detail-header.slint";
 import { ScreenshotCarousel } from "../components/screenshot-carousel.slint";
@@ -29,33 +29,23 @@ export component DetailScreen inherits Rectangle {
         }
     }
 
-    if !root.detail-loading: Flickable {
+    if !root.detail-loading: ScrollView {
         width: parent.width;
         height: parent.height;
-        viewport-width: parent.width;
-        viewport-height: content-layout.preferred-height + 32px;
 
-        content-layout := VerticalLayout {
+        VerticalLayout {
             spacing: 0px;
             width: parent.width;
 
-            // Header: back button + app info + divider
             DetailHeader {
                 detail-app: root.detail-app;
                 detail-busy: root.detail-busy;
                 settings-preferred: root.settings-preferred;
-                back-clicked => {
-                    root.back-clicked();
-                }
-                install-requested(id) => {
-                    root.install-requested(id);
-                }
-                remove-requested(id) => {
-                    root.remove-requested(id);
-                }
+                back-clicked => { root.back-clicked(); }
+                install-requested(id) => { root.install-requested(id); }
+                remove-requested(id) => { root.remove-requested(id); }
             }
 
-            // Short description
             if root.detail-app.summary != "": VerticalLayout {
                 padding-left: 20px;
                 padding-right: 20px;
@@ -70,7 +60,6 @@ export component DetailScreen inherits Rectangle {
                 }
             }
 
-            // Full description (native/Lutris packages only)
             if root.detail-app.description != "": VerticalLayout {
                 padding-left: 20px;
                 padding-right: 20px;
@@ -84,7 +73,6 @@ export component DetailScreen inherits Rectangle {
                 }
             }
 
-            // Screenshots
             HorizontalBox {
                 padding: 8px;
                 if root.detail-screenshots.length > 0: ScreenshotCarousel {
@@ -96,7 +84,6 @@ export component DetailScreen inherits Rectangle {
                 }
             }
 
-            // Homepage URL
             if root.detail-app.homepage-url != "": VerticalLayout {
                 padding-left: 20px;
                 padding-right: 20px;
@@ -124,13 +111,9 @@ export component DetailScreen inherits Rectangle {
 
                     Rectangle {
                         horizontal-stretch: 1;
-
                         url-ta := TouchArea {
-                            clicked => {
-                                root.open-url-requested(root.detail-app.homepage-url);
-                            }
+                            clicked => { root.open-url-requested(root.detail-app.homepage-url); }
                         }
-
                         Text {
                             text: root.detail-app.homepage-url;
                             font-size: 12px;
@@ -144,14 +127,11 @@ export component DetailScreen inherits Rectangle {
         }
     }
 
-    // Lightbox
     if root.lightbox-visible: Lightbox {
         width: parent.width;
         height: parent.height;
         images: root.detail-screenshots;
         initial-index: root.lightbox-index;
-        closed => {
-            root.lightbox-visible = false;
-        }
+        closed => { root.lightbox-visible = false; }
     }
 }
