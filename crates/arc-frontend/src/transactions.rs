@@ -85,19 +85,6 @@ pub fn push_transactions_to_ui(store: TxStore, app_weak: &slint::Weak<crate::App
 
     let active_count = (active.len() + pending.len()) as i32;
 
-    let status_text = if let Some(tx) = active.first() {
-        let verb = match tx.tx_type.as_str() {
-            "install" | "flatpakref" => "Installing",
-            "remove" => "Removing",
-            _ => "Updating",
-        };
-        format!("{} {} ({}%)", verb, tx.name, (tx.progress * 100.0) as i32)
-    } else if !pending.is_empty() {
-        format!("{} operation(s) queued", pending.len())
-    } else {
-        String::new()
-    };
-
     let _ = app_weak.upgrade_in_event_loop(move |app| {
         fn to_slint_items(txs: Vec<TrackedTx>) -> Vec<crate::TransactionItem> {
             txs.into_iter()
@@ -123,9 +110,6 @@ pub fn push_transactions_to_ui(store: TxStore, app_weak: &slint::Weak<crate::App
         app.set_pending_transactions(to_slint_items(pending).as_slice().into());
         app.set_completed_transactions(to_slint_items(completed).as_slice().into());
         app.set_active_transaction_count(active_count);
-        if !status_text.is_empty() {
-            app.set_status_text(status_text.into());
-        }
         let current_detail_pkg = app.get_detail_app().flatpak_id.to_string();
         if !current_detail_pkg.is_empty() {
             let is_busy = has_ongoing_transaction_for_package(&store, &current_detail_pkg);
@@ -209,6 +193,7 @@ pub fn begin_transaction(
                 "flatpakref" => p.install_flatpakref(&pkg_id).await.ok(),
                 "remove" => p.remove_package(&pkg_id).await.ok(),
                 "update" => p.update_package(&pkg_id).await.ok(),
+                "bundle" => p.install_flatpak_bundle(&pkg_id).await.ok(),
                 _ => None,
             },
             None => None,
@@ -327,7 +312,7 @@ pub async fn run_signal_listener(
                                 "update" => "Updated",
                                 _ => "Installed",
                             };
-                            app.set_status_text(format!("{} {}.", verb, name).into());
+
                             if refresh_detail && app.get_current_view() == "detail" {
                                 app.invoke_detail_requested(pkg_id.clone().into());
                             }
@@ -335,7 +320,7 @@ pub async fn run_signal_listener(
                                 remove_from_available_updates(&app, &pkg_id);
                             }
                         } else {
-                            app.set_status_text("Operation failed.".into());
+
                         }
                         if tx_type == "update" {
                             app.set_updates_all_queued(false);

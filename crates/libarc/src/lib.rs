@@ -1,12 +1,14 @@
 pub mod errors;
 pub mod events;
+pub mod search;
 pub mod settings;
 pub mod types;
 
 pub use errors::ArcError;
 pub use events::ArcEvent;
+pub use search::{is_subsequence, score_field, score_package, search_and_rank};
 pub use settings::Settings;
-pub use types::{Package, Provider, Transaction, TransactionStatus, TransactionType};
+pub use types::{Package, Provider, RemoteInfo, Transaction, TransactionStatus, TransactionType};
 
 use anyhow::Result;
 use zbus::{proxy, Connection};
@@ -32,6 +34,11 @@ pub trait ArcDaemon {
     async fn refresh_cache(&self) -> zbus::Result<bool>;
     async fn run_package(&self, package_id: &str) -> zbus::Result<String>;
     async fn cancel_transaction(&self, transaction_id: &str) -> zbus::Result<bool>;
+    async fn list_remotes(&self) -> zbus::Result<String>;
+    async fn add_remote(&self, name: &str, url: &str) -> zbus::Result<bool>;
+    async fn remove_remote(&self, name: &str) -> zbus::Result<bool>;
+    async fn add_flatpakrepo(&self, content: &str) -> zbus::Result<bool>;
+    async fn install_flatpak_bundle(&self, path: &str) -> zbus::Result<String>;
 
     // signals are one way messages the daemon sends to all connected clients
     // without them having to ask, fire and forget from the daemon side

@@ -1,5 +1,6 @@
 use appstream::enums::{ContentAttribute, ContentState, ProjectUrl};
 use appstream::{Collection, Component};
+use libarc::score_field;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -93,10 +94,10 @@ impl AppStreamDb {
             .collect()
     }
 
-    #[allow(dead_code)]
     pub fn search_apps(&self, query: &str) -> Vec<AppStreamEntry> {
         let q = query.to_lowercase();
-        self.components
+        let mut scored: Vec<(AppStreamEntry, u32)> = self
+            .components
             .iter()
             .filter(|(c, _)| {
                 matches!(
@@ -105,7 +106,7 @@ impl AppStreamDb {
                         | appstream::enums::ComponentKind::ConsoleApplication
                 )
             })
-            .filter(|(c, _)| {
+            .filter_map(|(c, remote)| {
                 let id = c.id.to_string().to_lowercase();
                 let name = c
                     .name
@@ -118,10 +119,18 @@ impl AppStreamDb {
                     .and_then(|s| s.get_default())
                     .map(|s| s.to_lowercase())
                     .unwrap_or_default();
-                id.contains(&q) || name.contains(&q) || summary.contains(&q)
+                let score = score_field(&name, &q)
+                    .max(score_field(&id, &q).saturating_sub(10))
+                    .max(score_field(&summary, &q).saturating_sub(30));
+                if score > 0 {
+                    Some((component_to_entry(c, remote.clone()), score))
+                } else {
+                    None
+                }
             })
-            .map(|(c, remote)| component_to_entry(c, remote.clone()))
-            .collect()
+            .collect();
+        scored.sort_by(|a, b| b.1.cmp(&a.1));
+        scored.into_iter().map(|(e, _)| e).collect()
     }
 
     #[allow(dead_code)]

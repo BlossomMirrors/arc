@@ -1,8 +1,10 @@
+use crate::providers::flatpak::FlatpakProvider;
 use crate::providers::MultiProvider;
 use crate::providers::PackageProvider;
 use crate::transaction_manager::TransactionManager;
 use libarc::{Provider, TransactionType};
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no slashes or semicolons).
 // distrobox ids look like "distrobox:container:name:type" or are file paths for installs.
@@ -32,6 +34,7 @@ use zbus::object_server::SignalEmitter;
 pub struct ArcDaemonInterface {
     pub provider: Arc<MultiProvider>,
     pub transaction_manager: Arc<TransactionManager>,
+    pub download_semaphore: Arc<Semaphore>,
 }
 
 #[interface(name = "dev.arc.ArcDaemon1")]
@@ -56,6 +59,7 @@ impl ArcDaemonInterface {
 
         let provider = self.provider.clone();
         let tm = self.transaction_manager.clone();
+        let semaphore = self.download_semaphore.clone();
         // emitter is tied to this request's lifetime so we have to own it
         // before spawning otherwise the borrow checker will not allow the move
         let emitter = emitter.to_owned();
@@ -65,6 +69,18 @@ impl ArcDaemonInterface {
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
+
+            // Wait for a download slot; allow cancellation while queued
+            let _permit = tokio::select! {
+                result = semaphore.acquire_owned() => {
+                    match result { Ok(p) => p, Err(_) => return }
+                }
+                _ = cancel_token.cancelled() => {
+                    tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
+                    return;
+                }
+            };
 
             let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
 
@@ -105,7 +121,7 @@ impl ArcDaemonInterface {
                     )
                     .await;
                 }
-                result = provider.install_with_progress(&package_id, progress_tx) => {
+                result = provider.install_with_progress(&package_id, progress_tx, cancel_token.clone()) => {
                     match result {
                         Ok(()) => {
                             provider.invalidate_package_cache().await;
@@ -157,10 +173,22 @@ impl ArcDaemonInterface {
 
         let provider = self.provider.clone();
         let tm = self.transaction_manager.clone();
+        let semaphore = self.download_semaphore.clone();
         let emitter = emitter.to_owned();
 
         tokio::spawn(async move {
             let _ = Self::transaction_started(&emitter, tx_id.to_string(), url.clone()).await;
+
+            let _permit = tokio::select! {
+                result = semaphore.acquire_owned() => {
+                    match result { Ok(p) => p, Err(_) => return }
+                }
+                _ = cancel_token.cancelled() => {
+                    tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
+                    return;
+                }
+            };
 
             let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
 
@@ -200,7 +228,7 @@ impl ArcDaemonInterface {
                     )
                     .await;
                 }
-                result = provider.install_flatpakref_with_progress(&url, progress_tx) => {
+                result = provider.install_flatpakref_with_progress(&url, progress_tx, cancel_token.clone()) => {
                     match result {
                         Ok(()) => {
                             provider.invalidate_package_cache().await;
@@ -310,11 +338,23 @@ impl ArcDaemonInterface {
 
         let provider = self.provider.clone();
         let tm = self.transaction_manager.clone();
+        let semaphore = self.download_semaphore.clone();
         let emitter = emitter.to_owned();
 
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
+
+            let _permit = tokio::select! {
+                result = semaphore.acquire_owned() => {
+                    match result { Ok(p) => p, Err(_) => return }
+                }
+                _ = cancel_token.cancelled() => {
+                    tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
+                    return;
+                }
+            };
 
             let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
 
@@ -354,7 +394,7 @@ impl ArcDaemonInterface {
                     )
                     .await;
                 }
-                result = provider.update_with_progress(&package_id, progress_tx) => {
+                result = provider.update_with_progress(&package_id, progress_tx, cancel_token.clone()) => {
                     match result {
                         Ok(()) => {
                             provider.invalidate_package_cache().await;
@@ -512,6 +552,115 @@ impl ArcDaemonInterface {
                 serde_json::json!({ "success": false, "error": e.to_string() }).to_string()
             }
         }
+    }
+
+    async fn list_remotes(&self) -> String {
+        info!("ListRemotes");
+        tokio::task::spawn_blocking(FlatpakProvider::list_remotes)
+            .await
+            .ok()
+            .and_then(|v| serde_json::to_string(&v).ok())
+            .unwrap_or_else(|| "[]".to_string())
+    }
+
+    async fn add_remote(&self, name: String, url: String) -> bool {
+        info!("AddRemote: {} {}", name, url);
+        tokio::task::spawn_blocking(move || FlatpakProvider::add_remote_from_url(&name, &url))
+            .await
+            .map(|r| r.is_ok())
+            .unwrap_or(false)
+    }
+
+    async fn remove_remote(&self, name: String) -> bool {
+        info!("RemoveRemote: {}", name);
+        tokio::task::spawn_blocking(move || FlatpakProvider::remove_remote(&name))
+            .await
+            .map(|r| r.is_ok())
+            .unwrap_or(false)
+    }
+
+    async fn add_flatpakrepo(&self, content: String) -> bool {
+        info!("AddFlatpakrepo");
+        tokio::task::spawn_blocking(move || FlatpakProvider::add_remote_from_flatpakrepo(&content))
+            .await
+            .map(|r| r.is_ok())
+            .unwrap_or(false)
+    }
+
+    async fn install_flatpak_bundle(
+        &self,
+        path: String,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> String {
+        info!("InstallFlatpakBundle: {}", path);
+        let (tx, cancel_token) = self
+            .transaction_manager
+            .create(TransactionType::Install, path.clone(), Provider::Flatpak)
+            .await;
+        let tx_id = tx.id;
+
+        let provider = self.provider.clone();
+        let tm = self.transaction_manager.clone();
+        let semaphore = self.download_semaphore.clone();
+        let emitter = emitter.to_owned();
+
+        tokio::spawn(async move {
+            let _ = Self::transaction_started(&emitter, tx_id.to_string(), path.clone()).await;
+
+            let _permit = tokio::select! {
+                result = semaphore.acquire_owned() => {
+                    match result { Ok(p) => p, Err(_) => return }
+                }
+                _ = cancel_token.cancelled() => {
+                    tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
+                    return;
+                }
+            };
+
+            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
+            let emitter_fwd = emitter.clone();
+            let tm_fwd = tm.clone();
+            let cancel_token_fwd = cancel_token.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = cancel_token_fwd.cancelled() => break,
+                        result = progress_rx.recv() => match result {
+                            Some(pct) => {
+                                tm_fwd.update_progress(tx_id, pct).await;
+                                let _ = Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                            }
+                            None => break,
+                        }
+                    }
+                }
+            });
+
+            tokio::select! {
+                _ = cancel_token.cancelled() => {
+                    tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
+                }
+                result = provider.install_bundle_with_progress(&path, progress_tx, cancel_token.clone()) => {
+                    match result {
+                        Ok(()) => {
+                            provider.invalidate_package_cache().await;
+                            tm.complete(tx_id, true, "Installation successful".to_string()).await;
+                            let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
+                            let _ = Self::transaction_finished(&emitter, tx_id.to_string(), true, "Installation successful".to_string()).await;
+                        }
+                        Err(e) => {
+                            error!("Bundle install failed: {}", e);
+                            tm.complete(tx_id, false, e.to_string()).await;
+                            let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, e.to_string()).await;
+                        }
+                    }
+                }
+            }
+        });
+
+        tx_id.to_string()
     }
 
     // the next four are signal declarations, zbus generates the actual emit

@@ -1,0 +1,56 @@
+import { VerticalBox, Button } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
+
+export component AddFlatpakRepoScreen inherits Rectangle {
+    in property <string> repo-title;
+    in property <string> repo-url;
+
+    callback confirmed();
+    callback cancelled();
+
+    VerticalBox {
+        alignment: center;
+        padding: 48px;
+        spacing: 20px;
+
+        Text {
+            text: "Add Repository";
+            font-size: 22px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.repo-title != "" ? root.repo-title : "Unknown repository";
+            font-size: 15px;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.repo-url;
+            font-size: 12px;
+            color: Palette.foreground.transparentize(0.45);
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+
+        Text {
+            text: "This will add the repository to your Flatpak user installation.";
+            font-size: 11px;
+            color: Palette.foreground.transparentize(0.4);
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+
+        Button {
+            text: "Add Repository";
+            clicked => { root.confirmed(); }
+        }
+
+        Button {
+            text: "Cancel";
+            clicked => { root.cancelled(); }
+        }
+    }
+}

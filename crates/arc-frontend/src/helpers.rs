@@ -30,6 +30,29 @@ pub fn is_pkg_file(path: &str) -> bool {
         || lower.ends_with(".pkg.tar.xz")
         || lower.ends_with(".pkg.tar.zst")
         || lower.ends_with(".appimage")
+        || lower.ends_with(".flatpak")
+}
+
+pub fn is_flatpak_bundle(path: &str) -> bool {
+    path.to_lowercase().ends_with(".flatpak")
+}
+
+pub fn is_flatpakrepo(path: &str) -> bool {
+    path.to_lowercase().ends_with(".flatpakrepo")
+}
+
+pub fn parse_flatpakrepo(content: &str) -> (String, String) {
+    let mut title = String::new();
+    let mut url = String::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("Title=") {
+            title = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("Url=") {
+            url = v.trim().to_string();
+        }
+    }
+    (title, url)
 }
 
 pub fn is_appimage(path: &str) -> bool {

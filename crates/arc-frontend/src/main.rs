@@ -6,14 +6,16 @@ mod transactions;
 
 use anyhow::Result;
 use helpers::{
-    get_display_name, get_proxy, is_appimage, is_pkg_file, parse_flatpakref,
-    pkg_name_from_filename,
+    get_display_name, get_proxy, is_appimage, is_flatpak_bundle, is_flatpakrepo, is_pkg_file,
+    parse_flatpakref, parse_flatpakrepo, pkg_name_from_filename,
 };
 use libarc::{ArcDaemonProxy, Provider, Settings};
 use packages::{load_detail, load_home, load_package_icons, refresh_home_installed};
 use slint::Model;
 use std::sync::{Arc, Mutex};
-use transactions::{begin_transaction, push_transactions_to_ui, run_signal_listener, TxStatus, TxStore};
+use transactions::{
+    begin_transaction, push_transactions_to_ui, run_signal_listener, TxStatus, TxStore,
+};
 
 slint::include_modules!();
 
@@ -43,15 +45,6 @@ fn main() -> Result<()> {
     let proxy_opt: Arc<Mutex<Option<ArcDaemonProxy<'static>>>> =
         Arc::new(Mutex::new(proxy_result.ok()));
 
-    {
-        let guard = proxy_opt.lock().unwrap();
-        if guard.is_none() {
-            app.set_status_text("Warning: Arc daemon not running. Start arc-daemon first.".into());
-        } else {
-            app.set_status_text("Connected to Arc daemon.".into());
-        }
-    }
-
     let settings: Arc<Mutex<Settings>> = Arc::new(Mutex::new(Settings::load()));
 
     {
@@ -66,6 +59,8 @@ fn main() -> Result<()> {
             .into(),
         );
         app.set_settings_ignore_native_pref(s.ignore_native_preference);
+        app.set_settings_auto_updates(s.auto_updates);
+        app.set_settings_concurrent_downloads(s.concurrent_downloads as i32);
     }
 
     let tx_store: TxStore = Arc::new(Mutex::new(Vec::new()));
@@ -152,6 +147,12 @@ fn main() -> Result<()> {
             if query_str.trim().is_empty() {
                 return;
             }
+
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_packages([].as_slice().into());
+                app_ref.set_is_loading(true);
+            }
+
             let app_weak2 = app_weak.clone();
             let proxy = get_proxy(&proxy_arc);
             let s = settings.lock().unwrap().clone();
@@ -167,21 +168,42 @@ fn main() -> Result<()> {
                     vec![]
                 };
 
-                let all_pkgs = helpers::dedup_by_preference(daemon_pkgs, &s);
+                // Fall back to local AppStream DB when daemon is unavailable or returns nothing
+                let all_pkgs = if daemon_pkgs.is_empty() {
+                    let q = query_str.clone();
+                    tokio::task::spawn_blocking(move || {
+                        appstream_db::AppStreamDb::get_static()
+                            .search_apps(&q)
+                            .into_iter()
+                            .map(|e| libarc::Package {
+                                id: e.id,
+                                name: e.name,
+                                version: String::new(),
+                                description: e.summary,
+                                provider: libarc::Provider::Flatpak,
+                                installed: false,
+                                icon_url: e.icon_url,
+                                remote: e.remote,
+                                screenshots: vec![],
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .await
+                    .unwrap_or_default()
+                } else {
+                    daemon_pkgs
+                };
+
+                let all_pkgs = helpers::dedup_by_preference(all_pkgs, &s);
                 let raw_pkgs = load_package_icons(all_pkgs).await;
                 let status = format!("Found {} result(s) for '{}'", raw_pkgs.len(), query_str);
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
                     let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
                     app.set_packages(pkgs.as_slice().into());
-                    app.set_status_text(status.into());
+
                     app.set_is_loading(false);
                 });
             });
-
-            if let Some(app_ref) = app_weak.upgrade() {
-                app_ref.set_is_loading(true);
-                app_ref.set_status_text("Searching...".into());
-            }
         });
     }
 
@@ -210,14 +232,13 @@ fn main() -> Result<()> {
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
                     let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
                     app.set_packages(pkgs.as_slice().into());
-                    app.set_status_text(status.into());
+
                     app.set_is_loading(false);
                 });
             });
 
             if let Some(app_ref) = app_weak.upgrade() {
                 app_ref.set_is_loading(true);
-                app_ref.set_status_text("Loading installed apps...".into());
             }
         });
     }
@@ -429,7 +450,7 @@ fn main() -> Result<()> {
                         raw_pkgs.iter().map(|r| r.to_slint()).collect();
                     app.set_current_view("search".into());
                     app.set_packages(slint_pkgs.as_slice().into());
-                    app.set_status_text(status.into());
+
                     app.set_is_loading(false);
                 });
             });
@@ -437,7 +458,6 @@ fn main() -> Result<()> {
             if let Some(app_ref) = app_weak.upgrade() {
                 app_ref.set_current_view("search".into());
                 app_ref.set_is_loading(true);
-                app_ref.set_status_text(format!("Loading {}...", category_id).into());
             }
         });
     }
@@ -471,16 +491,13 @@ fn main() -> Result<()> {
                     app.set_update_count(count as i32);
                     app.set_updates_loading(false);
                     if count == 0 {
-                        app.set_status_text("Everything is up to date.".into());
                     } else {
-                        app.set_status_text(format!("{} update(s) available.", count).into());
                     }
                 });
             });
 
             if let Some(app_ref) = app_weak.upgrade() {
                 app_ref.set_updates_loading(true);
-                app_ref.set_status_text("Checking for updates...".into());
             }
         });
     }
@@ -510,15 +527,107 @@ fn main() -> Result<()> {
 
     {
         let settings = settings.clone();
-        app.on_save_settings(move |preferred, ignore_native_pref| {
-            let mut s = settings.lock().unwrap();
-            s.preferred_provider = if preferred == "Native" {
-                Provider::Distrobox
-            } else {
-                Provider::Flatpak
-            };
-            s.ignore_native_preference = ignore_native_pref;
-            let _ = s.save();
+        app.on_save_settings(
+            move |preferred, ignore_native_pref, auto_updates, concurrent_downloads| {
+                let mut s = settings.lock().unwrap();
+                s.preferred_provider = if preferred == "Native" {
+                    Provider::Distrobox
+                } else {
+                    Provider::Flatpak
+                };
+                s.ignore_native_preference = ignore_native_pref;
+                s.auto_updates = auto_updates;
+                s.concurrent_downloads = (concurrent_downloads as u32).max(1);
+                let _ = s.save();
+            },
+        );
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+
+        app.on_load_remotes(move || {
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_settings_remotes_loading(true);
+            }
+            let app_weak2 = app_weak.clone();
+            let proxy = get_proxy(&proxy_arc);
+            rt_handle.spawn(async move {
+                let remotes: Vec<libarc::RemoteInfo> = if let Some(p) = proxy {
+                    p.list_remotes()
+                        .await
+                        .ok()
+                        .and_then(|j| serde_json::from_str(&j).ok())
+                        .unwrap_or_default()
+                } else {
+                    vec![]
+                };
+                let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                    let items: Vec<RemoteItem> = remotes
+                        .iter()
+                        .map(|r| RemoteItem {
+                            name: r.name.as_str().into(),
+                            url: r.url.as_str().into(),
+                            protected: r.protected,
+                        })
+                        .collect();
+                    app.set_settings_remotes(items.as_slice().into());
+                    app.set_settings_remotes_loading(false);
+                });
+            });
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+
+        app.on_add_remote(move |name, url| {
+            let name = name.to_string();
+            let url = url.to_string();
+            let proxy = get_proxy(&proxy_arc);
+            let app_weak2 = app_weak.clone();
+            rt_handle.spawn(async move {
+                let ok = if let Some(p) = proxy {
+                    p.add_remote(&name, &url).await.unwrap_or(false)
+                } else {
+                    false
+                };
+                let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                    if ok {
+                        app.invoke_load_remotes();
+                    } else {
+                    }
+                });
+            });
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+
+        app.on_remove_remote(move |name| {
+            let name = name.to_string();
+            let proxy = get_proxy(&proxy_arc);
+            let app_weak2 = app_weak.clone();
+            rt_handle.spawn(async move {
+                let ok = if let Some(p) = proxy {
+                    p.remove_remote(&name).await.unwrap_or(false)
+                } else {
+                    false
+                };
+                let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                    if ok {
+                        app.invoke_load_remotes();
+                    } else {
+                    }
+                });
+            });
         });
     }
 
@@ -534,11 +643,13 @@ fn main() -> Result<()> {
                 a.trim_start_matches("appstream://")
                     .trim_start_matches("appstream:")
                     .trim_start_matches("//")
+                    .trim_start_matches('/')
                     .to_string()
             });
         let flatpakref_url = std::env::args()
             .find(|a| a.starts_with("flatpak+https://") || a.starts_with("flatpak+http://"))
             .map(|a| a.trim_start_matches("flatpak+").to_string());
+        let flatpakrepo_file = std::env::args().skip(1).find(|a| is_flatpakrepo(a));
 
         if manage_extensions || initial_app.as_deref() == Some("") {
             if let Some(app_ref) = app_weak.upgrade() {
@@ -608,6 +719,48 @@ fn main() -> Result<()> {
                     }
                 });
             }
+        } else if let Some(repo_path) = flatpakrepo_file {
+            let content = std::fs::read_to_string(&repo_path).unwrap_or_default();
+            let (title, url) = parse_flatpakrepo(&content);
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_add_repo_title(title.into());
+                app_ref.set_add_repo_url(url.into());
+                app_ref.set_current_view("add-repo".into());
+            }
+
+            {
+                let app_weak3 = app_weak.clone();
+                let proxy_arc2 = proxy_arc.clone();
+                let rt_handle2 = rt_handle.clone();
+                let content2 = content.clone();
+                app.on_add_repo_confirmed(move || {
+                    let proxy = get_proxy(&proxy_arc2);
+                    let app_weak4 = app_weak3.clone();
+                    let c = content2.clone();
+                    rt_handle2.spawn(async move {
+                        let ok = if let Some(p) = proxy {
+                            p.add_flatpakrepo(&c).await.unwrap_or(false)
+                        } else {
+                            false
+                        };
+                        let _ = app_weak4.upgrade_in_event_loop(move |app| {
+                            if ok {
+                            } else {
+                            }
+                            app.set_current_view("home".into());
+                        });
+                    });
+                });
+            }
+
+            {
+                let app_weak3 = app_weak.clone();
+                app.on_add_repo_cancelled(move || {
+                    if let Some(app_ref) = app_weak3.upgrade() {
+                        app_ref.set_current_view("home".into());
+                    }
+                });
+            }
         }
     }
 
@@ -627,29 +780,31 @@ fn main() -> Result<()> {
                 .to_string();
             let pkg_name = pkg_name_from_filename(&file_name);
             let file_is_appimage = is_appimage(&file_path);
+            let file_is_bundle = is_flatpak_bundle(&file_path);
 
             if let Some(app_ref) = app_weak.upgrade() {
                 app_ref.set_install_file_path(file_path.clone().into());
                 app_ref.set_install_file_name(file_name.clone().into());
                 app_ref.set_install_file_has_flatpak(false);
-                app_ref.set_install_file_flatpak_searched(file_is_appimage); // appimage: skip search
+                // bundles and appimages skip the Flatpak alternative search
+                app_ref.set_install_file_flatpak_searched(file_is_appimage || file_is_bundle);
                 app_ref.set_install_file_is_appimage(file_is_appimage);
+                app_ref.set_install_file_is_flatpak_bundle(file_is_bundle);
                 app_ref.set_current_view("install-file".into());
             }
 
-            // search for a Flatpak alternative (for non-AppImage files)
-            if !file_is_appimage {
+            // search for a Flatpak alternative (for non-AppImage, non-bundle files)
+            if !file_is_appimage && !file_is_bundle {
                 let app_weak2 = app_weak.clone();
                 let proxy_search = get_proxy(&proxy_arc);
                 rt_handle.spawn(async move {
                     let flatpak_found = if let Some(p) = proxy_search {
                         if let Ok(results) = p.search(&pkg_name).await {
-                            if let Ok(pkgs) =
-                                serde_json::from_str::<Vec<libarc::Package>>(&results)
+                            if let Ok(pkgs) = serde_json::from_str::<Vec<libarc::Package>>(&results)
                             {
-                                pkgs.iter().find(|p| p.provider == Provider::Flatpak).map(|first| {
-                                    (first.id.clone(), first.name.clone())
-                                })
+                                pkgs.iter()
+                                    .find(|p| p.provider == Provider::Flatpak)
+                                    .map(|first| (first.id.clone(), first.name.clone()))
                             } else {
                                 None
                             }
@@ -707,6 +862,31 @@ fn main() -> Result<()> {
                         fp.clone(),
                         fn_.clone(),
                         "install".to_string(),
+                        true,
+                        false,
+                        store2.clone(),
+                        proxy_arc2.clone(),
+                        app_weak3.clone(),
+                        rt_handle2.clone(),
+                    );
+                    if let Some(app_ref) = app_weak3.upgrade() {
+                        app_ref.set_current_view("downloads".into());
+                    }
+                });
+            }
+
+            {
+                let app_weak3 = app_weak.clone();
+                let proxy_arc2 = proxy_arc.clone();
+                let rt_handle2 = rt_handle.clone();
+                let store2 = store.clone();
+                let fp = file_path.clone();
+                let fn_ = file_name.clone();
+                app.on_install_file_bundle_requested(move || {
+                    begin_transaction(
+                        fp.clone(),
+                        fn_.clone(),
+                        "bundle".to_string(),
                         true,
                         false,
                         store2.clone(),

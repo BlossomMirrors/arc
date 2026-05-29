@@ -1,15 +1,13 @@
 import { VerticalBox } from "std-widgets.slint";
 
 import { TopBar } from "components/top-bar.slint";
-import { StatusBar } from "components/status-bar.slint";
 
 import { HomeScreen } from "screens/home-screen.slint";
 import { PackageListScreen } from "screens/package-list-screen.slint";
 import { DetailScreen } from "screens/detail-screen.slint";
 import { InstallFileScreen } from "screens/install-file-screen.slint";
-import {
-    InstallFlatpakrefScreen,
-} from "screens/install-flatpakref-screen.slint";
+import { InstallFlatpakrefScreen } from "screens/install-flatpakref-screen.slint";
+import { AddFlatpakRepoScreen } from "screens/add-flatpakrepo-screen.slint";
 import { SettingsScreen } from "screens/settings-screen.slint";
 import { DownloadManagerScreen } from "screens/download-manager-screen.slint";
 
@@ -19,6 +17,7 @@ import {
     AppCardData,
     CategoryItem,
     TransactionItem,
+    RemoteItem,
 } from "types.slint";
 export {
     PackageItem,
@@ -26,6 +25,7 @@ export {
     AppCardData,
     CategoryItem,
     TransactionItem,
+    RemoteItem,
 } from "types.slint";
 
 export component AppWindow inherits Window {
@@ -35,7 +35,6 @@ export component AppWindow inherits Window {
     min-height: 640px;
 
     in-out property <string> search-text: "";
-    in-out property <string> status-text: "Ready";
     in-out property <[PackageItem]> packages: [];
     in-out property <bool> is-loading: false;
     in-out property <string> current-view: "home";
@@ -50,6 +49,15 @@ export component AppWindow inherits Window {
     in-out property <bool> detail-loading: false;
     in-out property <string> settings-preferred: "Flatpak";
     in-out property <bool> settings-ignore-native-pref: false;
+    in-out property <bool> settings-auto-updates: true;
+    in-out property <int> settings-concurrent-downloads: 3;
+    in-out property <[RemoteItem]> settings-remotes: [];
+    in-out property <bool> settings-remotes-loading: false;
+
+    in-out property <string> add-repo-title: "";
+    in-out property <string> add-repo-url: "";
+
+    in-out property <bool> install-file-is-flatpak-bundle: false;
 
     in-out property <[image]> detail-screenshots: [];
     in-out property <bool> detail-busy: false;
@@ -88,7 +96,13 @@ export component AppWindow inherits Window {
     callback refresh-updates-requested();
     callback category-selected(string);
     callback app-selected(string);
-    callback save-settings(string, bool);
+    callback save-settings(string, bool, bool, int);
+    callback load-remotes();
+    callback add-remote(string, string);
+    callback remove-remote(string);
+    callback add-repo-confirmed();
+    callback add-repo-cancelled();
+    callback install-file-bundle-requested();
     callback install-file-distrobox-requested();
     callback install-file-appimage-requested();
     callback install-file-flatpak-requested();
@@ -235,18 +249,21 @@ export component AppWindow inherits Window {
                 install-file-flatpak-searched: root.install-file-flatpak-searched;
                 install-file-flatpak-name: root.install-file-flatpak-name;
                 install-file-is-appimage: root.install-file-is-appimage;
-                distrobox-requested => {
-                    root.install-file-distrobox-requested();
-                }
-                appimage-requested => {
-                    root.install-file-appimage-requested();
-                }
-                flatpak-requested => {
-                    root.install-file-flatpak-requested();
-                }
-                cancelled => {
-                    root.install-file-cancelled();
-                }
+                install-file-is-flatpak-bundle: root.install-file-is-flatpak-bundle;
+                distrobox-requested => { root.install-file-distrobox-requested(); }
+                appimage-requested => { root.install-file-appimage-requested(); }
+                flatpak-requested => { root.install-file-flatpak-requested(); }
+                bundle-requested => { root.install-file-bundle-requested(); }
+                cancelled => { root.install-file-cancelled(); }
+            }
+
+            if root.current-view == "add-repo": AddFlatpakRepoScreen {
+                width: parent.width;
+                height: parent.height;
+                repo-title: root.add-repo-title;
+                repo-url: root.add-repo-url;
+                confirmed => { root.add-repo-confirmed(); }
+                cancelled => { root.add-repo-cancelled(); }
             }
 
             if root.current-view == "install-flatpakref": InstallFlatpakrefScreen {
@@ -268,17 +285,19 @@ export component AppWindow inherits Window {
                 height: parent.height;
                 settings-preferred <=> root.settings-preferred;
                 settings-ignore-native-pref <=> root.settings-ignore-native-pref;
-                back-clicked => {
-                    root.current-view = root.prev-view;
+                settings-auto-updates <=> root.settings-auto-updates;
+                settings-concurrent-downloads <=> root.settings-concurrent-downloads;
+                settings-remotes <=> root.settings-remotes;
+                settings-remotes-loading <=> root.settings-remotes-loading;
+                back-clicked => { root.current-view = root.prev-view; }
+                save-settings(preferred, ignore, auto_upd, concur) => {
+                    root.save-settings(preferred, ignore, auto_upd, concur);
                 }
-                save-settings(preferred, ignore) => {
-                    root.save-settings(preferred, ignore);
-                }
+                load-remotes => { root.load-remotes(); }
+                add-remote(name, url) => { root.add-remote(name, url); }
+                remove-remote(name) => { root.remove-remote(name); }
             }
         }
 
-        StatusBar {
-            status-text: root.status-text;
-        }
     }
 }

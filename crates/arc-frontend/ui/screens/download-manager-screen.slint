@@ -71,12 +71,6 @@ export component DownloadManagerScreen inherits Rectangle {
                 }
             }
 
-            Rectangle {
-                height: 1px;
-                background: #80808025;
-            }
-
-            // ── Active ────────────────────────────────────────────────────
             if root.active-transactions.length > 0: VerticalLayout {
                 spacing: 0px;
 
@@ -103,7 +97,6 @@ export component DownloadManagerScreen inherits Rectangle {
                 }
             }
 
-            // ── Pending ───────────────────────────────────────────────────
             if root.pending-transactions.length > 0: VerticalLayout {
                 spacing: 0px;
 
@@ -130,7 +123,6 @@ export component DownloadManagerScreen inherits Rectangle {
                 }
             }
 
-            // ── Completed ─────────────────────────────────────────────────
             if root.completed-transactions.length > 0: VerticalLayout {
                 spacing: 0px;
 
@@ -179,7 +171,6 @@ export component DownloadManagerScreen inherits Rectangle {
                 }
             }
 
-            // ── Updates Available ─────────────────────────────────────────
             if root.available-updates.length > 0: VerticalLayout {
                 spacing: 0px;
 
@@ -208,9 +199,7 @@ export component DownloadManagerScreen inherits Rectangle {
                         width: upd-all-label.preferred-width + 24px;
                         height: 24px;
                         border-radius: 5px;
-                        background: root.updates-all-queued
-                            ? #2563eb60
-                            : (upd-all-ta.has-hover ? #3b82f6 : #2563eb);
+                        background: root.updates-all-queued ? #2563eb60 : (upd-all-ta.has-hover ? #3b82f6 : #2563eb);
 
                         upd-all-ta := TouchArea {
                             enabled: !root.updates-all-queued;
@@ -238,7 +227,6 @@ export component DownloadManagerScreen inherits Rectangle {
                 }
             }
 
-            // ── Empty state ───────────────────────────────────────────────
             if !root.has-content: VerticalLayout {
                 alignment: center;
                 spacing: 8px;

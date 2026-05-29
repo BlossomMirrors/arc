@@ -6,10 +6,12 @@ export component InstallFileScreen inherits Rectangle {
     in property <string> install-file-flatpak-name;
     in property <bool> install-file-is-appimage;
     in property <bool> install-file-flatpak-searched;
+    in property <bool> install-file-is-flatpak-bundle;
 
     callback distrobox-requested();
     callback appimage-requested();
     callback flatpak-requested();
+    callback bundle-requested();
     callback cancelled();
 
     VerticalBox {
@@ -18,7 +20,9 @@ export component InstallFileScreen inherits Rectangle {
         spacing: 20px;
 
         Text {
-            text: root.install-file-is-appimage ? "Install AppImage" : "Install Package";
+            text: root.install-file-is-flatpak-bundle ? "Install Flatpak Bundle"
+                : root.install-file-is-appimage ? "Install AppImage"
+                : "Install Package";
             font-size: 22px;
             font-weight: 700;
             horizontal-alignment: center;
@@ -32,22 +36,27 @@ export component InstallFileScreen inherits Rectangle {
             overflow: elide;
         }
 
-        if root.install-file-is-appimage: Button {
+        if root.install-file-is-flatpak-bundle: Button {
+            text: "Install as Flatpak Bundle";
+            clicked => { root.bundle-requested(); }
+        }
+
+        if root.install-file-is-appimage && !root.install-file-is-flatpak-bundle: Button {
             text: "Install as AppImage";
             clicked => { root.appimage-requested(); }
         }
 
-        if !root.install-file-is-appimage: Button {
+        if !root.install-file-is-appimage && !root.install-file-is-flatpak-bundle: Button {
             text: "Install via Distrobox";
             clicked => { root.distrobox-requested(); }
         }
 
-        if root.install-file-has-flatpak: Button {
+        if root.install-file-has-flatpak && !root.install-file-is-flatpak-bundle: Button {
             text: "Install " + root.install-file-flatpak-name + " from Flathub instead";
             clicked => { root.flatpak-requested(); }
         }
 
-        if !root.install-file-is-appimage && !root.install-file-has-flatpak && !root.install-file-flatpak-searched: Text {
+        if !root.install-file-is-appimage && !root.install-file-is-flatpak-bundle && !root.install-file-has-flatpak && !root.install-file-flatpak-searched: Text {
             text: "Searching for Flathub alternative...";
             font-size: 11px;
             color: #888;

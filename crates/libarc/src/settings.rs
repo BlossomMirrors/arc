@@ -13,6 +13,15 @@ pub struct Settings {
     pub preferred_provider: Provider,
     // when true the internal native_preference list is ignored and preferred_provider wins
     pub ignore_native_preference: bool,
+    #[serde(default = "Settings::default_auto_updates")]
+    pub auto_updates: bool,
+    #[serde(default = "Settings::default_concurrent_downloads")]
+    pub concurrent_downloads: u32,
+}
+
+impl Settings {
+    fn default_auto_updates() -> bool { true }
+    fn default_concurrent_downloads() -> u32 { 3 }
 }
 
 impl Default for Settings {
@@ -20,6 +29,8 @@ impl Default for Settings {
         Self {
             preferred_provider: Provider::Flatpak,
             ignore_native_preference: false,
+            auto_updates: true,
+            concurrent_downloads: 3,
         }
     }
 }

@@ -7,6 +7,7 @@ use crate::providers::MultiProvider;
 use crate::transaction_manager::TransactionManager;
 use anyhow::Result;
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 use tokio::process::Command;
 use tracing::{info, warn};
 use zbus::connection::Builder as ConnectionBuilder;
@@ -75,9 +76,12 @@ impl Daemon {
             warn!("AppImage watcher failed to start: {}", e);
         }
 
+        let settings = libarc::Settings::load();
+        let concurrent = (settings.concurrent_downloads as usize).max(1);
         let interface = ArcDaemonInterface {
             provider: self.provider,
             transaction_manager: self.transaction_manager.clone(),
+            download_semaphore: Arc::new(Semaphore::new(concurrent)),
         };
 
         // register on the session dbus under our name so clients

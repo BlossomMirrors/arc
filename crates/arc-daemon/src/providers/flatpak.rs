@@ -1,7 +1,7 @@
 use super::PackageProvider;
 use crate::appstream_db::{entry_to_flatpak_package, AppStreamDb};
 use async_trait::async_trait;
-use libarc::{ArcError, Package, Provider};
+use libarc::{ArcError, Package, Provider, RemoteInfo};
 use libflatpak::glib;
 use libflatpak::prelude::*;
 use tokio::sync::mpsc::UnboundedSender;
@@ -200,10 +200,11 @@ impl FlatpakProvider {
         &self,
         app_id: &str,
         progress_tx: UnboundedSender<u8>,
+        gio_cancel: libflatpak::gio::Cancellable,
     ) -> Result<(), ArcError> {
         let app_id = app_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
-            let cancel = libflatpak::gio::Cancellable::NONE;
+            let cancel = Some(&gio_cancel);
             let db = AppStreamDb::get_static();
 
             // Build a list of remotes to try: primary from AppStream DB, then flathub as fallback
@@ -318,6 +319,7 @@ impl FlatpakProvider {
         &self,
         url: &str,
         progress_tx: UnboundedSender<u8>,
+        gio_cancel: libflatpak::gio::Cancellable,
     ) -> Result<(), ArcError> {
         let url = url.to_string();
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
@@ -348,7 +350,7 @@ impl FlatpakProvider {
                 }
             }
 
-            let cancel = libflatpak::gio::Cancellable::NONE;
+            let cancel = Some(&gio_cancel);
             let inst = libflatpak::Installation::new_user(cancel)
                 .map_err(|e: glib::Error| ArcError::ProviderError(e.to_string()))?;
 
@@ -410,10 +412,11 @@ impl FlatpakProvider {
         &self,
         app_id: &str,
         progress_tx: UnboundedSender<u8>,
+        gio_cancel: libflatpak::gio::Cancellable,
     ) -> Result<(), ArcError> {
         let app_id = app_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
-            let cancel = libflatpak::gio::Cancellable::NONE;
+            let cancel = Some(&gio_cancel);
             let (inst, installed) = installation_with_app(&app_id)?;
             let full_ref = installed
                 .format_ref()
@@ -426,6 +429,134 @@ impl FlatpakProvider {
             tx.connect_new_operation(move |_, _op, progress| {
                 progress.set_update_frequency(1500);
                 let sender = progress_tx.clone();
+                progress.connect_changed(move |p| {
+                    let _ = sender.send(p.progress().clamp(0, 100) as u8);
+                });
+            });
+            tx.run(cancel)
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))
+        })
+        .await
+        .map_err(|e| ArcError::TransactionFailed(e.to_string()))?
+    }
+
+    const PROTECTED_REMOTES: &'static [&'static str] = &["flathub", "blossomos"];
+
+    pub fn list_remotes() -> Vec<RemoteInfo> {
+        let cancel = libflatpak::gio::Cancellable::NONE;
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for inst in all_installations() {
+            for remote in inst.list_remotes(cancel).unwrap_or_default() {
+                let name = remote.name().map(|s| s.to_string()).unwrap_or_default();
+                let url = remote.url().map(|s| s.to_string()).unwrap_or_default();
+                if seen.insert(name.clone()) {
+                    let protected = Self::PROTECTED_REMOTES.contains(&name.as_str());
+                    out.push(RemoteInfo { name, url, protected });
+                }
+            }
+        }
+        out
+    }
+
+    pub fn add_remote_from_url(name: &str, url: &str) -> Result<(), ArcError> {
+        let cancel = libflatpak::gio::Cancellable::NONE;
+        let inst = libflatpak::Installation::new_user(cancel)
+            .map_err(|e: glib::Error| ArcError::ProviderError(e.to_string()))?;
+        let already = inst
+            .list_remotes(cancel)
+            .unwrap_or_default()
+            .iter()
+            .any(|r| r.name().map(|n| n == name).unwrap_or(false));
+        if already {
+            return Err(ArcError::ProviderError(format!("remote '{}' already exists", name)));
+        }
+        let remote = libflatpak::Remote::new(name);
+        remote.set_url(url);
+        inst.add_remote(&remote, false, cancel)
+            .map_err(|e: glib::Error| ArcError::ProviderError(e.to_string()))
+    }
+
+    pub fn remove_remote(name: &str) -> Result<(), ArcError> {
+        if Self::PROTECTED_REMOTES.contains(&name) {
+            return Err(ArcError::ProviderError(format!("'{}' is a protected repository and cannot be removed", name)));
+        }
+        let cancel = libflatpak::gio::Cancellable::NONE;
+        for inst in all_installations() {
+            let found = inst
+                .list_remotes(cancel)
+                .unwrap_or_default()
+                .iter()
+                .any(|r| r.name().map(|n| n == name).unwrap_or(false));
+            if found {
+                return inst
+                    .remove_remote(name, cancel)
+                    .map_err(|e: glib::Error| ArcError::ProviderError(e.to_string()));
+            }
+        }
+        Err(ArcError::ProviderError(format!("remote '{}' not found", name)))
+    }
+
+    pub fn add_remote_from_flatpakrepo(content: &str) -> Result<(), ArcError> {
+        let mut title = String::new();
+        let mut url = String::new();
+        let mut gpg_key_b64 = String::new();
+        for line in content.lines() {
+            let line = line.trim();
+            if let Some(v) = line.strip_prefix("Title=") {
+                title = v.trim().to_string();
+            } else if let Some(v) = line.strip_prefix("Url=") {
+                url = v.trim().to_string();
+            } else if let Some(v) = line.strip_prefix("GPGKey=") {
+                gpg_key_b64 = v.trim().to_string();
+            }
+        }
+        if url.is_empty() {
+            return Err(ArcError::ProviderError("No Url= found in .flatpakrepo".into()));
+        }
+        // Derive a safe remote name from the title
+        let name = if title.is_empty() {
+            "imported-repo".to_string()
+        } else {
+            title.to_lowercase().replace(' ', "-").chars().filter(|c| c.is_alphanumeric() || *c == '-').collect()
+        };
+        let cancel = libflatpak::gio::Cancellable::NONE;
+        let inst = libflatpak::Installation::new_user(cancel)
+            .map_err(|e: glib::Error| ArcError::ProviderError(e.to_string()))?;
+        // Don't fail if the remote already exists, just update it
+        let remote = libflatpak::Remote::new(&name);
+        remote.set_url(&url);
+        if !gpg_key_b64.is_empty() {
+            let key_bytes = glib::base64_decode(&gpg_key_b64);
+            remote.set_gpg_verify(true);
+            let key_gbytes = glib::Bytes::from(key_bytes.as_slice());
+            remote.set_gpg_key(&key_gbytes);
+        }
+        inst.add_remote(&remote, true, cancel)
+            .map_err(|e: glib::Error| ArcError::ProviderError(e.to_string()))
+    }
+
+    pub async fn install_bundle_with_progress(
+        &self,
+        path: &str,
+        progress_tx: UnboundedSender<u8>,
+        gio_cancel: libflatpak::gio::Cancellable,
+    ) -> Result<(), ArcError> {
+        let path = path.to_string();
+        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+            let cancel = Some(&gio_cancel);
+            let inst = libflatpak::Installation::new_user(cancel)
+                .map_err(|e: glib::Error| ArcError::ProviderError(e.to_string()))?;
+            let file = libflatpak::gio::File::for_path(&path);
+            let tx = libflatpak::Transaction::for_installation(&inst, cancel)
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+            tx.set_no_interaction(true);
+            tx.add_install_bundle(&file, None::<&glib::Bytes>)
+                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+            let progress_tx_for_tx = progress_tx.clone();
+            tx.connect_new_operation(move |_, _op, progress| {
+                progress.set_update_frequency(1500);
+                let sender = progress_tx_for_tx.clone();
                 progress.connect_changed(move |p| {
                     let _ = sender.send(p.progress().clamp(0, 100) as u8);
                 });

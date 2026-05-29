@@ -1,72 +1,339 @@
-import { VerticalBox, HorizontalBox, Button, ComboBox, CheckBox } from "std-widgets.slint";
+import {
+    VerticalBox,
+    HorizontalBox,
+    Button,
+    CheckBox,
+    LineEdit,
+} from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
+import { RemoteItem } from "../types.slint";
+
+component SectionLabel inherits HorizontalBox {
+    in property <string> text: "";
+    padding-top: 20px;
+    padding-bottom: 6px;
+    padding-left: 0px;
+    padding-right: 0px;
+    spacing: 0px;
+
+    Text {
+        text: root.text;
+        font-size: 10px;
+        font-weight: 700;
+        color: Palette.foreground.transparentize(0.45);
+        letter-spacing: 0.8px;
+    }
+}
 
 export component SettingsScreen inherits Rectangle {
-    in-out property <string> settings-preferred;
-    in-out property <bool> settings-ignore-native-pref;
+    in-out property <string> settings-preferred: "Flatpak";
+    in-out property <bool> settings-ignore-native-pref: false;
+    in-out property <bool> settings-auto-updates: true;
+    in-out property <int> settings-concurrent-downloads: 3;
+    in-out property <[RemoteItem]> settings-remotes: [];
+    in-out property <bool> settings-remotes-loading: false;
 
     callback back-clicked();
-    callback save-settings(string, bool);
+    callback save-settings(string, bool, bool, int);
+    callback load-remotes();
+    callback add-remote(string, string);
+    callback remove-remote(string);
 
+    property <string> new-repo-name: "";
+    property <string> new-repo-url: "";
+
+    init => {
+        root.load-remotes();
+    }
     clip: true;
 
     Flickable {
         width: parent.width;
         height: parent.height;
-        viewport-width: parent.width;
-        viewport-height: 480px;
+        viewport-height: inner.preferred-height + 20px;
 
-        VerticalBox {
-            padding: 16px;
-            spacing: 16px;
-            width: parent.width;
-
-            Button {
-                text: "← Back";
-                clicked => { root.back-clicked(); }
-            }
-
-            Text { text: "Settings"; font-size: 20px; font-weight: 700; }
+        inner := VerticalBox {
+            width: root.width;
+            padding: 20px;
+            spacing: 0px;
 
             HorizontalBox {
+                padding-left: 0;
+                padding-right: 0;
+                padding-bottom: 16px;
                 spacing: 12px;
                 alignment: start;
-
                 Text {
-                    text: "Preferred provider:";
+                    text: "Settings";
+                    font-size: 20px;
+                    font-weight: 700;
                     vertical-alignment: center;
-                    min-width: 160px;
                 }
+            }
 
-                ComboBox {
-                    model: ["Flatpak", "Native"];
-                    current-value: root.settings-preferred;
-                    selected(value) => { root.settings-preferred = value; }
-                }
+            SectionLabel {
+                text: "GENERAL";
             }
 
             HorizontalBox {
+                padding: 10px;
+                padding-left: 0;
+                padding-right: 0;
                 spacing: 12px;
-                alignment: start;
+                VerticalBox {
+                    spacing: 2px;
+                    padding: 0;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Auto-updates";
+                    }
 
-                Text {
-                    text: "Ignore native preference list:";
-                    vertical-alignment: center;
-                    min-width: 160px;
+                    Text {
+                        text: "Automatically update installed apps in the background";
+                        font-size: 11px;
+                        color: Palette.foreground.transparentize(0.4);
+                        wrap: word-wrap;
+                    }
                 }
 
-                CheckBox {
-                    checked: root.settings-ignore-native-pref;
-                    toggled => { root.settings-ignore-native-pref = self.checked; }
+                VerticalBox {
+                    alignment: center;
+                    padding: 0;
+                    horizontal-stretch: 0;
+                    CheckBox {
+                        checked: root.settings-auto-updates;
+                        toggled => {
+                            root.settings-auto-updates = self.checked;
+                            root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads);
+                        }
+                    }
                 }
             }
 
-            Button {
-                text: "Save";
-                clicked => {
-                    root.save-settings(
-                        root.settings-preferred,
-                        root.settings-ignore-native-pref
-                    );
+            SectionLabel {
+                text: "DOWNLOADS";
+                padding-bottom: 0px;
+            }
+
+            HorizontalBox {
+                padding: 10px;
+                padding-left: 0;
+                padding-right: 0;
+                spacing: 12px;
+                VerticalBox {
+                    spacing: 2px;
+                    padding: 0;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Concurrent downloads";
+                    }
+
+                    Text {
+                        text: "Maximum number of simultaneous downloads (1–10)";
+                        font-size: 11px;
+                        color: Palette.foreground.transparentize(0.4);
+                    }
+                }
+
+                HorizontalBox {
+                    spacing: 4px;
+                    alignment: end;
+
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 5px;
+                        border-width: 1px;
+                        border-color: Palette.border;
+                        background: dec-ta.has-hover ? Palette.background.darker(8%) : transparent;
+                        dec-ta := TouchArea {
+                            clicked => {
+                                if root.settings-concurrent-downloads > 1 {
+                                    root.settings-concurrent-downloads -= 1;
+                                }
+                                root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads);
+                            }
+                        }
+
+                        Text {
+                            text: "−";
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            font-size: 14px;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 32px;
+                        height: 28px;
+                        Text {
+                            text: root.settings-concurrent-downloads;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            font-size: 14px;
+                            font-weight: 600;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 5px;
+                        border-width: 1px;
+                        border-color: Palette.border;
+                        background: inc-ta.has-hover ? Palette.background.darker(8%) : transparent;
+                        inc-ta := TouchArea {
+                            clicked => {
+                                if root.settings-concurrent-downloads < 10 {
+                                    root.settings-concurrent-downloads += 1;
+                                }
+                                root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads);
+                            }
+                        }
+
+                        Text {
+                            text: "+";
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            font-size: 14px;
+                        }
+                    }
+                }
+            }
+
+            HorizontalBox {
+                padding-left: 0;
+                padding-right: 0;
+                padding-top: 20px;
+                padding-bottom: 6px;
+                alignment: start;
+                Text {
+                    text: "REPOSITORIES";
+                    font-size: 10px;
+                    font-weight: 700;
+                    color: Palette.foreground.transparentize(0.45);
+                    letter-spacing: 0.8px;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                if root.settings-remotes-loading: Text {
+                    text: "Loading…";
+                    font-size: 11px;
+                    color: Palette.foreground.transparentize(0.4);
+                    vertical-alignment: center;
+                }
+            }
+
+            for repo in root.settings-remotes: HorizontalBox {
+                padding: 8px;
+                padding-left: 0;
+                padding-right: 0;
+                spacing: 12px;
+                VerticalBox {
+                    spacing: 2px;
+                    padding: 0;
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    Text {
+                        text: repo.name;
+                        font-weight: 600;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        text: repo.url;
+                        font-size: 11px;
+                        color: Palette.foreground.transparentize(0.4);
+                        overflow: elide;
+                    }
+                }
+
+                if repo.protected: VerticalBox {
+                    alignment: center;
+                    padding: 0;
+                    horizontal-stretch: 0;
+                    Rectangle {
+                        width: 72px;
+                        height: 24px;
+                        border-radius: 4px;
+                        background: Palette.foreground.transparentize(0.88);
+                        Text {
+                            text: "Protected";
+                            font-size: 10px;
+                            color: Palette.foreground.transparentize(0.4);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if !repo.protected: VerticalBox {
+                    alignment: center;
+                    padding: 0;
+                    horizontal-stretch: 0;
+                    Button {
+                        text: "Remove";
+                        clicked => {
+                            root.remove-remote(repo.name);
+                        }
+                    }
+                }
+            }
+
+            SectionLabel {
+                text: "ADD REPOSITORY";
+            }
+
+            HorizontalBox {
+                padding: 8px;
+                padding-left: 0;
+                padding-right: 0;
+                spacing: 12px;
+                Text {
+                    text: "Name";
+                    vertical-alignment: center;
+                    min-width: 48px;
+                }
+
+                LineEdit {
+                    horizontal-stretch: 1;
+                    placeholder-text: "my-repo";
+                    text <=> root.new-repo-name;
+                }
+            }
+
+            HorizontalBox {
+                padding: 8px;
+                padding-left: 0;
+                padding-right: 0;
+                spacing: 12px;
+                Text {
+                    text: "URL";
+                    vertical-alignment: center;
+                    min-width: 48px;
+                }
+
+                LineEdit {
+                    horizontal-stretch: 1;
+                    placeholder-text: "https://example.com/repo";
+                    text <=> root.new-repo-url;
+                }
+            }
+
+            HorizontalBox {
+                padding-left: 0;
+                padding-right: 0;
+                padding-top: 8px;
+                padding-bottom: 4px;
+                alignment: start;
+                Button {
+                    text: "Add Repository";
+                    enabled: root.new-repo-name != "" && root.new-repo-url != "";
+                    clicked => {
+                        root.add-remote(root.new-repo-name, root.new-repo-url);
+                        root.new-repo-name = "";
+                        root.new-repo-url = "";
+                    }
                 }
             }
         }

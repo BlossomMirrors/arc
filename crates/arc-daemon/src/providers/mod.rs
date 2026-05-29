@@ -3,6 +3,9 @@ use libarc::{ArcError, Package};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc::UnboundedSender, RwLock};
+use tokio_util::sync::CancellationToken;
+
+use libflatpak::gio::prelude::CancellableExt;
 
 // 15 minutes
 // newly installed packages show up without a manual refresh
@@ -100,6 +103,7 @@ impl MultiProvider {
         &self,
         package_id: &str,
         progress_tx: UnboundedSender<u8>,
+        cancel_token: CancellationToken,
     ) -> Result<(), ArcError> {
         if Self::is_appimage_id(package_id) {
             let _ = progress_tx.send(10);
@@ -107,9 +111,18 @@ impl MultiProvider {
             let _ = progress_tx.send(100);
             result
         } else if Self::is_flatpak_id(package_id) {
-            self.flatpak
-                .install_with_progress(package_id, progress_tx)
-                .await
+            let gio_cancel = libflatpak::gio::Cancellable::new();
+            let gio_cancel_bridge = gio_cancel.clone();
+            let bridge = tokio::spawn(async move {
+                cancel_token.cancelled().await;
+                gio_cancel_bridge.cancel();
+            });
+            let result = self
+                .flatpak
+                .install_with_progress(package_id, progress_tx, gio_cancel)
+                .await;
+            bridge.abort();
+            result
         } else if Self::is_lutris_id(package_id) {
             self.lutris.install(package_id).await
         } else {
@@ -121,16 +134,47 @@ impl MultiProvider {
         &self,
         url: &str,
         progress_tx: UnboundedSender<u8>,
+        cancel_token: CancellationToken,
     ) -> Result<(), ArcError> {
-        self.flatpak
-            .install_flatpakref_with_progress(url, progress_tx)
-            .await
+        let gio_cancel = libflatpak::gio::Cancellable::new();
+        let gio_cancel_bridge = gio_cancel.clone();
+        let bridge = tokio::spawn(async move {
+            cancel_token.cancelled().await;
+            gio_cancel_bridge.cancel();
+        });
+        let result = self
+            .flatpak
+            .install_flatpakref_with_progress(url, progress_tx, gio_cancel)
+            .await;
+        bridge.abort();
+        result
+    }
+
+    pub async fn install_bundle_with_progress(
+        &self,
+        path: &str,
+        progress_tx: UnboundedSender<u8>,
+        cancel_token: CancellationToken,
+    ) -> Result<(), ArcError> {
+        let gio_cancel = libflatpak::gio::Cancellable::new();
+        let gio_cancel_bridge = gio_cancel.clone();
+        let bridge = tokio::spawn(async move {
+            cancel_token.cancelled().await;
+            gio_cancel_bridge.cancel();
+        });
+        let result = self
+            .flatpak
+            .install_bundle_with_progress(path, progress_tx, gio_cancel)
+            .await;
+        bridge.abort();
+        result
     }
 
     pub async fn update_with_progress(
         &self,
         package_id: &str,
         progress_tx: UnboundedSender<u8>,
+        cancel_token: CancellationToken,
     ) -> Result<(), ArcError> {
         if Self::is_appimage_id(package_id) {
             let _ = progress_tx.send(10);
@@ -138,9 +182,18 @@ impl MultiProvider {
             let _ = progress_tx.send(100);
             result
         } else if Self::is_flatpak_id(package_id) {
-            self.flatpak
-                .update_with_progress(package_id, progress_tx)
-                .await
+            let gio_cancel = libflatpak::gio::Cancellable::new();
+            let gio_cancel_bridge = gio_cancel.clone();
+            let bridge = tokio::spawn(async move {
+                cancel_token.cancelled().await;
+                gio_cancel_bridge.cancel();
+            });
+            let result = self
+                .flatpak
+                .update_with_progress(package_id, progress_tx, gio_cancel)
+                .await;
+            bridge.abort();
+            result
         } else {
             self.native.update(package_id).await
         }
@@ -162,16 +215,8 @@ impl MultiProvider {
 #[async_trait]
 impl PackageProvider for MultiProvider {
     async fn search(&self, query: &str) -> Result<Vec<Package>, ArcError> {
-        let q = query.to_lowercase();
         let packages = self.all_packages().await?;
-        Ok(packages
-            .into_iter()
-            .filter(|p| {
-                p.name.to_lowercase().contains(&q)
-                    || p.id.to_lowercase().contains(&q)
-                    || p.description.to_lowercase().contains(&q)
-            })
-            .collect())
+        Ok(libarc::search_and_rank(packages, query))
     }
 
     async fn list_installed(&self) -> Result<Vec<Package>, ArcError> {
