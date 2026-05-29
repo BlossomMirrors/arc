@@ -6,19 +6,30 @@ import { Badge } from "badge.slint";
 export component DetailHeader inherits Rectangle {
     in property <AppDetailData> detail-app;
     in property <bool> detail-busy;
+    in property <float> detail-progress;
+    in property <string> detail-transaction-id;
     in property <string> settings-preferred;
 
     callback back-clicked();
     callback install-requested(string);
     callback remove-requested(string);
+    callback cancel-requested(string);
+    callback launch-requested(string);
+
+    private property <length> shared-btn-width: 90px;
+    private property <length> shared-btn-height: 36px;
+    private property <bool> btn-is-lutris: root.detail-app.lutris-id != "" && (root.settings-preferred == "Lutris" || (root.detail-app.flatpak-id == "" && root.detail-app.native-id == ""));
+    private property <bool> btn-is-native: root.detail-app.native-id != "" && (root.settings-preferred == "Native" || (root.detail-app.flatpak-id == "" && root.detail-app.lutris-id == ""));
+    private property <bool> btn-is-installed: root.btn-is-lutris ? root.detail-app.lutris-installed : (root.btn-is-native ? root.detail-app.native-installed : root.detail-app.flatpak-installed);
+    private property <string> btn-active-id: root.btn-is-lutris ? root.detail-app.lutris-id : (root.btn-is-native ? root.detail-app.native-id : root.detail-app.flatpak-id);
 
     VerticalLayout {
         spacing: 0px;
 
         // Back button row
         HorizontalLayout {
-            padding-left: 20px;
-            padding-right: 20px;
+            padding-left: 30px;
+            padding-right: 30px;
             padding-top: 20px;
             padding-bottom: 12px;
             alignment: start;
@@ -66,8 +77,8 @@ export component DetailHeader inherits Rectangle {
 
         // App info row: icon | name/developer/badges (stretch) | install button
         HorizontalLayout {
-            padding-left: 20px;
-            padding-right: 20px;
+            padding-left: 30px;
+            padding-right: 30px;
             padding-bottom: 20px;
             spacing: 20px;
 
@@ -145,26 +156,100 @@ export component DetailHeader inherits Rectangle {
                 }
             }
 
-            // Install / remove button, right edge because info column stretches
+            // Buttons column
             VerticalLayout {
                 alignment: center;
+                horizontal-stretch: 0;
 
-                install-btn := Button {
-                    property <bool> only-lutris: root.detail-app.lutris-id != "" && root.detail-app.flatpak-id == "" && root.detail-app.native-id == "";
-                    property <bool> only-native: root.detail-app.native-id != "" && root.detail-app.flatpak-id == "" && root.detail-app.lutris-id == "";
-                    property <bool> is-lutris: root.detail-app.lutris-id != "" && (root.settings-preferred == "Lutris" || self.only-lutris);
-                    property <bool> is-native: root.detail-app.native-id != "" && (root.settings-preferred == "Native" || self.only-native);
-                    property <bool> is-installed: self.is-lutris ? root.detail-app.lutris-installed : (self.is-native ? root.detail-app.native-installed : root.detail-app.flatpak-installed);
-                    property <string> active-id: self.is-lutris ? root.detail-app.lutris-id : (self.is-native ? root.detail-app.native-id : root.detail-app.flatpak-id);
+                if !root.detail-busy: HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
 
-                    text: root.detail-busy ? "Working..." : (self.is-installed ? "Remove" : "Install");
-                    enabled: self.active-id != "" && !root.detail-busy;
-                    clicked => {
-                        if self.is-installed {
-                            root.remove-requested(self.active-id);
-                        } else {
-                            root.install-requested(self.active-id);
+                    action-btn := Button {
+                        min-width: root.shared-btn-width;
+                        horizontal-stretch: 0;
+                        text: root.btn-is-installed ? "Remove" : "Install";
+                        enabled: root.btn-active-id != "";
+                        clicked => {
+                            if root.btn-is-installed {
+                                root.remove-requested(root.btn-active-id);
+                            } else {
+                                root.install-requested(root.btn-active-id);
+                            }
                         }
+                    }
+
+                    if root.btn-is-installed: Rectangle {
+                        width: root.shared-btn-width;
+                        height: root.shared-btn-height;
+                        border-radius: 8px;
+                        background: run-ta.has-hover ? #22c55e : #16a34a;
+
+                        run-ta := TouchArea {
+                            clicked => { root.launch-requested(root.btn-active-id); }
+                        }
+
+                        run-label := Text {
+                            text: "Run";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: white;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+                }
+
+                if root.detail-busy && root.detail-app.flatpak-id != "": Rectangle {
+                    width: cancel-detail-label.preferred-width + 24px;
+                    height: root.shared-btn-height;
+                    border-radius: 8px;
+                    background: cancel-detail-ta.has-hover ? #ff33b0 : #e91e90;
+
+                    cancel-detail-ta := TouchArea {
+                        clicked => { root.cancel-requested(root.detail-transaction-id); }
+                    }
+
+                    cancel-detail-label := Text {
+                        text: "Cancel";
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: white;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+
+                if root.detail-busy && root.detail-app.flatpak-id == "": Text {
+                    text: "Working...";
+                    font-size: 13px;
+                    color: Palette.foreground.transparentize(0.4);
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Progress bar below the app-info row when busy
+        if root.detail-busy: HorizontalLayout {
+            padding-left: 30px;
+            padding-right: 30px;
+            padding-bottom: 12px;
+
+            Rectangle {
+                height: 4px;
+                border-radius: 2px;
+                background: #80808028;
+
+                Rectangle {
+                    x: 0;
+                    y: 0;
+                    width: parent.width * root.detail-progress;
+                    height: parent.height;
+                    border-radius: 2px;
+                    background: #3b82f6;
+                    animate width {
+                        duration: 300ms;
+                        easing: ease-out;
                     }
                 }
             }

@@ -50,6 +50,7 @@ pub struct RawDetailData {
     pub content_rating: String,
 }
 
+#[derive(Clone)]
 pub struct RawPackage {
     pub pkg: libarc::Package,
     pub icon: Option<RawIcon>,
@@ -263,6 +264,19 @@ pub async fn refresh_home_installed(
         }
         app.set_recent_apps(recent_items.as_slice().into());
     });
+}
+
+pub async fn build_installed_cache(proxy: Option<ArcDaemonProxy<'static>>) -> Vec<RawPackage> {
+    let pkgs: Vec<libarc::Package> = if let Some(p) = &proxy {
+        p.list_installed()
+            .await
+            .ok()
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+    load_package_icons(pkgs).await
 }
 
 pub async fn load_package_icons(pkgs: Vec<libarc::Package>) -> Vec<RawPackage> {

@@ -117,7 +117,7 @@ export component TopBar inherits Rectangle {
 
             // Button group
             Rectangle {
-                width: group-layout.preferred-width + 4px;
+                width: group-layout.preferred-width;
                 height: 36px;
                 border-radius: 8px;
                 border-width: 1px;
@@ -132,7 +132,10 @@ export component TopBar inherits Rectangle {
                     // Installed segment
                     Rectangle {
                         width: installed-label.preferred-width + 20px;
-                        border-radius: 6px;
+                        border-top-left-radius: 6px;
+                        border-bottom-left-radius: 6px;
+                        border-top-right-radius: 0px;
+                        border-bottom-right-radius: 0px;
                         background: root.current-view == "installed"
                             ? #ffffff30
                             : (installed-ta.has-hover ? #80808020 : #00000000);
@@ -155,7 +158,10 @@ export component TopBar inherits Rectangle {
                     // Downloads & Updates segment
                     Rectangle {
                         width: dl-row.preferred-width + 20px;
-                        border-radius: 6px;
+                        border-top-left-radius: 0px;
+                        border-bottom-left-radius: 0px;
+                        border-top-right-radius: 6px;
+                        border-bottom-right-radius: 6px;
                         background: root.current-view == "downloads"
                             ? #ffffff30
                             : (dl-ta.has-hover ? #80808020 : #00000000);

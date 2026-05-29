@@ -55,12 +55,14 @@ export component Lightbox inherits Rectangle {
             }
         }
 
-        Text {
-            text: "‹";
-            font-size: 28px;
-            color: white;
-            horizontal-alignment: center;
-            vertical-alignment: center;
+        Image {
+            source: @image-url("../../assets/chevron-left.svg");
+            width: 20px;
+            height: 20px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            image-fit: contain;
+            colorize: white;
         }
     }
 
@@ -82,12 +84,14 @@ export component Lightbox inherits Rectangle {
             }
         }
 
-        Text {
-            text: "›";
-            font-size: 28px;
-            color: white;
-            horizontal-alignment: center;
-            vertical-alignment: center;
+        Image {
+            source: @image-url("../../assets/chevron-right.svg");
+            width: 20px;
+            height: 20px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            image-fit: contain;
+            colorize: white;
         }
     }
 

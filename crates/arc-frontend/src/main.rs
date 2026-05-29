@@ -10,7 +10,7 @@ use helpers::{
     parse_flatpakref, parse_flatpakrepo, pkg_name_from_filename,
 };
 use libarc::{ArcDaemonProxy, Provider, Settings};
-use packages::{load_detail, load_home, load_package_icons, refresh_home_installed};
+use packages::{build_installed_cache, load_detail, load_home, load_package_icons, refresh_home_installed};
 use slint::Model;
 use std::sync::{Arc, Mutex};
 use transactions::{
@@ -66,6 +66,9 @@ fn main() -> Result<()> {
 
     let tx_store: TxStore = Arc::new(Mutex::new(Vec::new()));
 
+    type InstalledCache = Arc<Mutex<Option<Vec<packages::RawPackage>>>>;
+    let installed_cache: InstalledCache = Arc::new(Mutex::new(None));
+
     {
         let app_weak = app.as_weak();
         let proxy = proxy_opt.lock().unwrap().clone();
@@ -96,11 +99,58 @@ fn main() -> Result<()> {
         });
     }
 
+    let (cache_tx, mut cache_rx) = tokio::sync::mpsc::channel::<()>(8);
+
     if let Some(proxy) = get_proxy(&proxy_opt) {
         let store = tx_store.clone();
         let app_weak = app.as_weak();
         rt.handle()
-            .spawn(run_signal_listener(proxy, store, app_weak));
+            .spawn(run_signal_listener(proxy, store, app_weak, cache_tx));
+    }
+
+    // Populate the installed cache on startup.
+    {
+        let cache = installed_cache.clone();
+        let proxy = get_proxy(&proxy_opt);
+        let app_weak = app.as_weak();
+        rt.handle().spawn(async move {
+            let raw = build_installed_cache(proxy).await;
+            let mut guard = cache.lock().unwrap();
+            *guard = Some(raw);
+            drop(guard);
+            // If the user already navigated to the installed tab, update it now.
+            let _ = app_weak.upgrade_in_event_loop(|app| {
+                if app.get_current_view() == "installed" && app.get_is_loading() {
+                    app.invoke_refresh_requested();
+                }
+            });
+        });
+    }
+
+    // Rebuild the cache after every transaction completion and refresh the UI
+    // if the user is on the installed tab.
+    {
+        let cache = installed_cache.clone();
+        let proxy_arc = proxy_opt.clone();
+        let app_weak = app.as_weak();
+        let rt_handle = rt.handle().clone();
+        rt_handle.clone().spawn(async move {
+            while cache_rx.recv().await.is_some() {
+                let proxy = get_proxy(&proxy_arc);
+                let raw = build_installed_cache(proxy).await;
+                {
+                    let mut guard = cache.lock().unwrap();
+                    *guard = Some(raw.clone());
+                }
+                let _ = app_weak.upgrade_in_event_loop(move |app| {
+                    if app.get_current_view() == "installed" {
+                        let pkgs: Vec<PackageItem> = raw.iter().map(|r| r.to_slint()).collect();
+                        app.set_packages(pkgs.as_slice().into());
+                        app.set_is_loading(false);
+                    }
+                });
+            }
+        });
     }
 
     {
@@ -209,35 +259,23 @@ fn main() -> Result<()> {
 
     {
         let app_weak = app.as_weak();
-        let proxy_arc = proxy_opt.clone();
-        let rt_handle = rt.handle().clone();
 
         app.on_refresh_requested(move || {
-            let app_weak2 = app_weak.clone();
-            let proxy = get_proxy(&proxy_arc);
-
-            rt_handle.spawn(async move {
-                let search_pkgs: Vec<libarc::Package> = if let Some(p) = &proxy {
-                    p.list_installed()
-                        .await
-                        .ok()
-                        .and_then(|json| serde_json::from_str(&json).ok())
-                        .unwrap_or_default()
-                } else {
-                    vec![]
-                };
-
-                let raw_pkgs = load_package_icons(search_pkgs).await;
-                let _ = app_weak2.upgrade_in_event_loop(move |app| {
-                    let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
-                    app.set_packages(pkgs.as_slice().into());
-
-                    app.set_is_loading(false);
-                });
-            });
-
-            if let Some(app_ref) = app_weak.upgrade() {
-                app_ref.set_is_loading(true);
+            let cached = {
+                let guard = installed_cache.lock().unwrap();
+                guard.clone()
+            };
+            if let Some(raw) = cached {
+                let pkgs: Vec<PackageItem> = raw.iter().map(|r| r.to_slint()).collect();
+                if let Some(app_ref) = app_weak.upgrade() {
+                    app_ref.set_packages(pkgs.as_slice().into());
+                    app_ref.set_is_loading(false);
+                }
+            } else {
+                // Cache is still being built — show spinner and wait.
+                if let Some(app_ref) = app_weak.upgrade() {
+                    app_ref.set_is_loading(true);
+                }
             }
         });
     }
@@ -1001,6 +1039,20 @@ fn main() -> Result<()> {
             .arg(url.as_str())
             .spawn();
     });
+
+    {
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+        app.on_launch_requested(move |pkg_id| {
+            let pkg_id = pkg_id.to_string();
+            let proxy_arc = proxy_arc.clone();
+            rt_handle.spawn(async move {
+                if let Some(proxy) = helpers::get_or_connect(&proxy_arc).await {
+                    let _ = proxy.run_package(&pkg_id).await;
+                }
+            });
+        });
+    }
 
     app.run()?;
     Ok(())

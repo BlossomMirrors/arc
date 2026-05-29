@@ -45,6 +45,22 @@ pub fn has_ongoing_transaction_for_package(store: &TxStore, pkg_id: &str) -> boo
     })
 }
 
+pub fn progress_for_package(store: &TxStore, pkg_id: &str) -> f32 {
+    let s = store.lock().unwrap();
+    s.iter()
+        .find(|tx| tx.pkg_id == pkg_id && (tx.status == TxStatus::Pending || tx.status == TxStatus::Running))
+        .map(|tx| tx.progress)
+        .unwrap_or(0.0)
+}
+
+pub fn transaction_id_for_package(store: &TxStore, pkg_id: &str) -> String {
+    let s = store.lock().unwrap();
+    s.iter()
+        .find(|tx| tx.pkg_id == pkg_id && (tx.status == TxStatus::Pending || tx.status == TxStatus::Running))
+        .map(|tx| tx.id.clone())
+        .unwrap_or_default()
+}
+
 pub fn add_to_available_updates(
     app: &crate::AppWindow,
     pkg: SavedPkgData,
@@ -147,7 +163,11 @@ pub fn push_transactions_to_ui(store: TxStore, app_weak: &slint::Weak<crate::App
         let current_detail_pkg = app.get_detail_app().flatpak_id.to_string();
         if !current_detail_pkg.is_empty() {
             let is_busy = has_ongoing_transaction_for_package(&store, &current_detail_pkg);
+            let progress = progress_for_package(&store, &current_detail_pkg);
+            let tx_id = transaction_id_for_package(&store, &current_detail_pkg);
             app.set_detail_busy(is_busy);
+            app.set_detail_progress(progress);
+            app.set_detail_transaction_id(tx_id.into());
         }
     });
 }
@@ -273,6 +293,7 @@ pub async fn run_signal_listener(
     proxy: ArcDaemonProxy<'static>,
     store: TxStore,
     app_weak: slint::Weak<crate::AppWindow>,
+    cache_invalidate_tx: tokio::sync::mpsc::Sender<()>,
 ) {
     let (mut progress_stream, mut finished_stream) = match tokio::join!(
         proxy.receive_transaction_progress(),
@@ -331,6 +352,7 @@ pub async fn run_signal_listener(
                 };
 
                 push_transactions_to_ui(store.clone(), &app_weak);
+                let _ = cache_invalidate_tx.try_send(());
 
                 if let Some((pkg_id, installed_after, refresh_detail, ok, _name, tx_type)) =
                     side_effect
@@ -361,7 +383,9 @@ pub async fn run_signal_listener(
                                 &store_for_closure,
                                 &current_detail_pkg,
                             );
+                            let progress = progress_for_package(&store_for_closure, &current_detail_pkg);
                             app.set_detail_busy(is_busy);
+                            app.set_detail_progress(progress);
                         }
                     });
                 }

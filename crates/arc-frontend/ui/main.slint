@@ -61,6 +61,8 @@ export component AppWindow inherits Window {
 
     in-out property <[image]> detail-screenshots: [];
     in-out property <bool> detail-busy: false;
+    in-out property <float> detail-progress: 0;
+    in-out property <string> detail-transaction-id: "";
     in-out property <int> update-count: 0;
 
     in-out property <[TransactionItem]> active-transactions: [];
@@ -110,6 +112,7 @@ export component AppWindow inherits Window {
     callback install-flatpakref-confirmed();
     callback install-flatpakref-cancelled();
     callback open-url-requested(string);
+    callback launch-requested(string);
     callback clear-completed-requested();
     callback update-all-requested();
     callback cancel-requested(string);
@@ -122,7 +125,7 @@ export component AppWindow inherits Window {
 
         TopBar {
             search-text <=> root.search-text;
-            update-count: root.update-count;
+            update-count: root.update-count + root.active-transaction-count;
             current-view: root.current-view;
             icon-home: root.icon-home;
             icon-search: root.icon-search;
@@ -197,6 +200,8 @@ export component AppWindow inherits Window {
                 detail-app: root.detail-app;
                 detail-loading: root.detail-loading;
                 detail-busy: root.detail-busy;
+                detail-progress: root.detail-progress;
+                detail-transaction-id: root.detail-transaction-id;
                 detail-screenshots: root.detail-screenshots;
                 settings-preferred: root.settings-preferred;
                 back-clicked => {
@@ -210,6 +215,12 @@ export component AppWindow inherits Window {
                 }
                 remove-requested(id) => {
                     root.remove-requested(id);
+                }
+                cancel-requested(id) => {
+                    root.cancel-requested(id);
+                }
+                launch-requested(id) => {
+                    root.launch-requested(id);
                 }
                 open-url-requested(url) => {
                     root.open-url-requested(url);

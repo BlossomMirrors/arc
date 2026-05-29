@@ -130,7 +130,7 @@ export component SettingsScreen inherits Rectangle {
                     }
 
                     Text {
-                        text: "Maximum number of simultaneous downloads (1–10)";
+                        text: "Maximum number of simultaneous downloads (1–16)";
                         font-size: 11px;
                         color: Palette.foreground.transparentize(0.4);
                     }
@@ -185,7 +185,7 @@ export component SettingsScreen inherits Rectangle {
                         background: inc-ta.has-hover ? Palette.background.darker(8%) : transparent;
                         inc-ta := TouchArea {
                             clicked => {
-                                if root.settings-concurrent-downloads < 10 {
+                                if root.settings-concurrent-downloads < 16 {
                                     root.settings-concurrent-downloads += 1;
                                 }
                                 root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads);
