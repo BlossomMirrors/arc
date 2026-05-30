@@ -322,6 +322,7 @@ dependencies = [
  "futures-util",
  "image",
  "libarc",
+ "libc",
  "libflatpak",
  "notify",
  "reqwest",

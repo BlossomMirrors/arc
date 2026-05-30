@@ -5,8 +5,10 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 use uuid::Uuid;
+extern crate libc;
 
 const CONTAINER_DEB: &str = "arc-debian";
 const CONTAINER_RPM: &str = "arc-fedora";
@@ -121,16 +123,21 @@ impl DistroboxProvider {
         })
     }
 
-    async fn ensure_container(&self, name: &str, image: &str) -> Result<(), ArcError> {
+    async fn ensure_container(
+        &self,
+        name: &str,
+        image: &str,
+        cancel_token: &CancellationToken,
+    ) -> Result<(), ArcError> {
         if self.container_exists(name).await {
             return Ok(());
         }
         info!("Creating distrobox container {} ({})", name, image);
-        let status = Command::new("distrobox")
-            .args(["create", "--name", name, "--image", image, "--yes"])
-            .status()
-            .await
-            .map_err(|e| ArcError::ProviderError(format!("distrobox create: {}", e)))?;
+        let status = run_cancellable(
+            Command::new("distrobox").args(["create", "--name", name, "--image", image, "--yes"]),
+            cancel_token,
+        )
+        .await?;
         if !status.success() {
             return Err(ArcError::ProviderError(format!(
                 "Failed to create container '{}'",
@@ -138,10 +145,11 @@ impl DistroboxProvider {
             )));
         }
         // initialise the container so it is ready for use
-        let _ = Command::new("distrobox")
-            .args(["enter", name, "--", "true"])
-            .status()
-            .await;
+        let _ = run_cancellable(
+            Command::new("distrobox").args(["enter", name, "--", "true"]),
+            cancel_token,
+        )
+        .await;
         info!("Container {} ready", name);
         Ok(())
     }
@@ -152,6 +160,7 @@ impl DistroboxProvider {
         pkg_file: &Path,
         pkg_type: PkgType,
         guessed_name: &str,
+        cancel_token: &CancellationToken,
     ) -> Result<(), ArcError> {
         fs::create_dir_all(&self.packages_dir)
             .await
@@ -179,8 +188,8 @@ impl DistroboxProvider {
             .await
             .map_err(|e| ArcError::ProviderError(format!("copy package: {}", e)))?;
 
-        let status = Command::new("distrobox")
-            .args([
+        let status = run_cancellable(
+            Command::new("distrobox").args([
                 "enter",
                 container,
                 "--",
@@ -188,14 +197,15 @@ impl DistroboxProvider {
                 pkg_dest.to_str().unwrap(),
                 pkg_type.as_str(),
                 export_log.to_str().unwrap(),
-            ])
-            .status()
-            .await
-            .map_err(|e| ArcError::ProviderError(format!("distrobox enter: {}", e)))?;
+            ]),
+            cancel_token,
+        )
+        .await;
 
         let log_content = fs::read_to_string(&export_log).await.unwrap_or_default();
         let _ = fs::remove_dir_all(&work_dir).await;
 
+        let status = status?;
         if !status.success() {
             return Err(ArcError::ProviderError(format!(
                 "Installation of {} failed",
@@ -485,16 +495,17 @@ impl PackageProvider for DistroboxProvider {
     }
 
     async fn install(&self, package_id: &str) -> Result<(), ArcError> {
+        let cancel_token = CancellationToken::new();
         let path = PathBuf::from(package_id);
         let (container, image, pkg_type) = classify_file(&path).ok_or_else(|| {
             ArcError::ProviderError(format!("Unsupported package format: {}", path.display()))
         })?;
         let guessed_name = guess_pkg_name(&path, pkg_type);
-        self.ensure_container(&container, &image).await?;
+        self.ensure_container(&container, &image, &cancel_token).await?;
         if container == CONTAINER_DEB {
-            self.ensure_debian_compat().await?;
+            self.ensure_debian_compat(&cancel_token).await?;
         }
-        self.install_and_export(&container, &path, pkg_type, &guessed_name)
+        self.install_and_export(&container, &path, pkg_type, &guessed_name, &cancel_token)
             .await
     }
 
@@ -602,6 +613,40 @@ impl PackageProvider for DistroboxProvider {
     }
 }
 
+async fn run_cancellable(
+    cmd: &mut Command,
+    cancel_token: &CancellationToken,
+) -> Result<std::process::ExitStatus, ArcError> {
+    // setsid() makes the child its own process group leader (pgid == pid),
+    // so we can kill the whole tree (distrobox → podman exec → apt-get/dnf/pacman)
+    // with a single kill(-pgid, SIGKILL).
+    unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+
+    // Spawn a separate task that kills the process group when the token fires.
+    // This mirrors the GIO-bridge pattern for flatpak: it fires independently of
+    // whether the outer install future is still being polled, so the process is
+    // killed even if the outer tokio::select! drops this future first.
+    let pid = child.id();
+    let killer_token = cancel_token.clone();
+    let killer = tokio::spawn(async move {
+        killer_token.cancelled().await;
+        if let Some(pid) = pid {
+            unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL); }
+        }
+    });
+
+    let result = child.wait().await.map_err(|e| ArcError::ProviderError(e.to_string()));
+    killer.abort();
+
+    if cancel_token.is_cancelled() {
+        return Err(ArcError::ProviderError("Cancelled".to_string()));
+    }
+    result
+}
+
 /// Spawns a task that drip-feeds progress from `from` to `ceiling` every
 /// `interval_secs` seconds. Abort the returned handle when the phase ends.
 fn slow_tick(
@@ -627,6 +672,7 @@ impl DistroboxProvider {
         &self,
         package_id: &str,
         progress_tx: UnboundedSender<u8>,
+        cancel_token: CancellationToken,
     ) -> Result<(), ArcError> {
         let path = PathBuf::from(package_id);
         let (container, image, pkg_type) = classify_file(&path).ok_or_else(|| {
@@ -637,29 +683,36 @@ impl DistroboxProvider {
         // Phase 1: ensure container (fast if it exists, slow if it needs creating)
         let _ = progress_tx.send(5);
         let ticker = slow_tick(progress_tx.clone(), 5, 18, 2);
-        self.ensure_container(&container, &image).await?;
+        let result = self.ensure_container(&container, &image, &cancel_token).await;
         ticker.abort();
+        result?;
 
         // Phase 2: one-time compat setup (only slow on first .deb install ever)
         let _ = progress_tx.send(20);
         if container == CONTAINER_DEB {
             let ticker = slow_tick(progress_tx.clone(), 20, 55, 3);
-            self.ensure_debian_compat().await?;
+            let result = self.ensure_debian_compat(&cancel_token).await;
             ticker.abort();
+            result?;
         }
 
         // Phase 3: install + export inside the container
         let _ = progress_tx.send(60);
         let ticker = slow_tick(progress_tx.clone(), 60, 92, 2);
-        self.install_and_export(&container, &path, pkg_type, &guessed_name)
-            .await?;
+        let result = self
+            .install_and_export(&container, &path, pkg_type, &guessed_name, &cancel_token)
+            .await;
         ticker.abort();
+        result?;
 
         let _ = progress_tx.send(95);
         Ok(())
     }
 
-    async fn ensure_debian_compat(&self) -> Result<(), ArcError> {
+    async fn ensure_debian_compat(
+        &self,
+        cancel_token: &CancellationToken,
+    ) -> Result<(), ArcError> {
         let arc_dir = PathBuf::from(&self.home).join(".local/share/arc");
         let marker = arc_dir.join("arc-debian-compat-v2.done");
         if marker.exists() {
@@ -682,20 +735,21 @@ impl DistroboxProvider {
             .await
             .ok();
 
-        let status = Command::new("distrobox")
-            .args([
+        let status = run_cancellable(
+            Command::new("distrobox").args([
                 "enter",
                 CONTAINER_DEB,
                 "--",
                 helper_path.to_str().unwrap(),
                 marker.to_str().unwrap(),
-            ])
-            .status()
-            .await
-            .map_err(|e| ArcError::ProviderError(format!("compat setup: {}", e)))?;
+            ]),
+            cancel_token,
+        )
+        .await;
 
         let _ = fs::remove_dir_all(&work_dir).await;
 
+        let status = status?;
         if !status.success() {
             return Err(ArcError::ProviderError(
                 "Failed to set up Debian compatibility packages".to_string(),
@@ -796,6 +850,8 @@ touch "$EXPORT_LOG"
 
 case "$PKG_TYPE" in
     deb)
+        sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock
+        sudo dpkg --configure -a 2>/dev/null || true
         sudo apt-get update -qq 2>/dev/null || true
         pkg_name="$(dpkg-deb --field "$DEST" Package)"
         sudo apt-get install -y "$DEST" || (sudo dpkg -i "$DEST" && sudo apt-get install -f -y)
