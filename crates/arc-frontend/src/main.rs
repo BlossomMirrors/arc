@@ -856,10 +856,7 @@ fn main() -> Result<()> {
                             false
                         };
                         let _ = app_weak4.upgrade_in_event_loop(move |app| {
-                            if ok {
-                            } else {
-                            }
-                            app.set_current_view("home".into());
+                            app.set_current_view("settings".into());
                         });
                     });
                 });
@@ -869,7 +866,7 @@ fn main() -> Result<()> {
                 let app_weak3 = app_weak.clone();
                 app.on_add_repo_cancelled(move || {
                     if let Some(app_ref) = app_weak3.upgrade() {
-                        app_ref.set_current_view("home".into());
+                        app_ref.set_current_view("settings".into());
                     }
                 });
             }
