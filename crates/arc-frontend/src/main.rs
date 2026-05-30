@@ -850,10 +850,8 @@ fn main() -> Result<()> {
                     let app_weak4 = app_weak3.clone();
                     let c = content2.clone();
                     rt_handle2.spawn(async move {
-                        let ok = if let Some(p) = proxy {
-                            p.add_flatpakrepo(&c).await.unwrap_or(false)
-                        } else {
-                            false
+                        if let Some(p) = proxy {
+                            let _ = p.add_flatpakrepo(&c).await;
                         };
                         let _ = app_weak4.upgrade_in_event_loop(move |app| {
                             app.set_current_view("settings".into());

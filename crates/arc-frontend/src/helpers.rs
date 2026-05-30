@@ -76,12 +76,12 @@ pub fn pkg_name_from_filename(filename: &str) -> String {
         .strip_suffix(".pkg.tar.zst")
         .or_else(|| filename.strip_suffix(".pkg.tar.xz"))
         .unwrap_or(filename);
+    // Arch format: <name>-<version>-<pkgrel>-<arch>
+    // Strip the last 3 fields (version, pkgrel, arch) to recover the name.
+    // Searching for the first digit-starting field fails for names like "1password".
     let parts: Vec<&str> = no_ext.split('-').collect();
-    let end = parts
-        .iter()
-        .position(|p| p.starts_with(|c: char| c.is_ascii_digit()))
-        .unwrap_or(parts.len());
-    parts[..end].join("-")
+    let name_end = parts.len().saturating_sub(3);
+    if name_end > 0 { parts[..name_end].join("-") } else { parts[0].to_string() }
 }
 
 pub fn dedup_by_preference(pkgs: Vec<Package>, settings: &Settings) -> Vec<Package> {

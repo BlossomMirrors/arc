@@ -73,7 +73,12 @@ fn guess_pkg_name(path: &Path, pkg_type: PkgType) -> String {
                 .strip_suffix(".pkg.tar.zst")
                 .or_else(|| base.strip_suffix(".pkg.tar.xz"))
                 .unwrap_or(base);
-            strip_version_suffix(no_ext)
+            // Arch format: <name>-<version>-<pkgrel>-<arch>
+            // Strip the last 3 fields to recover the name. Searching for the first
+            // digit-starting field fails for names like "1password" or "0ad".
+            let parts: Vec<&str> = no_ext.split('-').collect();
+            let name_end = parts.len().saturating_sub(3);
+            if name_end > 0 { parts[..name_end].join("-") } else { parts[0].to_string() }
         }
     }
 }
@@ -687,11 +692,16 @@ impl DistroboxProvider {
         ticker.abort();
         result?;
 
-        // Phase 2: one-time compat setup (only slow on first .deb install ever)
+        // Phase 2: one-time compat setup
         let _ = progress_tx.send(20);
         if container == CONTAINER_DEB {
             let ticker = slow_tick(progress_tx.clone(), 20, 55, 3);
             let result = self.ensure_debian_compat(&cancel_token).await;
+            ticker.abort();
+            result?;
+        } else if container == CONTAINER_ARCH {
+            let ticker = slow_tick(progress_tx.clone(), 20, 55, 3);
+            let result = self.ensure_arch_compat(&cancel_token).await;
             ticker.abort();
             result?;
         }
@@ -753,6 +763,55 @@ impl DistroboxProvider {
         if !status.success() {
             return Err(ArcError::ProviderError(
                 "Failed to set up Debian compatibility packages".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn ensure_arch_compat(
+        &self,
+        cancel_token: &CancellationToken,
+    ) -> Result<(), ArcError> {
+        let arc_dir = PathBuf::from(&self.home).join(".local/share/arc");
+        let marker = arc_dir.join("arc-arch-compat-v1.done");
+        if marker.exists() {
+            return Ok(());
+        }
+
+        let work_dir =
+            PathBuf::from(&self.home).join(format!(".arc-distrobox-{}", Uuid::new_v4().simple()));
+        fs::create_dir_all(&work_dir)
+            .await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+
+        let helper_path = work_dir.join("compat.sh");
+        fs::write(&helper_path, ARCH_COMPAT_HELPER)
+            .await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+        Command::new("chmod")
+            .args(["+x", helper_path.to_str().unwrap()])
+            .status()
+            .await
+            .ok();
+
+        let status = run_cancellable(
+            Command::new("distrobox").args([
+                "enter",
+                CONTAINER_ARCH,
+                "--",
+                helper_path.to_str().unwrap(),
+                marker.to_str().unwrap(),
+            ]),
+            cancel_token,
+        )
+        .await;
+
+        let _ = fs::remove_dir_all(&work_dir).await;
+
+        let status = status?;
+        if !status.success() {
+            return Err(ArcError::ProviderError(
+                "Failed to set up Arch compatibility packages".to_string(),
             ));
         }
         Ok(())
@@ -922,6 +981,28 @@ sudo apt-get install -y \
     libxss1:i386 \
     libxtst6:i386 \
     libnss3:i386
+
+touch "$MARKER"
+"#;
+
+const ARCH_COMPAT_HELPER: &str = r#"#!/bin/bash
+set -euo pipefail
+MARKER="$1"
+
+[ -f "$MARKER" ] && exit 0
+
+sudo pacman -Sy --noconfirm
+
+# Audio: PipeWire client libraries + PulseAudio and ALSA compatibility layers.
+# The host PipeWire socket is bind-mounted into the container by distrobox;
+# these packages let containerised apps connect to it via PA or ALSA APIs.
+sudo pacman -S --noconfirm --needed \
+    pipewire \
+    pipewire-alsa \
+    pipewire-pulse \
+    libpulse \
+    alsa-lib \
+    alsa-plugins
 
 touch "$MARKER"
 "#;
