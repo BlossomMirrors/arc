@@ -142,7 +142,10 @@ pub fn push_transactions_to_ui(store: TxStore, app_weak: &slint::Weak<crate::App
                     pkg_id: tx.pkg_id.into(),
                     name: tx.name.into(),
                     icon: tx.icon.map(|r| r.to_slint_image()).unwrap_or_default(),
-                    progress: tx.progress,
+                    progress: match tx.status {
+                        TxStatus::Completed | TxStatus::Failed => 1.0,
+                        _ => tx.progress,
+                    },
                     status: match tx.status {
                         TxStatus::Pending => "pending",
                         TxStatus::Running => "running",
@@ -359,7 +362,7 @@ pub async fn run_signal_listener(
                 push_transactions_to_ui(store.clone(), &app_weak);
                 let _ = cache_invalidate_tx.try_send(());
 
-                if let Some((pkg_id, installed_after, refresh_detail, ok, _name, tx_type)) =
+                if let Some((pkg_id, installed_after, refresh_detail, ok, name, tx_type)) =
                     side_effect
                 {
                     // Detect completed AppImage installs so we can patch the transaction
@@ -368,13 +371,29 @@ pub async fn run_signal_listener(
                         std::path::Path::new(&pkg_id)
                             .file_name()
                             .and_then(|n| n.to_str())
-                            .and_then(|name| {
-                                if name.to_lowercase().ends_with(".appimage") {
-                                    Some(name[..name.len() - ".appimage".len()].to_string())
+                            .and_then(|file| {
+                                if file.to_lowercase().ends_with(".appimage") {
+                                    Some(file[..file.len() - ".appimage".len()].to_string())
                                 } else {
                                     None
                                 }
                             })
+                    } else {
+                        None
+                    };
+
+                    // Detect DEB/RPM/Arch installs for post-completion icon loading.
+                    let native_name = if ok && tx_type == "install" && appimage_stem.is_none() {
+                        let lower = pkg_id.to_lowercase();
+                        if lower.ends_with(".deb")
+                            || lower.ends_with(".rpm")
+                            || lower.ends_with(".pkg.tar.zst")
+                            || lower.ends_with(".pkg.tar.xz")
+                        {
+                            Some(name.clone())
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     };
@@ -415,6 +434,119 @@ pub async fn run_signal_listener(
                             app.set_detail_progress(progress);
                         }
                     });
+
+                    // For DEB/RPM/Arch installs, read the exported .desktop file to get
+                    // the real display name and icon, since the install helper writes
+                    // EXPORTED_APPS to the .info file pointing at the desktop entry.
+                    if let Some(pkg_name) = native_name {
+                        let tx_id_for_native = tx_id.clone();
+                        let store_for_native = store.clone();
+                        let app_weak_for_native = app_weak.clone();
+                        tokio::spawn(async move {
+                            let home = std::env::var("HOME")
+                                .unwrap_or_else(|_| "/root".to_string());
+
+                            // Try all three containers to find the .info file.
+                            let (info_content, found_container) = {
+                                let mut found = None;
+                                let mut found_c = None;
+                                for c in &["arc-debian", "arc-fedora", "arc-arch"] {
+                                    let p = format!(
+                                        "{}/.local/share/arc/packages/{}___{}.info",
+                                        home, c, pkg_name
+                                    );
+                                    if let Ok(content) = tokio::fs::read_to_string(&p).await {
+                                        found = Some(content);
+                                        found_c = Some(c.to_string());
+                                        break;
+                                    }
+                                }
+                                (found, found_c)
+                            };
+
+                            let (real_name, desktop_name, icon_value, pkg_type_str) =
+                                if let Some(ref info) = info_content {
+                                    let real = info
+                                        .lines()
+                                        .find_map(|l| l.strip_prefix("REAL_NAME=").map(|v| v.to_string()))
+                                        .filter(|n| !n.is_empty());
+
+                                    let ptype = info
+                                        .lines()
+                                        .find_map(|l| l.strip_prefix("PKG_TYPE=").map(|v| v.to_string()))
+                                        .filter(|n| !n.is_empty());
+
+                                    // Read the first exported .desktop file for Name= and Icon=.
+                                    let (dname, icon) = info
+                                        .lines()
+                                        .find_map(|l| l.strip_prefix("EXPORTED_APPS=").map(|v| v.to_string()))
+                                        .and_then(|apps| apps.split_whitespace().next().map(|s| s.to_string()))
+                                        .and_then(|app| {
+                                            let dp = format!(
+                                                "{}/.local/share/applications/{}.desktop",
+                                                home, app
+                                            );
+                                            std::fs::read_to_string(dp).ok()
+                                        })
+                                        .map(|desktop| {
+                                            let mut in_entry = false;
+                                            let mut name = None::<String>;
+                                            let mut icon = None::<String>;
+                                            for line in desktop.lines() {
+                                                let t = line.trim();
+                                                if t.starts_with('[') {
+                                                    in_entry = t == "[Desktop Entry]";
+                                                    continue;
+                                                }
+                                                if !in_entry { continue; }
+                                                if let Some(v) = line.strip_prefix("Name=") {
+                                                    name = Some(v.to_string());
+                                                } else if let Some(v) = line.strip_prefix("Icon=") {
+                                                    icon = Some(v.to_string());
+                                                }
+                                            }
+                                            (name, icon)
+                                        })
+                                        .unwrap_or((None, None));
+
+                                    (real, dname, icon, ptype)
+                                } else {
+                                    (None, None, None, None)
+                                };
+
+                            let display_name = desktop_name.or(real_name).unwrap_or(pkg_name.clone());
+                            let icon_str = icon_value;
+
+                            // Reconstruct the proper distrobox package ID so that clicking
+                            // the completed transaction navigates to the right detail page.
+                            let new_pkg_id = match (found_container, pkg_type_str) {
+                                (Some(container), Some(ptype)) => {
+                                    Some(format!("distrobox:{}:{}:{}", container, pkg_name, ptype))
+                                }
+                                _ => None,
+                            };
+
+                            let icon_data = tokio::task::spawn_blocking(move || {
+                                icons::load_distrobox_icon(icon_str.as_deref(), &pkg_name)
+                            })
+                            .await
+                            .unwrap_or(None);
+
+                            {
+                                let mut s = store_for_native.lock().unwrap();
+                                if let Some(e) = s.iter_mut().find(|e| e.id == tx_id_for_native) {
+                                    e.name = display_name;
+                                    if let Some(id) = new_pkg_id {
+                                        e.pkg_id = id;
+                                    }
+                                    if let Some(data) = icon_data {
+                                        e.icon = Some(data);
+                                    }
+                                }
+                            }
+                            push_transactions_to_ui(store_for_native, &app_weak_for_native);
+                        });
+                    }
 
                     // After a successful AppImage install, patch the completed
                     // transaction entry with the real name and icon from the .info file.

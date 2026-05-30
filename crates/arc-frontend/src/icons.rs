@@ -161,6 +161,7 @@ fn load_png_icon(path: &Path, size: u32) -> Option<RawIcon> {
     })
 }
 
+
 fn load_icon_from_path(path: &Path, size: u32) -> Option<RawIcon> {
     match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
         "png" => load_png_icon(path, size),
@@ -424,6 +425,61 @@ pub fn load_appimage_icon(icon_url: Option<&str>, stem: &str) -> Option<RawIcon>
 
 pub fn load_ui_icon(icon_name: &str) -> Option<RawIcon> {
     find_system_icon(icon_name, 16).and_then(|path| load_icon_from_path(&path, 16))
+}
+
+pub fn load_distrobox_icon(icon_url: Option<&str>, pkg_name: &str) -> Option<RawIcon> {
+    if let Some(v) = icon_url {
+        let p = Path::new(v);
+        if p.is_absolute() && p.exists() {
+            if let Some(icon) = load_icon_from_path(p, 64) {
+                return Some(icon);
+            }
+        }
+        // Symbolic name: search user local icon dirs directly before falling back to
+        // icon_loader (which may not index freshly-copied per-user icons).
+        if !p.is_absolute() {
+            if let Some(icon) = find_user_local_icon(v, 64) {
+                return Some(icon);
+            }
+        }
+        // Fall through to native lookup using the icon name as package name hint.
+        if let Some(icon) = load_native_package_icon(v) {
+            return Some(icon);
+        }
+    }
+    load_native_package_icon(pkg_name)
+}
+
+fn find_user_local_icon(icon_name: &str, size: u32) -> Option<RawIcon> {
+    let home = home_dir();
+    let bases = [home.join(".local/share/icons"), home.join(".icons")];
+    for base in &bases {
+        for theme in ["hicolor", "Adwaita", "breeze"] {
+            let theme_dir = base.join(theme);
+            for size_dir in ["256x256", "128x128", "96x96", "64x64", "48x48", "scalable"] {
+                let apps_dir = theme_dir.join(size_dir).join("apps");
+                for ext in ["png", "svg", "svgz"] {
+                    let p = apps_dir.join(format!("{}.{}", icon_name, ext));
+                    if p.exists() {
+                        if let Some(icon) = load_icon_from_path(&p, size) {
+                            return Some(icon);
+                        }
+                    }
+                }
+            }
+        }
+        // Also check pixmaps under ~/.local/share/
+        let pixmaps = home_dir().join(".local/share/pixmaps");
+        for ext in ["png", "svg", "svgz"] {
+            let p = pixmaps.join(format!("{}.{}", icon_name, ext));
+            if p.exists() {
+                if let Some(icon) = load_icon_from_path(&p, size) {
+                    return Some(icon);
+                }
+            }
+        }
+    }
+    None
 }
 
 pub fn load_native_package_icon(package_name: &str) -> Option<RawIcon> {

@@ -126,7 +126,7 @@ impl MultiProvider {
         } else if Self::is_lutris_id(package_id) {
             self.lutris.install(package_id).await
         } else {
-            self.native.install(package_id).await
+            self.native.install_with_progress(package_id, progress_tx).await
         }
     }
 

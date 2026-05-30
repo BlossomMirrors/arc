@@ -314,9 +314,12 @@ pub async fn load_package_icons(pkgs: Vec<libarc::Package>) -> Vec<RawPackage> {
                 }
                 Provider::Distrobox => {
                     let name = pkg.name.clone();
-                    tokio::task::spawn_blocking(move || icons::load_native_package_icon(&name))
-                        .await
-                        .unwrap_or(None)
+                    let icon_url = pkg.icon_url.clone();
+                    tokio::task::spawn_blocking(move || {
+                        icons::load_distrobox_icon(icon_url.as_deref(), &name)
+                    })
+                    .await
+                    .unwrap_or(None)
                 }
             }
         })
@@ -376,8 +379,9 @@ pub async fn load_detail(
 
     let native_pkg = all_pkgs.iter().copied().find(|p| {
         p.provider == Provider::Distrobox
-            && (p.id.split(';').next().map(|n| n.to_lowercase()).as_deref()
-                == Some(name_lower.as_str())
+            && (p.id == app_id.as_str()
+                || p.id.split(';').next().map(|n| n.to_lowercase()).as_deref()
+                    == Some(name_lower.as_str())
                 || p.name.to_lowercase() == name_lower)
     });
 
@@ -426,6 +430,7 @@ pub async fn load_detail(
             && !app_id.contains(';')
             && !app_id.starts_with("appimage:")
             && !app_id.starts_with("lutris:")
+            && !app_id.starts_with("distrobox:")
         {
             app_id.to_string()
         } else {
@@ -465,7 +470,8 @@ pub async fn load_detail(
         }
     } else if !native_id.is_empty() {
         let name = native_pkg.map(|p| p.name.clone()).unwrap_or_default();
-        tokio::task::spawn_blocking(move || icons::load_native_package_icon(&name))
+        let icon_url = native_pkg.and_then(|p| p.icon_url.clone());
+        tokio::task::spawn_blocking(move || icons::load_distrobox_icon(icon_url.as_deref(), &name))
             .await
             .unwrap_or(None)
     } else if !appimage_id.is_empty() {

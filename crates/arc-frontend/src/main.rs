@@ -10,12 +10,14 @@ use helpers::{
     parse_flatpakref, parse_flatpakrepo, pkg_name_from_filename,
 };
 use libarc::{ArcDaemonProxy, Provider, Settings};
-use packages::{build_installed_cache, load_detail, load_home, load_package_icons, refresh_home_installed};
+use packages::{
+    build_installed_cache, load_detail, load_home, load_package_icons, refresh_home_installed,
+};
 use slint::Model;
 use std::sync::{Arc, Mutex};
 use transactions::{
-    add_to_available_updates, begin_transaction, push_transactions_to_ui, remove_from_available_updates, run_signal_listener,
-    SavedPkgData, TxStatus, TxStore,
+    add_to_available_updates, begin_transaction, push_transactions_to_ui,
+    remove_from_available_updates, run_signal_listener, SavedPkgData, TxStatus, TxStore,
 };
 
 slint::include_modules!();
@@ -272,7 +274,7 @@ fn main() -> Result<()> {
                     app_ref.set_is_loading(false);
                 }
             } else {
-                // Cache is still being built — show spinner and wait.
+                // Cache is still being built. Show loading screen and wait.
                 if let Some(app_ref) = app_weak.upgrade() {
                     app_ref.set_is_loading(true);
                 }
@@ -942,11 +944,11 @@ fn main() -> Result<()> {
                 let rt_handle2 = rt_handle.clone();
                 let store2 = store.clone();
                 let fp = file_path.clone();
-                let fn_ = file_name.clone();
+                let pn_distrobox = pkg_name.clone();
                 app.on_install_file_distrobox_requested(move || {
                     begin_transaction(
                         fp.clone(),
-                        fn_.clone(),
+                        pn_distrobox.clone(),
                         "install".to_string(),
                         true,
                         false,

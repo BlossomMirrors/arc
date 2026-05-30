@@ -4,6 +4,7 @@ use libarc::{ArcError, Package, Provider};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::process::Command;
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 use uuid::Uuid;
 
@@ -12,7 +13,7 @@ const CONTAINER_RPM: &str = "arc-fedora";
 const CONTAINER_ARCH: &str = "arc-arch";
 
 const IMAGE_DEB: &str = "quay.io/toolbx-images/debian-toolbox:13";
-const IMAGE_RPM: &str = "registry.fedoraproject.org/fedora-toolbox:43";
+const IMAGE_RPM: &str = "registry.fedoraproject.org/fedora-toolbox:44";
 const IMAGE_ARCH: &str = "docker.io/archlinux:latest";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -295,21 +296,75 @@ impl DistroboxProvider {
         Ok(())
     }
 
+    async fn existing_containers(&self) -> Vec<String> {
+        let Ok(out) = Command::new("distrobox")
+            .args(["list", "--no-color"])
+            .output()
+            .await
+        else {
+            return Vec::new();
+        };
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .skip(1)
+            .filter_map(|line| {
+                line.split('|')
+                    .nth(1)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
+            .collect()
+    }
+
     async fn read_installed(&self) -> Result<Vec<Package>, ArcError> {
         let mut entries = match fs::read_dir(&self.packages_dir).await {
             Ok(e) => e,
             Err(_) => return Ok(Vec::new()),
         };
+
+        let live_containers = self.existing_containers().await;
+
         let mut packages = Vec::new();
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("info") {
                 continue;
             }
-            if let Ok(content) = fs::read_to_string(&path).await {
-                if let Some(pkg) = parse_info(&content) {
-                    packages.push(pkg);
+            let content = match fs::read_to_string(&path).await {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            // Find which container this package belongs to.
+            let container = content
+                .lines()
+                .find_map(|l| l.strip_prefix("CONTAINER=").map(|v| v.to_string()))
+                .unwrap_or_default();
+
+            if !container.is_empty() && !live_containers.contains(&container) {
+                // Container was deleted, remove the index entry and any exported files.
+                let home = std::path::PathBuf::from(&self.home);
+                for line in content.lines() {
+                    if let Some(apps) = line.strip_prefix("EXPORTED_APPS=") {
+                        for app in apps.split_whitespace().filter(|s| !s.is_empty()) {
+                            let _ = fs::remove_file(
+                                home.join(".local/share/applications")
+                                    .join(format!("{}.desktop", app)),
+                            )
+                            .await;
+                        }
+                    } else if let Some(bins) = line.strip_prefix("EXPORTED_BINS=") {
+                        for bin in bins.split_whitespace().filter(|s| !s.is_empty()) {
+                            let _ = fs::remove_file(home.join(".local/bin").join(bin)).await;
+                        }
+                    }
                 }
+                let _ = fs::remove_file(&path).await;
+                continue;
+            }
+
+            if let Some(pkg) = parse_info(&content, &self.home) {
+                packages.push(pkg);
             }
         }
         Ok(packages)
@@ -320,11 +375,12 @@ impl DistroboxProvider {
     }
 }
 
-fn parse_info(content: &str) -> Option<Package> {
+fn parse_info(content: &str, home: &str) -> Option<Package> {
     let mut guessed_name = String::new();
     let mut real_name = String::new();
     let mut pkg_type = String::new();
     let mut container = String::new();
+    let mut exported_apps: Vec<String> = Vec::new();
 
     for line in content.lines() {
         if let Some(v) = line.strip_prefix("GUESSED_NAME=") {
@@ -335,6 +391,8 @@ fn parse_info(content: &str) -> Option<Package> {
             pkg_type = v.to_string();
         } else if let Some(v) = line.strip_prefix("CONTAINER=") {
             container = v.to_string();
+        } else if let Some(v) = line.strip_prefix("EXPORTED_APPS=") {
+            exported_apps = v.split_whitespace().map(|s| s.to_string()).collect();
         }
     }
 
@@ -342,17 +400,56 @@ fn parse_info(content: &str) -> Option<Package> {
         return None;
     }
 
-    let name = if real_name.is_empty() {
-        guessed_name.clone()
-    } else {
-        real_name
-    };
+    // Read the exported .desktop file for the real display name, icon, and comment.
+    let (desktop_name, desktop_icon, desktop_comment) = exported_apps
+        .first()
+        .and_then(|app| {
+            let path = format!("{}/.local/share/applications/{}.desktop", home, app);
+            std::fs::read_to_string(path).ok()
+        })
+        .map(|desktop| {
+            let mut in_entry = false;
+            let mut name = None::<String>;
+            let mut icon = None::<String>;
+            let mut comment = None::<String>;
+            for line in desktop.lines() {
+                let t = line.trim();
+                if t.starts_with('[') {
+                    in_entry = t == "[Desktop Entry]";
+                    continue;
+                }
+                if !in_entry {
+                    continue;
+                }
+                if let Some(v) = line.strip_prefix("Name=") {
+                    name = Some(v.to_string());
+                } else if let Some(v) = line.strip_prefix("Icon=") {
+                    icon = Some(v.to_string());
+                } else if let Some(v) = line.strip_prefix("Comment=") {
+                    comment = Some(v.to_string());
+                }
+            }
+            (name, icon, comment)
+        })
+        .unwrap_or((None, None, None));
 
-    let description = match pkg_type.as_str() {
+    let name = desktop_name.unwrap_or_else(|| {
+        if real_name.is_empty() {
+            guessed_name.clone()
+        } else {
+            real_name
+        }
+    });
+
+    let container_label = match pkg_type.as_str() {
         "deb" => format!("Installed in Debian container ({})", container),
         "rpm" => format!("Installed in Fedora container ({})", container),
         "pacman" => format!("Installed in Arch container ({})", container),
         _ => format!("Installed in container ({})", container),
+    };
+    let description = match desktop_comment {
+        Some(ref c) if !c.is_empty() => format!("{} — {}", c, container_label),
+        _ => container_label,
     };
 
     Some(Package {
@@ -362,7 +459,7 @@ fn parse_info(content: &str) -> Option<Package> {
         description,
         provider: Provider::Distrobox,
         installed: true,
-        icon_url: None,
+        icon_url: desktop_icon,
         remote: None,
         screenshots: vec![],
     })
@@ -394,6 +491,9 @@ impl PackageProvider for DistroboxProvider {
         })?;
         let guessed_name = guess_pkg_name(&path, pkg_type);
         self.ensure_container(&container, &image).await?;
+        if container == CONTAINER_DEB {
+            self.ensure_debian_compat().await?;
+        }
         self.install_and_export(&container, &path, pkg_type, &guessed_name)
             .await
     }
@@ -441,11 +541,53 @@ impl PackageProvider for DistroboxProvider {
         ))
     }
 
-    async fn run(&self, _package_id: &str) -> Result<(), ArcError> {
-        Err(ArcError::ProviderError(
-            "Running distrobox applications is not supported. Use distrobox-enter directly."
-                .to_string(),
-        ))
+    async fn run(&self, package_id: &str) -> Result<(), ArcError> {
+        // package_id format: "distrobox:CONTAINER:GUESSED_NAME:PKG_TYPE"
+        let parts: Vec<&str> = package_id.splitn(4, ':').collect();
+        if parts.len() < 4 || parts[0] != "distrobox" {
+            return Err(ArcError::ProviderError(format!(
+                "Invalid distrobox package id: {}",
+                package_id
+            )));
+        }
+        let (container, guessed_name) = (parts[1], parts[2]);
+
+        let info_path = self.info_file(container, guessed_name);
+        let content = fs::read_to_string(&info_path)
+            .await
+            .map_err(|_| ArcError::PackageNotFound(guessed_name.to_string()))?;
+
+        let app_name = content
+            .lines()
+            .find_map(|l| l.strip_prefix("EXPORTED_APPS=").map(|v| v.to_string()))
+            .and_then(|apps| apps.split_whitespace().next().map(|s| s.to_string()));
+
+        if let Some(app) = app_name {
+            Command::new("gtk-launch")
+                .arg(&app)
+                .spawn()
+                .map_err(|e| ArcError::ProviderError(format!("gtk-launch: {}", e)))?;
+            return Ok(());
+        }
+
+        // No desktop app. Try the first exported binary instead.
+        let bin_name = content
+            .lines()
+            .find_map(|l| l.strip_prefix("EXPORTED_BINS=").map(|v| v.to_string()))
+            .and_then(|bins| bins.split_whitespace().next().map(|s| s.to_string()));
+
+        if let Some(bin) = bin_name {
+            let bin_path = PathBuf::from(&self.home).join(".local/bin").join(&bin);
+            Command::new(&bin_path)
+                .spawn()
+                .map_err(|e| ArcError::ProviderError(format!("launch {}: {}", bin, e)))?;
+            return Ok(());
+        }
+
+        Err(ArcError::ProviderError(format!(
+            "No exported app or binary found for {}",
+            guessed_name
+        )))
     }
 
     async fn search_category(&self, _category: &str) -> Result<Vec<Package>, ArcError> {
@@ -457,6 +599,109 @@ impl PackageProvider for DistroboxProvider {
         // Look up the package from installed packages
         let installed = self.read_installed().await?;
         Ok(installed.into_iter().find(|p| p.id == package_id))
+    }
+}
+
+/// Spawns a task that drip-feeds progress from `from` to `ceiling` every
+/// `interval_secs` seconds. Abort the returned handle when the phase ends.
+fn slow_tick(
+    tx: UnboundedSender<u8>,
+    from: u8,
+    ceiling: u8,
+    interval_secs: u64,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut p = from;
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(interval_secs)).await;
+            p = p.saturating_add(1).min(ceiling);
+            if tx.send(p).is_err() {
+                break;
+            }
+        }
+    })
+}
+
+impl DistroboxProvider {
+    pub async fn install_with_progress(
+        &self,
+        package_id: &str,
+        progress_tx: UnboundedSender<u8>,
+    ) -> Result<(), ArcError> {
+        let path = PathBuf::from(package_id);
+        let (container, image, pkg_type) = classify_file(&path).ok_or_else(|| {
+            ArcError::ProviderError(format!("Unsupported package format: {}", path.display()))
+        })?;
+        let guessed_name = guess_pkg_name(&path, pkg_type);
+
+        // Phase 1: ensure container (fast if it exists, slow if it needs creating)
+        let _ = progress_tx.send(5);
+        let ticker = slow_tick(progress_tx.clone(), 5, 18, 2);
+        self.ensure_container(&container, &image).await?;
+        ticker.abort();
+
+        // Phase 2: one-time compat setup (only slow on first .deb install ever)
+        let _ = progress_tx.send(20);
+        if container == CONTAINER_DEB {
+            let ticker = slow_tick(progress_tx.clone(), 20, 55, 3);
+            self.ensure_debian_compat().await?;
+            ticker.abort();
+        }
+
+        // Phase 3: install + export inside the container
+        let _ = progress_tx.send(60);
+        let ticker = slow_tick(progress_tx.clone(), 60, 92, 2);
+        self.install_and_export(&container, &path, pkg_type, &guessed_name)
+            .await?;
+        ticker.abort();
+
+        let _ = progress_tx.send(95);
+        Ok(())
+    }
+
+    async fn ensure_debian_compat(&self) -> Result<(), ArcError> {
+        let arc_dir = PathBuf::from(&self.home).join(".local/share/arc");
+        let marker = arc_dir.join("arc-debian-compat-v2.done");
+        if marker.exists() {
+            return Ok(());
+        }
+
+        let work_dir =
+            PathBuf::from(&self.home).join(format!(".arc-distrobox-{}", Uuid::new_v4().simple()));
+        fs::create_dir_all(&work_dir)
+            .await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+
+        let helper_path = work_dir.join("compat.sh");
+        fs::write(&helper_path, DEBIAN_COMPAT_HELPER)
+            .await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+        Command::new("chmod")
+            .args(["+x", helper_path.to_str().unwrap()])
+            .status()
+            .await
+            .ok();
+
+        let status = Command::new("distrobox")
+            .args([
+                "enter",
+                CONTAINER_DEB,
+                "--",
+                helper_path.to_str().unwrap(),
+                marker.to_str().unwrap(),
+            ])
+            .status()
+            .await
+            .map_err(|e| ArcError::ProviderError(format!("compat setup: {}", e)))?;
+
+        let _ = fs::remove_dir_all(&work_dir).await;
+
+        if !status.success() {
+            return Err(ArcError::ProviderError(
+                "Failed to set up Debian compatibility packages".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -551,7 +796,7 @@ touch "$EXPORT_LOG"
 
 case "$PKG_TYPE" in
     deb)
-        sudo apt-get update -qq
+        sudo apt-get update -qq 2>/dev/null || true
         pkg_name="$(dpkg-deb --field "$DEST" Package)"
         sudo apt-get install -y "$DEST" || (sudo dpkg -i "$DEST" && sudo apt-get install -f -y)
         file_list="$(dpkg -L "$pkg_name" 2>/dev/null || true)"
@@ -570,7 +815,59 @@ case "$PKG_TYPE" in
 esac
 
 printf 'pkgname:%s\n' "$pkg_name" >> "$EXPORT_LOG"
+
+# Refresh package lists after install. The package may have added new apt
+# repos (e.g. steam-launcher adds Valve's repo). Running update here means
+# the cache timestamp is current so apps like Steam don't pop up an
+# "apt-get update" xterm dialog on first launch.
+if [ "$PKG_TYPE" = "deb" ]; then
+    sudo apt-get update -qq 2>/dev/null || true
+
+    # If steam-launcher was just installed, pre-install all runtime deps so
+    # Steam never needs to call apt-get via polkit on launch.
+    if dpkg -s steam-launcher &>/dev/null 2>&1; then
+        DEBIAN_FRONTEND=noninteractive sudo apt-get install -y \
+            libegl1:i386 libgbm1:i386 xdg-desktop-portal-kde \
+            steam-libs-amd64 2>/dev/null || true
+    fi
+fi
+
 export_all "$file_list"
+"#;
+
+const DEBIAN_COMPAT_HELPER: &str = r#"#!/bin/bash
+set -euo pipefail
+MARKER="$1"
+
+# Already done on a previous install
+[ -f "$MARKER" ] && exit 0
+
+# Enable 32-bit architecture support (required for Steam and most Windows-compat libs)
+sudo dpkg --add-architecture i386
+sudo apt-get update -qq
+
+# KDE / xdg-desktop-portal support. Lets apps use native file pickers, portals,
+# and the secret service. Installed silently; nothing is exported to the host.
+sudo apt-get install -y --no-install-recommends \
+    xdg-desktop-portal-kde \
+    libsecret-1-0
+
+# lib32 / multiarch libraries required by Steam and similar apps.
+# Installing all of these here means Steam never needs to run apt-get at
+# launch time (which would pop up a polkit/xterm dialog).
+sudo apt-get install -y \
+    libc6:i386 \
+    libegl1:i386 \
+    libgbm1:i386 \
+    libgl1:i386 \
+    libgl1-mesa-dri:i386 \
+    libstdc++6:i386 \
+    libgcc-s1:i386 \
+    libxss1:i386 \
+    libxtst6:i386 \
+    libnss3:i386
+
+touch "$MARKER"
 "#;
 
 const UNINSTALL_HELPER: &str = r#"#!/bin/bash

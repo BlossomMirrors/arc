@@ -47,11 +47,21 @@ export component DetailScreen inherits Rectangle {
                 detail-progress: root.detail-progress;
                 detail-transaction-id: root.detail-transaction-id;
                 settings-preferred: root.settings-preferred;
-                back-clicked => { root.back-clicked(); }
-                install-requested(id) => { root.install-requested(id); }
-                remove-requested(id) => { root.remove-requested(id); }
-                cancel-requested(id) => { root.cancel-requested(id); }
-                launch-requested(id) => { root.launch-requested(id); }
+                back-clicked => {
+                    root.back-clicked();
+                }
+                install-requested(id) => {
+                    root.install-requested(id);
+                }
+                remove-requested(id) => {
+                    root.remove-requested(id);
+                }
+                cancel-requested(id) => {
+                    root.cancel-requested(id);
+                }
+                launch-requested(id) => {
+                    root.launch-requested(id);
+                }
             }
 
             if root.detail-app.summary != "": VerticalLayout {
@@ -71,6 +81,7 @@ export component DetailScreen inherits Rectangle {
             if root.detail-app.description != "": VerticalLayout {
                 padding-left: 30px;
                 padding-right: 30px;
+                padding-top: 16px;
                 padding-bottom: 12px;
 
                 Text {
@@ -123,8 +134,11 @@ export component DetailScreen inherits Rectangle {
                     Rectangle {
                         horizontal-stretch: 1;
                         url-ta := TouchArea {
-                            clicked => { root.open-url-requested(root.detail-app.homepage-url); }
+                            clicked => {
+                                root.open-url-requested(root.detail-app.homepage-url);
+                            }
                         }
+
                         Text {
                             text: root.detail-app.homepage-url;
                             font-size: 12px;
@@ -143,6 +157,8 @@ export component DetailScreen inherits Rectangle {
         height: parent.height;
         images: root.detail-screenshots;
         initial-index: root.lightbox-index;
-        closed => { root.lightbox-visible = false; }
+        closed => {
+            root.lightbox-visible = false;
+        }
     }
 }

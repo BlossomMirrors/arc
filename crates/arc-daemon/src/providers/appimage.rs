@@ -169,7 +169,7 @@ impl AppImageProvider {
         let squashfs = extract_dir.join("squashfs-root");
         let mut meta = Self::read_squashfs_meta(&squashfs, path).await;
 
-        // ELF section is canonical — override whatever the desktop file said
+        // ELF section is canonical, override whatever the desktop file said
         if !elf_update_info.is_empty() {
             meta.update_info = elf_update_info;
         }
@@ -256,7 +256,9 @@ impl AppImageProvider {
 
         // Pick the best candidate: skip hidden/secondary entries (NoDisplay, "Quit …", etc.)
         let is_primary = |c: &str| {
-            let hidden = c.lines().any(|l| l == "NoDisplay=true" || l == "Hidden=true");
+            let hidden = c
+                .lines()
+                .any(|l| l == "NoDisplay=true" || l == "Hidden=true");
             if hidden {
                 return false;
             }
@@ -265,8 +267,10 @@ impl AppImageProvider {
                 .find_map(|l| l.strip_prefix("Name="))
                 .unwrap_or("")
                 .to_lowercase();
-            !name.starts_with("quit") && !name.ends_with(" quit")
-                && !name.starts_with("tray") && !name.ends_with(" tray")
+            !name.starts_with("quit")
+                && !name.ends_with(" quit")
+                && !name.starts_with("tray")
+                && !name.ends_with(" tray")
         };
 
         if let Some(primary) = candidates.iter().find(|c| is_primary(c)) {
@@ -614,9 +618,14 @@ fn find_named_icon(squashfs: &Path, icon_name: &str) -> Option<PathBuf> {
     }
     // hicolor theme, largest sizes first
     let hicolor = squashfs.join("usr/share/icons/hicolor");
-    for size in ["512x512", "256x256", "128x128", "64x64", "48x48", "scalable", "32x32"] {
+    for size in [
+        "512x512", "256x256", "128x128", "64x64", "48x48", "scalable", "32x32",
+    ] {
         for ext in ["png", "svg", "svgz", "xpm"] {
-            let p = hicolor.join(size).join("apps").join(format!("{}.{}", icon_name, ext));
+            let p = hicolor
+                .join(size)
+                .join("apps")
+                .join(format!("{}.{}", icon_name, ext));
             if p.exists() {
                 return Some(p);
             }
@@ -624,7 +633,9 @@ fn find_named_icon(squashfs: &Path, icon_name: &str) -> Option<PathBuf> {
     }
     // pixmaps fallback
     for ext in ["png", "svg", "svgz", "xpm"] {
-        let p = squashfs.join("usr/share/pixmaps").join(format!("{}.{}", icon_name, ext));
+        let p = squashfs
+            .join("usr/share/pixmaps")
+            .join(format!("{}.{}", icon_name, ext));
         if p.exists() {
             return Some(p);
         }
@@ -641,8 +652,9 @@ fn parse_desktop(content: &str) -> AppImageMeta {
         update_info: String::new(),
         icon_path: None,
     };
-    // Only parse the [Desktop Entry] section — action sections like
-    // [Desktop Action quit] have their own Name= lines that must be ignored.
+    // Only parse the [Desktop Entry] section.
+    // Action sections like [Desktop Action quit] have their own
+    // Name= lines that must be ignored.
     let mut in_entry_section = false;
     for line in content.lines() {
         let trimmed = line.trim();
@@ -1049,8 +1061,8 @@ fn elf_u64(buf: &[u8], off: usize, le: bool) -> u64 {
 }
 
 /// Read the `.upd_info` ELF section from an AppImage binary.
-/// This is the canonical source of AppImage update information per the spec —
-/// it works without FUSE or extracting the squashfs payload.
+/// This is the canonical source of AppImage update information per the spec.
+/// It works without FUSE or extracting the squashfs payload.
 fn read_upd_info_from_elf(path: &Path) -> Option<String> {
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom};
