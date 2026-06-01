@@ -48,6 +48,7 @@ export component HomeScreen inherits Rectangle {
                         color: white;
                         horizontal-alignment: center;
                     }
+
                     Text {
                         text: "Install apps from Flathub and your system repositories";
                         font-size: 13px;
@@ -77,7 +78,9 @@ export component HomeScreen inherits Rectangle {
                         width: (parent.width + 12px) / 5 - 12px;
                         height: 152px;
                         card: app;
-                        clicked(id) => { root.detail-requested(id); }
+                        clicked(id) => {
+                            root.detail-requested(id);
+                        }
                     }
                 }
             }
@@ -95,13 +98,15 @@ export component HomeScreen inherits Rectangle {
                 Carousel {
                     width: parent.width;
                     items: root.recent-apps;
-                    item-clicked(id) => { root.detail-requested(id); }
+                    item-clicked(id) => {
+                        root.detail-requested(id);
+                    }
                 }
             }
 
             if root.categories.length > 0: VerticalBox {
                 padding-top: 20px;
-                spacing: 8px;
+                spacing: 24px;
 
                 Text {
                     text: "Categories";
@@ -109,17 +114,22 @@ export component HomeScreen inherits Rectangle {
                     font-weight: 700;
                 }
 
-                Rectangle {
-                    height: ceil(root.categories.length / 4) * 114px;
-                    preferred-width: 0px;
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: min(parent.width, 750px);
+                        height: ceil(root.categories.length / 3) * 114px;
 
-                    for cat[i] in root.categories: CategoryCard {
-                        x: mod(i, 4) * (parent.width + 12px) / 4;
-                        y: ((i - mod(i, 4)) / 4) * 114px;
-                        width: (parent.width + 12px) / 4 - 12px;
-                        height: 104px;
-                        category: cat;
-                        clicked(id) => { root.category-selected(id); }
+                        for cat[i] in root.categories: CategoryCard {
+                            x: mod(i, 3) * (parent.width + 12px) / 3;
+                            y: ((i - mod(i, 3)) / 3) * 114px;
+                            width: (parent.width + 12px) / 3 - 12px;
+                            height: 104px;
+                            category: cat;
+                            clicked(id) => {
+                                root.category-selected(id);
+                            }
+                        }
                     }
                 }
             }
