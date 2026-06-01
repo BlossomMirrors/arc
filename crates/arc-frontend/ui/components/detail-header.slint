@@ -169,7 +169,7 @@ export component DetailHeader inherits Rectangle {
                     spacing: 8px;
                     alignment: end;
 
-                    if root.has-extensions: Rectangle {
+                    if root.has-extensions && root.btn-is-installed: Rectangle {
                         width: root.shared-btn-height;
                         height: root.shared-btn-height;
                         border-radius: 8px;
@@ -192,20 +192,37 @@ export component DetailHeader inherits Rectangle {
                         }
                     }
 
-                    if !root.btn-is-appimage || root.btn-is-installed: Button {
+                    if !root.btn-is-appimage || root.btn-is-installed: Rectangle {
                         width: root.shared-btn-width;
                         height: root.shared-btn-height;
-                        horizontal-stretch: 0;
-                        text: root.btn-is-installed ? "Remove" : "Install";
-                        enabled: root.btn-active-id != "";
-                        clicked => {
-                            if root.btn-is-installed {
-                                root.remove-requested(root.btn-active-id);
-                            } else if root.detail-app.eula-url != "" {
-                                root.eula-requested();
-                            } else {
-                                root.install-requested(root.btn-active-id);
+                        border-radius: 8px;
+                        background: root.btn-active-id == "" ? #80808030 :
+                            (install-ta.has-hover ? #80808035 : #80808020);
+                        border-width: 1px;
+                        border-color: #80808040;
+
+                        install-ta := TouchArea {
+                            enabled: root.btn-active-id != "";
+                            clicked => {
+                                if root.btn-is-installed {
+                                    root.remove-requested(root.btn-active-id);
+                                } else if root.detail-app.eula-url != "" {
+                                    root.eula-requested();
+                                } else {
+                                    root.install-requested(root.btn-active-id);
+                                }
                             }
+                        }
+
+                        Text {
+                            text: root.btn-is-installed ? "Remove" : "Install";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: root.btn-active-id == "" ?
+                                Palette.foreground.transparentize(0.6) :
+                                Palette.foreground.transparentize(0.05);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
                         }
                     }
 
@@ -213,7 +230,7 @@ export component DetailHeader inherits Rectangle {
                         width: root.shared-btn-width;
                         height: root.shared-btn-height;
                         border-radius: 8px;
-                        background: run-ta.has-hover ? #22c55e : #16a34a;
+                        background: run-ta.has-hover ? #2563eb : #3b82f6;
 
                         run-ta := TouchArea {
                             clicked => {
@@ -236,7 +253,7 @@ export component DetailHeader inherits Rectangle {
                     width: cancel-detail-label.preferred-width + 24px;
                     height: root.shared-btn-height;
                     border-radius: 8px;
-                    background: cancel-detail-ta.has-hover ? #ff33b0 : #e91e90;
+                    background: cancel-detail-ta.has-hover ? #dc2626 : #ef4444;
 
                     cancel-detail-ta := TouchArea {
                         clicked => {
