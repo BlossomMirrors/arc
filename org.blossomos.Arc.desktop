@@ -3,15 +3,14 @@ Type=Application
 Name=Arc Software
 Comment=Discover and install applications from Flathub and your package files
 Comment[de]=Apps aus Flathub und lokalen Paketen entdecken und installieren
-Exec=arc-frontend %F %U
+Exec=arc-frontend %F
 Icon=org.blossomos.Arc
 Terminal=false
 Categories=System;PackageManager;
 StartupNotify=true
 StartupWMClass=arc-frontend
-MimeType=application/x-deb;application/x-rpm;application/vnd.archlinux.pkg;application/x-appimage;x-scheme-handler/appstream;x-scheme-handler/flatpak+https;
+MimeType=application/x-deb;application/x-rpm;application/vnd.archlinux.pkg;application/x-appimage;
 Actions=ManageExtensions;
-X-KDE-Protocols=appstream
 
 [Desktop Action ManageExtensions]
 Name=Manage Extensions

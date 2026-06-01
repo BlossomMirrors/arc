@@ -39,6 +39,7 @@ tar -czf $SOURCES_DIR/$PACKAGE_NAME-$VERSION.tar.gz \
     target/release/arc-daemon \
     target/release/arc \
     org.blossomos.Arc.desktop \
+    org.blossomos.Arc.Handler.desktop \
     org.blossomos.Arc.metainfo.xml \
     org.blossomos.Arc.xml \
     arc-daemon.desktop \
@@ -84,7 +85,8 @@ automatic desktop integration.
 install -Dm 755 target/release/arc-frontend %{buildroot}/usr/bin/arc-frontend
 install -Dm 755 target/release/arc-daemon   %{buildroot}/usr/bin/arc-daemon
 install -Dm 755 target/release/arc      %{buildroot}/usr/bin/arc
-install -Dm 644 org.blossomos.Arc.desktop     %{buildroot}/usr/share/applications/org.blossomos.Arc.desktop
+install -Dm 644 org.blossomos.Arc.desktop         %{buildroot}/usr/share/applications/org.blossomos.Arc.desktop
+install -Dm 644 org.blossomos.Arc.Handler.desktop %{buildroot}/usr/share/applications/org.blossomos.Arc.Handler.desktop
 install -Dm 644 org.blossomos.Arc.metainfo.xml %{buildroot}/usr/share/metainfo/org.blossomos.Arc.metainfo.xml
 install -Dm 644 org.blossomos.Arc.xml         %{buildroot}/usr/share/mime/packages/org.blossomos.Arc.xml
 install -Dm 644 arc-daemon.desktop            %{buildroot}/etc/xdg/autostart/arc-daemon.desktop
@@ -99,22 +101,27 @@ update-mime-database /usr/share/mime &>/dev/null || :
 update-desktop-database /usr/share/applications &>/dev/null || :
 gtk-update-icon-cache /usr/share/icons/hicolor &>/dev/null || :
 MIMEAPPS=/usr/share/applications/mimeapps.list
-ENTRY="x-scheme-handler/appstream=org.blossomos.Arc.desktop"
-if [ -f "\$MIMEAPPS" ]; then
-    if ! grep -q "x-scheme-handler/appstream" "\$MIMEAPPS"; then
-        grep -q "^\[Default Applications\]" "\$MIMEAPPS" \
-            && sed -i "/^\[Default Applications\]/a \$ENTRY" "\$MIMEAPPS" \
-            || printf '\n[Default Applications]\n%s\n' "\$ENTRY" >> "\$MIMEAPPS"
+for ENTRY in \
+    "x-scheme-handler/appstream=org.blossomos.Arc.Handler.desktop" \
+    "x-scheme-handler/flatpak+https=org.blossomos.Arc.Handler.desktop"
+do
+    KEY=\$(echo "\$ENTRY" | cut -d= -f1)
+    if [ -f "\$MIMEAPPS" ]; then
+        if ! grep -q "\$KEY" "\$MIMEAPPS"; then
+            grep -q "^\[Default Applications\]" "\$MIMEAPPS" \
+                && sed -i "/^\[Default Applications\]/a \$ENTRY" "\$MIMEAPPS" \
+                || printf '\n[Default Applications]\n%s\n' "\$ENTRY" >> "\$MIMEAPPS"
+        fi
+    else
+        printf '[Default Applications]\n%s\n' "\$ENTRY" > "\$MIMEAPPS"
     fi
-else
-    printf '[Default Applications]\n%s\n' "\$ENTRY" > "\$MIMEAPPS"
-fi
+done
 
 %postun
 update-mime-database /usr/share/mime &>/dev/null || :
 update-desktop-database /usr/share/applications &>/dev/null || :
 gtk-update-icon-cache /usr/share/icons/hicolor &>/dev/null || :
-sed -i '/x-scheme-handler\/appstream=org\.blossomos\.Arc\.desktop/d' \
+sed -i '/x-scheme-handler\/appstream=org\.blossomos\.Arc\.Handler\.desktop/d;/x-scheme-handler\/flatpak+https=org\.blossomos\.Arc\.Handler\.desktop/d' \
     /usr/share/applications/mimeapps.list 2>/dev/null || :
 
 %files
@@ -122,6 +129,7 @@ sed -i '/x-scheme-handler\/appstream=org\.blossomos\.Arc\.desktop/d' \
 /usr/bin/arc-daemon
 /usr/bin/arc
 /usr/share/applications/org.blossomos.Arc.desktop
+/usr/share/applications/org.blossomos.Arc.Handler.desktop
 /usr/share/metainfo/org.blossomos.Arc.metainfo.xml
 /usr/share/mime/packages/org.blossomos.Arc.xml
 /etc/xdg/autostart/arc-daemon.desktop
