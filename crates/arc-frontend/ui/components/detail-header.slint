@@ -9,12 +9,14 @@ export component DetailHeader inherits Rectangle {
     in property <float> detail-progress;
     in property <string> detail-transaction-id;
     in property <string> settings-preferred;
+    in property <bool> has-extensions: false;
 
     callback back-clicked();
     callback install-requested(string);
     callback remove-requested(string);
     callback cancel-requested(string);
     callback launch-requested(string);
+    callback extensions-clicked();
 
     private property <length> shared-btn-width: 90px;
     private property <length> shared-btn-height: 36px;
@@ -166,8 +168,30 @@ export component DetailHeader inherits Rectangle {
                     spacing: 8px;
                     alignment: end;
 
+                    if root.has-extensions: Rectangle {
+                        width: root.shared-btn-height;
+                        height: root.shared-btn-height;
+                        border-radius: 8px;
+                        background: ext-icon-ta.has-hover ? #80808020 : #80808010;
+                        border-width: 1px;
+                        border-color: #80808030;
+
+                        ext-icon-ta := TouchArea {
+                            clicked => { root.extensions-clicked(); }
+                        }
+
+                        Text {
+                            text: "⊞";
+                            font-size: 17px;
+                            color: Palette.foreground.transparentize(0.2);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
                     if !root.btn-is-appimage || root.btn-is-installed: Button {
-                        min-width: root.shared-btn-width;
+                        width: root.shared-btn-width;
+                        height: root.shared-btn-height;
                         horizontal-stretch: 0;
                         text: root.btn-is-installed ? "Remove" : "Install";
                         enabled: root.btn-active-id != "";

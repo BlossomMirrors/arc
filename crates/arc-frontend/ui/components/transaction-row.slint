@@ -24,7 +24,7 @@ export component TransactionRow inherits Rectangle {
         card-ta := TouchArea {
             mouse-cursor: pointer;
             clicked => {
-                root.detail-requested(root.item.pkg-id);
+                root.detail-requested(root.item.parent-id != "" ? root.item.parent-id : root.item.pkg-id);
             }
         }
 

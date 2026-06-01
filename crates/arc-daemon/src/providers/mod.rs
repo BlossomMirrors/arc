@@ -99,6 +99,10 @@ impl MultiProvider {
         *cache = None;
     }
 
+    pub async fn list_extensions(&self, app_id: &str) -> Result<Vec<Package>, ArcError> {
+        self.flatpak.list_extensions(app_id).await
+    }
+
     pub async fn install_with_progress(
         &self,
         package_id: &str,

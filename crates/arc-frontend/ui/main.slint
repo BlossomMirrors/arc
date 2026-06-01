@@ -18,6 +18,7 @@ import {
     CategoryItem,
     TransactionItem,
     RemoteItem,
+    ExtensionItem,
 } from "types.slint";
 export {
     PackageItem,
@@ -26,6 +27,7 @@ export {
     CategoryItem,
     TransactionItem,
     RemoteItem,
+    ExtensionItem,
 } from "types.slint";
 
 export component AppWindow inherits Window {
@@ -60,6 +62,7 @@ export component AppWindow inherits Window {
     in-out property <bool> install-file-is-flatpak-bundle: false;
 
     in-out property <[image]> detail-screenshots: [];
+    in-out property <[ExtensionItem]> detail-extensions: [];
     in-out property <bool> detail-busy: false;
     in-out property <float> detail-progress: 0;
     in-out property <string> detail-transaction-id: "";
@@ -113,6 +116,9 @@ export component AppWindow inherits Window {
     callback install-flatpakref-cancelled();
     callback open-url-requested(string);
     callback launch-requested(string);
+    callback install-extension-requested(string);
+    callback remove-extension-requested(string);
+    callback refresh-extensions-requested();
     callback clear-completed-requested();
     callback update-all-requested();
     callback cancel-requested(string);
@@ -203,6 +209,7 @@ export component AppWindow inherits Window {
                 detail-progress: root.detail-progress;
                 detail-transaction-id: root.detail-transaction-id;
                 detail-screenshots: root.detail-screenshots;
+                detail-extensions: root.detail-extensions;
                 settings-preferred: root.settings-preferred;
                 back-clicked => {
                     if root.prev-view == "home" {
@@ -224,6 +231,12 @@ export component AppWindow inherits Window {
                 }
                 open-url-requested(url) => {
                     root.open-url-requested(url);
+                }
+                install-extension-requested(id) => {
+                    root.install-extension-requested(id);
+                }
+                remove-extension-requested(id) => {
+                    root.remove-extension-requested(id);
                 }
             }
 

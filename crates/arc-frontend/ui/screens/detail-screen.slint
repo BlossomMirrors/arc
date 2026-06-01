@@ -1,5 +1,5 @@
 import { Palette, HorizontalBox, ScrollView } from "std-widgets.slint";
-import { AppDetailData } from "../types.slint";
+import { AppDetailData, ExtensionItem } from "../types.slint";
 import { DetailHeader } from "../components/detail-header.slint";
 import { ScreenshotCarousel } from "../components/screenshot-carousel.slint";
 import { Lightbox } from "../components/lightbox.slint";
@@ -12,6 +12,7 @@ export component DetailScreen inherits Rectangle {
     in property <string> detail-transaction-id;
     in property <[image]> detail-screenshots;
     in property <string> settings-preferred;
+    in property <[ExtensionItem]> detail-extensions;
 
     callback back-clicked();
     callback install-requested(string);
@@ -19,9 +20,12 @@ export component DetailScreen inherits Rectangle {
     callback cancel-requested(string);
     callback launch-requested(string);
     callback open-url-requested(string);
+    callback install-extension-requested(string);
+    callback remove-extension-requested(string);
 
     private property <bool> lightbox-visible: false;
     private property <int> lightbox-index: 0;
+    private property <bool> extensions-popup-visible: false;
 
     clip: true;
 
@@ -47,6 +51,7 @@ export component DetailScreen inherits Rectangle {
                 detail-progress: root.detail-progress;
                 detail-transaction-id: root.detail-transaction-id;
                 settings-preferred: root.settings-preferred;
+                has-extensions: root.detail-extensions.length > 0;
                 back-clicked => {
                     root.back-clicked();
                 }
@@ -61,6 +66,9 @@ export component DetailScreen inherits Rectangle {
                 }
                 launch-requested(id) => {
                     root.launch-requested(id);
+                }
+                extensions-clicked => {
+                    root.extensions-popup-visible = true;
                 }
             }
 
@@ -159,6 +167,144 @@ export component DetailScreen inherits Rectangle {
         initial-index: root.lightbox-index;
         closed => {
             root.lightbox-visible = false;
+        }
+    }
+
+    if root.extensions-popup-visible: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #00000055;
+
+        TouchArea {
+            clicked => {
+                root.extensions-popup-visible = false;
+            }
+        }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: max(48px, (parent.height - self.height) / 2);
+            width: min(480px, parent.width - 48px);
+            height: min(root.detail-extensions.length * 60px + 88px, parent.height - 80px);
+            border-radius: 12px;
+            background: Palette.background;
+            drop-shadow-blur: 32px;
+            drop-shadow-color: #00000050;
+
+            TouchArea { }
+
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Text {
+                        text: "Extensions";
+                        font-size: 16px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        horizontal-stretch: 0;
+                        border-radius: 6px;
+                        background: close-ext-ta.has-hover ? #80808025 : transparent;
+
+                        close-ext-ta := TouchArea {
+                            clicked => {
+                                root.extensions-popup-visible = false;
+                            }
+                        }
+
+                        Text {
+                            text: "✕";
+                            font-size: 11px;
+                            color: Palette.foreground.transparentize(0.4);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                ScrollView {
+                    vertical-stretch: 1;
+                    viewport-width: self.visible-width;
+
+                    VerticalLayout {
+                        spacing: 4px;
+                        padding-bottom: 4px;
+
+                        for ext in root.detail-extensions: Rectangle {
+                            height: 44px;
+
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                padding-top: 12px;
+                                padding-bottom: 12px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: ext.name;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+
+                                if !ext.installed: Rectangle {
+                                    width: 80px;
+                                    height: 30px;
+                                    border-radius: 8px;
+                                    background: inst-ext-ta.has-hover ? #2563eb : #3b82f6;
+
+                                    inst-ext-ta := TouchArea {
+                                        clicked => {
+                                            root.install-extension-requested(ext.id);
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "Install";
+                                        font-size: 13px;
+                                        font-weight: 600;
+                                        color: white;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                if ext.installed: Rectangle {
+                                    width: 80px;
+                                    height: 30px;
+                                    border-radius: 8px;
+                                    background: rm-ext-ta.has-hover ? #ff33b0 : #e91e90;
+
+                                    rm-ext-ta := TouchArea {
+                                        clicked => {
+                                            root.remove-extension-requested(ext.id);
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "Remove";
+                                        font-size: 13px;
+                                        font-weight: 600;
+                                        color: white;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

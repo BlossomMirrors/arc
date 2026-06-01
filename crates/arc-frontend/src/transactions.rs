@@ -25,6 +25,7 @@ pub struct SavedPkgData {
 pub struct TrackedTx {
     pub id: String,
     pub pkg_id: String,
+    pub parent_id: String,
     pub name: String,
     pub icon: Option<RawIcon>,
     pub progress: f32,
@@ -33,6 +34,7 @@ pub struct TrackedTx {
     pub error: String,
     pub installed_after: bool,
     pub refresh_detail: bool,
+    pub refresh_extensions: bool,
     pub saved_pkg: Option<SavedPkgData>,
 }
 
@@ -140,6 +142,7 @@ pub fn push_transactions_to_ui(store: TxStore, app_weak: &slint::Weak<crate::App
                 .map(|tx| crate::TransactionItem {
                     id: tx.id.into(),
                     pkg_id: tx.pkg_id.into(),
+                    parent_id: tx.parent_id.into(),
                     name: tx.name.into(),
                     icon: tx.icon.map(|r| r.to_slint_image()).unwrap_or_default(),
                     progress: match tx.status {
@@ -209,10 +212,12 @@ pub async fn load_icon_for_pkg(pkg_id: &str, name: &str) -> Option<RawIcon> {
 
 pub fn begin_transaction(
     pkg_id: String,
+    parent_id: String,
     display_name: String,
     tx_type: String,
     installed_after: bool,
     refresh_detail: bool,
+    refresh_extensions: bool,
     saved_pkg: Option<SavedPkgData>,
     store: TxStore,
     proxy_arc: Arc<Mutex<Option<ArcDaemonProxy<'static>>>>,
@@ -233,6 +238,7 @@ pub fn begin_transaction(
         s.push(TrackedTx {
             id: String::new(),
             pkg_id: pkg_id.clone(),
+            parent_id: parent_id.clone(),
             name: display_name.clone(),
             icon: None,
             progress: 0.0,
@@ -241,6 +247,7 @@ pub fn begin_transaction(
             error: String::new(),
             installed_after,
             refresh_detail,
+            refresh_extensions,
             saved_pkg,
         });
         s.len() - 1
@@ -350,6 +357,7 @@ pub async fn run_signal_listener(
                             e.pkg_id.clone(),
                             e.installed_after,
                             e.refresh_detail,
+                            e.refresh_extensions,
                             success,
                             e.name.clone(),
                             e.tx_type.clone(),
@@ -362,7 +370,7 @@ pub async fn run_signal_listener(
                 push_transactions_to_ui(store.clone(), &app_weak);
                 let _ = cache_invalidate_tx.try_send(());
 
-                if let Some((pkg_id, installed_after, refresh_detail, ok, name, tx_type)) =
+                if let Some((pkg_id, installed_after, refresh_detail, refresh_extensions, ok, name, tx_type)) =
                     side_effect
                 {
                     // Detect completed AppImage installs so we can patch the transaction
@@ -408,6 +416,9 @@ pub async fn run_signal_listener(
                             }
                             if refresh_detail && app.get_current_view() == "detail" {
                                 app.invoke_detail_requested(pkg_id.clone().into());
+                            }
+                            if refresh_extensions && app.get_current_view() == "detail" {
+                                app.invoke_refresh_extensions_requested();
                             }
                             if tx_type == "update" {
                                 remove_from_available_updates(&app, &pkg_id);

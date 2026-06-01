@@ -554,6 +554,17 @@ impl ArcDaemonInterface {
         }
     }
 
+    async fn list_extensions(&self, app_id: String) -> String {
+        info!("ListExtensions: {}", app_id);
+        match self.provider.list_extensions(&app_id).await {
+            Ok(packages) => serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => {
+                error!("ListExtensions failed: {}", e);
+                "[]".to_string()
+            }
+        }
+    }
+
     async fn list_remotes(&self) -> String {
         info!("ListRemotes");
         tokio::task::spawn_blocking(FlatpakProvider::list_remotes)

@@ -60,6 +60,30 @@ fn installation_with_app(
     )))
 }
 
+// Like installation_with_app but also finds Runtime refs (extensions/addons).
+fn installation_with_ref(
+    app_id: &str,
+) -> Result<(libflatpak::Installation, libflatpak::InstalledRef), ArcError> {
+    let cancel = libflatpak::gio::Cancellable::NONE;
+    for inst in all_installations() {
+        if let Ok(r) = inst.current_installed_app(app_id, cancel) {
+            return Ok((inst, r));
+        }
+        let runtime_ref = inst
+            .list_installed_refs_by_kind(libflatpak::RefKind::Runtime, cancel)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|r| r.name().map(|n| n == app_id).unwrap_or(false));
+        if let Some(r) = runtime_ref {
+            return Ok((inst, r));
+        }
+    }
+    Err(ArcError::TransactionFailed(format!(
+        "'{}' is not installed",
+        app_id
+    )))
+}
+
 fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
     let id = r.name().map(|s| s.to_string()).unwrap_or_default();
     let name = r
@@ -185,6 +209,120 @@ impl FlatpakProvider {
         .map_err(|e| ArcError::ProviderError(e.to_string()))?
     }
 
+    pub async fn list_extensions(&self, app_id: &str) -> Result<Vec<Package>, ArcError> {
+        let app_id = app_id.to_string();
+        tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
+            let cancel = libflatpak::gio::Cancellable::NONE;
+            let prefix = format!("{}.", app_id);
+
+            fn should_filter(suffix: &str) -> bool {
+                let l = suffix.to_lowercase();
+                l.contains("debug") || l.contains("sources") || l.contains("locale")
+            }
+
+            fn fallback_name(suffix: &str) -> String {
+                let s = suffix.replace('_', " ").replace('-', " ").replace('.', " ");
+                let mut chars = s.chars();
+                match chars.next() {
+                    None => s,
+                    Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                }
+            }
+
+            // Collect installed extensions; grab appdata_name() while we have the InstalledRef
+            let mut installed_names: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
+            for inst in all_installations() {
+                for r in inst
+                    .list_installed_refs_by_kind(libflatpak::RefKind::Runtime, cancel)
+                    .unwrap_or_default()
+                {
+                    let Some(name) = r.name() else { continue };
+                    if !name.starts_with(&prefix) {
+                        continue;
+                    }
+                    let suffix = name.strip_prefix(&prefix).unwrap_or(&name);
+                    if should_filter(suffix) {
+                        continue;
+                    }
+                    let display = r
+                        .appdata_name()
+                        .map(|s| s.to_string())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| fallback_name(suffix));
+                    installed_names.insert(name.to_string(), display);
+                }
+            }
+
+            let db = AppStreamDb::get_static();
+            let mut extensions: Vec<Package> = Vec::new();
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+            for inst in all_installations() {
+                for remote in inst.list_remotes(cancel).unwrap_or_default() {
+                    let Some(remote_name) = remote.name() else { continue };
+                    for r in inst
+                        .list_remote_refs_sync(remote_name.as_str(), cancel)
+                        .unwrap_or_default()
+                    {
+                        if r.kind() != libflatpak::RefKind::Runtime {
+                            continue;
+                        }
+                        let Some(name) = r.name() else { continue };
+                        if !name.starts_with(&prefix) {
+                            continue;
+                        }
+                        if !seen.insert(name.to_string()) {
+                            continue;
+                        }
+                        let suffix = name.strip_prefix(&prefix).unwrap_or(&name);
+                        if should_filter(suffix) {
+                            continue;
+                        }
+                        let installed = installed_names.contains_key(&name.to_string());
+                        let display = installed_names
+                            .get(&name.to_string())
+                            .cloned()
+                            .or_else(|| db.find_by_id(&name).map(|e| e.name))
+                            .unwrap_or_else(|| fallback_name(suffix));
+                        extensions.push(Package {
+                            id: name.to_string(),
+                            name: display,
+                            version: r.branch().map(|s| s.to_string()).unwrap_or_default(),
+                            description: String::new(),
+                            provider: libarc::Provider::Flatpak,
+                            installed,
+                            icon_url: None,
+                            remote: Some(remote_name.to_string()),
+                            screenshots: vec![],
+                        });
+                    }
+                }
+            }
+
+            // include installed extensions not found in any remote listing
+            for (id, display) in &installed_names {
+                if !seen.contains(id) {
+                    extensions.push(Package {
+                        id: id.clone(),
+                        name: display.clone(),
+                        version: String::new(),
+                        description: String::new(),
+                        provider: libarc::Provider::Flatpak,
+                        installed: true,
+                        icon_url: None,
+                        remote: None,
+                        screenshots: vec![],
+                    });
+                }
+            }
+
+            Ok(extensions)
+        })
+        .await
+        .map_err(|e| ArcError::ProviderError(e.to_string()))?
+    }
+
     pub async fn get_app_info(&self, app_id: &str) -> Result<Option<Package>, ArcError> {
         let app_id = app_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<Option<Package>, ArcError> {
@@ -207,16 +345,23 @@ impl FlatpakProvider {
             let cancel = Some(&gio_cancel);
             let db = AppStreamDb::get_static();
 
-            // Build a list of remotes to try: primary from AppStream DB, then flathub as fallback
+            // Build a list of remotes to try: primary from AppStream DB first,
+            // then every configured remote (covers extensions which aren't in the DB)
             let primary_remote = db.find_by_id(&app_id).and_then(|e| e.remote);
 
-            let mut remotes_to_try = Vec::new();
-            if let Some(remote) = &primary_remote {
-                remotes_to_try.push(remote.clone());
+            let mut remotes_to_try: Vec<String> = Vec::new();
+            if let Some(ref r) = primary_remote {
+                remotes_to_try.push(r.clone());
             }
-            // Always try flathub as fallback if it's not the primary
-            if primary_remote.as_deref() != Some("flathub") {
-                remotes_to_try.push("flathub".to_string());
+            for inst in all_installations() {
+                for remote in inst.list_remotes(libflatpak::gio::Cancellable::NONE).unwrap_or_default() {
+                    if let Some(name) = remote.name() {
+                        let n = name.to_string();
+                        if !remotes_to_try.contains(&n) {
+                            remotes_to_try.push(n);
+                        }
+                    }
+                }
             }
 
             // Branches to try for each remote
@@ -255,17 +400,27 @@ impl FlatpakProvider {
                 let mut branch_tried = false;
                 for branch in branch_candidates {
                     branch_tried = true;
-                    let remote_ref = match inst.fetch_remote_ref_sync(
-                        &remote_name,
-                        libflatpak::RefKind::App,
-                        &app_id,
-                        None,
-                        Some(branch.as_str()),
-                        cancel,
-                    ) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            last_error = Some(ArcError::TransactionFailed(e.to_string()));
+                    // Try App kind first (normal apps), then Runtime (extensions/addons)
+                    let remote_ref = [libflatpak::RefKind::App, libflatpak::RefKind::Runtime]
+                        .into_iter()
+                        .find_map(|kind| {
+                            inst.fetch_remote_ref_sync(
+                                &remote_name,
+                                kind,
+                                &app_id,
+                                None,
+                                Some(branch.as_str()),
+                                cancel,
+                            )
+                            .ok()
+                        });
+                    let remote_ref = match remote_ref {
+                        Some(r) => r,
+                        None => {
+                            last_error = Some(ArcError::TransactionFailed(format!(
+                                "ref not found in {}/{}",
+                                remote_name, branch
+                            )));
                             continue;
                         }
                     };
@@ -759,7 +914,7 @@ impl PackageProvider for FlatpakProvider {
         let package_id = package_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
-            let (inst, installed) = installation_with_app(&package_id)?;
+            let (inst, installed) = installation_with_ref(&package_id)?;
             let full_ref = installed
                 .format_ref()
                 .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?;
@@ -779,7 +934,7 @@ impl PackageProvider for FlatpakProvider {
         let package_id = package_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
-            let (inst, installed) = installation_with_app(&package_id)?;
+            let (inst, installed) = installation_with_ref(&package_id)?;
             let full_ref = installed
                 .format_ref()
                 .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?;

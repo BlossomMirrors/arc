@@ -568,8 +568,10 @@ pub async fn load_detail(
     } else {
         raw.appimage_id.clone()
     };
+    let flatpak_id_for_extensions = raw.flatpak_id.clone();
     let _ = app_weak.upgrade_in_event_loop(move |app| {
         app.set_detail_screenshots([].as_slice().into());
+        app.set_detail_extensions([].as_slice().into());
         app.set_detail_app(crate::AppDetailData {
             id: Default::default(),
             name: raw.name.into(),
@@ -600,6 +602,36 @@ pub async fn load_detail(
         let is_busy = has_ongoing_transaction_for_package(&store, &pkg_id_for_busy_check);
         app.set_detail_busy(is_busy);
     });
+
+    if !flatpak_id_for_extensions.is_empty() {
+        let flatpak_id = flatpak_id_for_extensions;
+        let proxy_clone = proxy.clone();
+        let app_weak3 = app_weak.clone();
+        tokio::spawn(async move {
+            let extensions: Vec<libarc::Package> = if let Some(p) = &proxy_clone {
+                p.list_extensions(&flatpak_id)
+                    .await
+                    .ok()
+                    .and_then(|j| serde_json::from_str(&j).ok())
+                    .unwrap_or_default()
+            } else {
+                vec![]
+            };
+            if !extensions.is_empty() {
+                let _ = app_weak3.upgrade_in_event_loop(move |app| {
+                    let items: Vec<crate::ExtensionItem> = extensions
+                        .iter()
+                        .map(|e| crate::ExtensionItem {
+                            id: SharedString::from(e.id.as_str()),
+                            name: SharedString::from(e.name.as_str()),
+                            installed: e.installed,
+                        })
+                        .collect();
+                    app.set_detail_extensions(items.as_slice().into());
+                });
+            }
+        });
+    }
 
     if !screenshot_urls.is_empty() {
         let app_weak2 = app_weak.clone();

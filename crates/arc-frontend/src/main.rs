@@ -301,10 +301,80 @@ fn main() -> Result<()> {
 
             begin_transaction(
                 pkg_id_str,
+                String::new(),
                 display_name,
                 "install".to_string(),
                 true,
                 in_detail,
+                false,
+                None,
+                store.clone(),
+                proxy_arc.clone(),
+                app_weak.clone(),
+                rt_handle.clone(),
+            );
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+        let store = tx_store.clone();
+
+        app.on_install_extension_requested(move |pkg_id| {
+            let pkg_id_str = pkg_id.to_string();
+            let parent_id = app_weak
+                .upgrade()
+                .map(|a| a.get_detail_app().flatpak_id.to_string())
+                .unwrap_or_default();
+            let display_name = app_weak
+                .upgrade()
+                .map(|a| get_display_name(&a, &pkg_id_str))
+                .unwrap_or_else(|| pkg_id_str.clone());
+
+            begin_transaction(
+                pkg_id_str,
+                parent_id,
+                display_name,
+                "install".to_string(),
+                true,
+                false, // don't reload the detail page
+                true,  // re-fetch extensions
+                None,
+                store.clone(),
+                proxy_arc.clone(),
+                app_weak.clone(),
+                rt_handle.clone(),
+            );
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+        let store = tx_store.clone();
+
+        app.on_remove_extension_requested(move |pkg_id| {
+            let pkg_id_str = pkg_id.to_string();
+            let parent_id = app_weak
+                .upgrade()
+                .map(|a| a.get_detail_app().flatpak_id.to_string())
+                .unwrap_or_default();
+            let display_name = app_weak
+                .upgrade()
+                .map(|a| get_display_name(&a, &pkg_id_str))
+                .unwrap_or_else(|| pkg_id_str.clone());
+
+            begin_transaction(
+                pkg_id_str,
+                parent_id,
+                display_name,
+                "remove".to_string(),
+                false,
+                false, // don't reload the detail page
+                true,  // re-fetch extensions
                 None,
                 store.clone(),
                 proxy_arc.clone(),
@@ -333,10 +403,12 @@ fn main() -> Result<()> {
 
             begin_transaction(
                 pkg_id_str,
+                String::new(),
                 display_name,
                 "remove".to_string(),
                 false,
                 in_detail,
+                false,
                 None,
                 store.clone(),
                 proxy_arc.clone(),
@@ -378,10 +450,12 @@ fn main() -> Result<()> {
 
             begin_transaction(
                 pkg_id_str.clone(),
+                String::new(),
                 display_name,
                 "update".to_string(),
                 true,
                 in_detail,
+                false,
                 saved_pkg,
                 store.clone(),
                 proxy_arc.clone(),
@@ -429,9 +503,11 @@ fn main() -> Result<()> {
                 let name = pkg.name.clone();
                 begin_transaction(
                     pkg_id,
+                    String::new(),
                     name,
                     "update".to_string(),
                     true,
+                    false,
                     false,
                     Some(pkg),
                     store.clone(),
@@ -637,6 +713,46 @@ fn main() -> Result<()> {
     }
 
     {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+
+        app.on_refresh_extensions_requested(move || {
+            let flatpak_id = app_weak
+                .upgrade()
+                .map(|a| a.get_detail_app().flatpak_id.to_string())
+                .unwrap_or_default();
+            if flatpak_id.is_empty() {
+                return;
+            }
+            let proxy = get_proxy(&proxy_arc);
+            let app_weak2 = app_weak.clone();
+            rt_handle.spawn(async move {
+                let extensions: Vec<libarc::Package> = if let Some(p) = &proxy {
+                    p.list_extensions(&flatpak_id)
+                        .await
+                        .ok()
+                        .and_then(|j| serde_json::from_str(&j).ok())
+                        .unwrap_or_default()
+                } else {
+                    vec![]
+                };
+                let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                    let items: Vec<crate::ExtensionItem> = extensions
+                        .iter()
+                        .map(|e| crate::ExtensionItem {
+                            id: slint::SharedString::from(e.id.as_str()),
+                            name: slint::SharedString::from(e.name.as_str()),
+                            installed: e.installed,
+                        })
+                        .collect();
+                    app.set_detail_extensions(items.as_slice().into());
+                });
+            });
+        });
+    }
+
+    {
         let settings = settings.clone();
         app.on_save_settings(
             move |preferred, ignore_native_pref, auto_updates, concurrent_downloads| {
@@ -806,9 +922,11 @@ fn main() -> Result<()> {
 
                     begin_transaction(
                         url3,
+                        String::new(),
                         title,
                         "flatpakref".to_string(),
                         true,
+                        false,
                         false,
                         None,
                         store2.clone(),
@@ -943,9 +1061,11 @@ fn main() -> Result<()> {
                 app.on_install_file_distrobox_requested(move || {
                     begin_transaction(
                         fp.clone(),
+                        String::new(),
                         pn_distrobox.clone(),
                         "install".to_string(),
                         true,
+                        false,
                         false,
                         None,
                         store2.clone(),
@@ -969,9 +1089,11 @@ fn main() -> Result<()> {
                 app.on_install_file_appimage_requested(move || {
                     begin_transaction(
                         fp.clone(),
+                        String::new(),
                         pn.clone(),
                         "install".to_string(),
                         true,
+                        false,
                         false,
                         None,
                         store2.clone(),
@@ -995,9 +1117,11 @@ fn main() -> Result<()> {
                 app.on_install_file_bundle_requested(move || {
                     begin_transaction(
                         fp.clone(),
+                        String::new(),
                         fn_.clone(),
                         "bundle".to_string(),
                         true,
+                        false,
                         false,
                         None,
                         store2.clone(),

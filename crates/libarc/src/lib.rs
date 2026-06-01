@@ -34,6 +34,7 @@ pub trait ArcDaemon {
     async fn refresh_cache(&self) -> zbus::Result<bool>;
     async fn run_package(&self, package_id: &str) -> zbus::Result<String>;
     async fn cancel_transaction(&self, transaction_id: &str) -> zbus::Result<bool>;
+    async fn list_extensions(&self, app_id: &str) -> zbus::Result<String>;
     async fn list_remotes(&self) -> zbus::Result<String>;
     async fn add_remote(&self, name: &str, url: &str) -> zbus::Result<bool>;
     async fn remove_remote(&self, name: &str) -> zbus::Result<bool>;
