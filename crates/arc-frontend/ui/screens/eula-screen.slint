@@ -1,0 +1,133 @@
+import { VerticalBox, Button } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
+import { AppDetailData } from "../types.slint";
+import { Badge } from "../components/badge.slint";
+
+export component EulaScreen inherits Rectangle {
+    in property <AppDetailData> detail-app;
+
+    callback confirmed();
+    callback cancelled();
+    callback open-url-requested(string);
+
+    VerticalBox {
+        alignment: center;
+        padding: 48px;
+        spacing: 20px;
+
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 80px;
+                height: 80px;
+                border-radius: 16px;
+                background: #80808012;
+                border-width: 1px;
+                border-color: #80808025;
+
+                Image {
+                    source: root.detail-app.icon;
+                    width: 64px;
+                    height: 64px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    image-fit: contain;
+                }
+            }
+        }
+
+        Text {
+            text: "License Agreement";
+            font-size: 20px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.detail-app.name + " requires you to accept its End User License Agreement before installing.";
+            font-size: 13px;
+            color: Palette.foreground.transparentize(0.25);
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+
+        if root.detail-app.eula-url != "": HorizontalLayout {
+            alignment: center;
+
+            Rectangle {
+                height: 32px;
+                width: eula-label.preferred-width + 24px;
+                border-radius: 8px;
+                background: eula-ta.has-hover ? #80808025 : #80808015;
+                border-width: 1px;
+                border-color: #80808030;
+
+                eula-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.open-url-requested(root.detail-app.eula-url);
+                    }
+                }
+
+                eula-label := Text {
+                    text: "Read License Agreement →";
+                    font-size: 12px;
+                    color: #3b82f6;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: center;
+
+            Rectangle {
+                width: 120px;
+                height: 36px;
+                border-radius: 8px;
+                background: cancel-ta.has-hover ? #80808025 : #80808015;
+                border-width: 1px;
+                border-color: #80808030;
+
+                cancel-ta := TouchArea {
+                    clicked => {
+                        root.cancelled();
+                    }
+                }
+
+                Text {
+                    text: "Cancel";
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: Palette.foreground.transparentize(0.2);
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle {
+                width: 120px;
+                height: 36px;
+                border-radius: 8px;
+                background: accept-ta.has-hover ? #2563eb : #3b82f6;
+
+                accept-ta := TouchArea {
+                    clicked => {
+                        root.confirmed();
+                    }
+                }
+
+                Text {
+                    text: "Accept & Install";
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: white;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

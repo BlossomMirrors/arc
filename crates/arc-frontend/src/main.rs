@@ -753,6 +753,53 @@ fn main() -> Result<()> {
     }
 
     {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt.handle().clone();
+        let store = tx_store.clone();
+
+        app.on_eula_confirmed(move || {
+            let (pkg_id, display_name, parent_id) = app_weak
+                .upgrade()
+                .map(|a| {
+                    let d = a.get_detail_app();
+                    (d.flatpak_id.to_string(), d.name.to_string(), String::new())
+                })
+                .unwrap_or_default();
+            if pkg_id.is_empty() {
+                return;
+            }
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_current_view("detail".into());
+            }
+            begin_transaction(
+                pkg_id,
+                parent_id,
+                display_name,
+                "install".to_string(),
+                true,
+                true,
+                false,
+                None,
+                store.clone(),
+                proxy_arc.clone(),
+                app_weak.clone(),
+                rt_handle.clone(),
+            );
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+
+        app.on_eula_cancelled(move || {
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_current_view("detail".into());
+            }
+        });
+    }
+
+    {
         let settings = settings.clone();
         app.on_save_settings(
             move |preferred, ignore_native_pref, auto_updates, concurrent_downloads| {

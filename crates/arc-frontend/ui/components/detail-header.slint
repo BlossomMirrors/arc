@@ -17,6 +17,7 @@ export component DetailHeader inherits Rectangle {
     callback cancel-requested(string);
     callback launch-requested(string);
     callback extensions-clicked();
+    callback eula-requested();
 
     private property <length> shared-btn-width: 90px;
     private property <length> shared-btn-height: 36px;
@@ -177,7 +178,9 @@ export component DetailHeader inherits Rectangle {
                         border-color: #80808030;
 
                         ext-icon-ta := TouchArea {
-                            clicked => { root.extensions-clicked(); }
+                            clicked => {
+                                root.extensions-clicked();
+                            }
                         }
 
                         Text {
@@ -198,6 +201,8 @@ export component DetailHeader inherits Rectangle {
                         clicked => {
                             if root.btn-is-installed {
                                 root.remove-requested(root.btn-active-id);
+                            } else if root.detail-app.eula-url != "" {
+                                root.eula-requested();
                             } else {
                                 root.install-requested(root.btn-active-id);
                             }
@@ -211,7 +216,9 @@ export component DetailHeader inherits Rectangle {
                         background: run-ta.has-hover ? #22c55e : #16a34a;
 
                         run-ta := TouchArea {
-                            clicked => { root.launch-requested(root.btn-active-id); }
+                            clicked => {
+                                root.launch-requested(root.btn-active-id);
+                            }
                         }
 
                         run-label := Text {
@@ -232,7 +239,9 @@ export component DetailHeader inherits Rectangle {
                     background: cancel-detail-ta.has-hover ? #ff33b0 : #e91e90;
 
                     cancel-detail-ta := TouchArea {
-                        clicked => { root.cancel-requested(root.detail-transaction-id); }
+                        clicked => {
+                            root.cancel-requested(root.detail-transaction-id);
+                        }
                     }
 
                     cancel-detail-label := Text {

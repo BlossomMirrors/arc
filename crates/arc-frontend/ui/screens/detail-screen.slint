@@ -22,6 +22,7 @@ export component DetailScreen inherits Rectangle {
     callback open-url-requested(string);
     callback install-extension-requested(string);
     callback remove-extension-requested(string);
+    callback eula-requested();
 
     private property <bool> lightbox-visible: false;
     private property <int> lightbox-index: 0;
@@ -69,6 +70,9 @@ export component DetailScreen inherits Rectangle {
                 }
                 extensions-clicked => {
                     root.extensions-popup-visible = true;
+                }
+                eula-requested => {
+                    root.eula-requested();
                 }
             }
 

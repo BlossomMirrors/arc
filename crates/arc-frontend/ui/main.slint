@@ -6,7 +6,10 @@ import { HomeScreen } from "screens/home-screen.slint";
 import { PackageListScreen } from "screens/package-list-screen.slint";
 import { DetailScreen } from "screens/detail-screen.slint";
 import { InstallFileScreen } from "screens/install-file-screen.slint";
-import { InstallFlatpakrefScreen } from "screens/install-flatpakref-screen.slint";
+import {
+    InstallFlatpakrefScreen,
+} from "screens/install-flatpakref-screen.slint";
+import { EulaScreen } from "screens/eula-screen.slint";
 import { AddFlatpakRepoScreen } from "screens/add-flatpakrepo-screen.slint";
 import { SettingsScreen } from "screens/settings-screen.slint";
 import { DownloadManagerScreen } from "screens/download-manager-screen.slint";
@@ -114,6 +117,8 @@ export component AppWindow inherits Window {
     callback install-file-cancelled();
     callback install-flatpakref-confirmed();
     callback install-flatpakref-cancelled();
+    callback eula-confirmed();
+    callback eula-cancelled();
     callback open-url-requested(string);
     callback launch-requested(string);
     callback install-extension-requested(string);
@@ -238,6 +243,10 @@ export component AppWindow inherits Window {
                 remove-extension-requested(id) => {
                     root.remove-extension-requested(id);
                 }
+                eula-requested => {
+                    root.prev-view = root.current-view;
+                    root.current-view = "eula";
+                }
             }
 
             if root.current-view == "downloads": DownloadManagerScreen {
@@ -279,11 +288,21 @@ export component AppWindow inherits Window {
                 install-file-flatpak-name: root.install-file-flatpak-name;
                 install-file-is-appimage: root.install-file-is-appimage;
                 install-file-is-flatpak-bundle: root.install-file-is-flatpak-bundle;
-                distrobox-requested => { root.install-file-distrobox-requested(); }
-                appimage-requested => { root.install-file-appimage-requested(); }
-                flatpak-requested => { root.install-file-flatpak-requested(); }
-                bundle-requested => { root.install-file-bundle-requested(); }
-                cancelled => { root.install-file-cancelled(); }
+                distrobox-requested => {
+                    root.install-file-distrobox-requested();
+                }
+                appimage-requested => {
+                    root.install-file-appimage-requested();
+                }
+                flatpak-requested => {
+                    root.install-file-flatpak-requested();
+                }
+                bundle-requested => {
+                    root.install-file-bundle-requested();
+                }
+                cancelled => {
+                    root.install-file-cancelled();
+                }
             }
 
             if root.current-view == "add-repo": AddFlatpakRepoScreen {
@@ -291,8 +310,12 @@ export component AppWindow inherits Window {
                 height: parent.height;
                 repo-title: root.add-repo-title;
                 repo-url: root.add-repo-url;
-                confirmed => { root.add-repo-confirmed(); }
-                cancelled => { root.add-repo-cancelled(); }
+                confirmed => {
+                    root.add-repo-confirmed();
+                }
+                cancelled => {
+                    root.add-repo-cancelled();
+                }
             }
 
             if root.current-view == "install-flatpakref": InstallFlatpakrefScreen {
@@ -309,6 +332,21 @@ export component AppWindow inherits Window {
                 }
             }
 
+            if root.current-view == "eula": EulaScreen {
+                width: parent.width;
+                height: parent.height;
+                detail-app: root.detail-app;
+                confirmed => {
+                    root.eula-confirmed();
+                }
+                cancelled => {
+                    root.eula-cancelled();
+                }
+                open-url-requested(url) => {
+                    root.open-url-requested(url);
+                }
+            }
+
             if root.current-view == "settings": SettingsScreen {
                 width: parent.width;
                 height: parent.height;
@@ -318,15 +356,22 @@ export component AppWindow inherits Window {
                 settings-concurrent-downloads <=> root.settings-concurrent-downloads;
                 settings-remotes <=> root.settings-remotes;
                 settings-remotes-loading <=> root.settings-remotes-loading;
-                back-clicked => { root.current-view = root.prev-view; }
+                back-clicked => {
+                    root.current-view = root.prev-view;
+                }
                 save-settings(preferred, ignore, auto_upd, concur) => {
                     root.save-settings(preferred, ignore, auto_upd, concur);
                 }
-                load-remotes => { root.load-remotes(); }
-                add-remote(name, url) => { root.add-remote(name, url); }
-                remove-remote(name) => { root.remove-remote(name); }
+                load-remotes => {
+                    root.load-remotes();
+                }
+                add-remote(name, url) => {
+                    root.add-remote(name, url);
+                }
+                remove-remote(name) => {
+                    root.remove-remote(name);
+                }
             }
         }
-
     }
 }

@@ -48,6 +48,7 @@ pub struct RawDetailData {
     pub appimage_installed: bool,
     pub verified: bool,
     pub license: String,
+    pub eula_url: String,
     pub homepage_url: String,
     pub content_rating: String,
 }
@@ -304,7 +305,11 @@ pub async fn load_package_icons(pkgs: Vec<libarc::Package>) -> Vec<RawPackage> {
                     }
                 }
                 Provider::AppImage => {
-                    let stem = pkg.id.strip_prefix("appimage:").unwrap_or(&pkg.id).to_string();
+                    let stem = pkg
+                        .id
+                        .strip_prefix("appimage:")
+                        .unwrap_or(&pkg.id)
+                        .to_string();
                     let icon_url = pkg.icon_url.clone();
                     tokio::task::spawn_blocking(move || {
                         icons::load_appimage_icon(icon_url.as_deref(), &stem)
@@ -345,27 +350,26 @@ pub async fn load_detail(
         .map(|a| a.name.clone())
         .unwrap_or_else(|| id.split(';').next().unwrap_or(&id).to_string());
 
-    let (search_pkgs, installed_pkgs): (Vec<Package>, Vec<Package>) =
-        if let Some(ref p) = proxy {
-            tokio::join!(
-                async {
-                    p.search(&app_name)
-                        .await
-                        .ok()
-                        .and_then(|j| serde_json::from_str(&j).ok())
-                        .unwrap_or_default()
-                },
-                async {
-                    p.list_installed()
-                        .await
-                        .ok()
-                        .and_then(|j| serde_json::from_str(&j).ok())
-                        .unwrap_or_default()
-                }
-            )
-        } else {
-            (vec![], vec![])
-        };
+    let (search_pkgs, installed_pkgs): (Vec<Package>, Vec<Package>) = if let Some(ref p) = proxy {
+        tokio::join!(
+            async {
+                p.search(&app_name)
+                    .await
+                    .ok()
+                    .and_then(|j| serde_json::from_str(&j).ok())
+                    .unwrap_or_default()
+            },
+            async {
+                p.list_installed()
+                    .await
+                    .ok()
+                    .and_then(|j| serde_json::from_str(&j).ok())
+                    .unwrap_or_default()
+            }
+        )
+    } else {
+        (vec![], vec![])
+    };
 
     let name_lower = app_name.to_lowercase();
     let all_pkgs: Vec<&Package> = search_pkgs.iter().chain(installed_pkgs.iter()).collect();
@@ -475,7 +479,10 @@ pub async fn load_detail(
             .await
             .unwrap_or(None)
     } else if !appimage_id.is_empty() {
-        let stem = appimage_id.strip_prefix("appimage:").unwrap_or(&appimage_id).to_string();
+        let stem = appimage_id
+            .strip_prefix("appimage:")
+            .unwrap_or(&appimage_id)
+            .to_string();
         let icon_url = appimage_pkg.and_then(|p| p.icon_url.clone());
         tokio::task::spawn_blocking(move || icons::load_appimage_icon(icon_url.as_deref(), &stem))
             .await
@@ -553,6 +560,10 @@ pub async fn load_detail(
             .as_ref()
             .and_then(|a| a.license.clone())
             .unwrap_or_default(),
+        eula_url: appstream_info
+            .as_ref()
+            .and_then(|a| a.eula_url.clone())
+            .unwrap_or_default(),
         homepage_url: appstream_info
             .as_ref()
             .and_then(|a| a.homepage_url.clone())
@@ -592,9 +603,13 @@ pub async fn load_detail(
             native_installed: raw.native_installed,
             lutris_installed: raw.lutris_installed,
             appimage_installed: raw.appimage_installed,
-            installed: raw.flatpak_installed || raw.native_installed || raw.lutris_installed || raw.appimage_installed,
+            installed: raw.flatpak_installed
+                || raw.native_installed
+                || raw.lutris_installed
+                || raw.appimage_installed,
             verified: raw.verified,
             license: raw.license.into(),
+            eula_url: raw.eula_url.into(),
             homepage_url: raw.homepage_url.into(),
             content_rating: raw.content_rating.into(),
         });
