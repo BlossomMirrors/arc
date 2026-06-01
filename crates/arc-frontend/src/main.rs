@@ -44,6 +44,9 @@ fn main() -> Result<()> {
     if let Some(icon) = icons::load_ui_icon("settings-configure") {
         app.set_icon_settings(icon.to_slint_image());
     }
+    if let Some(icon) = icons::load_ui_icon("user-trash-symbolic") {
+        app.set_icon_trash(icon.to_slint_image());
+    }
 
     let proxy_opt: Arc<Mutex<Option<ArcDaemonProxy<'static>>>> =
         Arc::new(Mutex::new(proxy_result.ok()));

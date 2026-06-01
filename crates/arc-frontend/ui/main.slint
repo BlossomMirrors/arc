@@ -94,6 +94,7 @@ export component AppWindow inherits Window {
     in-out property <image> icon-home;
     in-out property <image> icon-search;
     in-out property <image> icon-settings;
+    in-out property <image> icon-trash;
 
     callback detail-requested(string);
     callback search-requested(string);
@@ -190,6 +191,7 @@ export component AppWindow inherits Window {
                 packages: root.packages;
                 is-loading: root.is-loading;
                 current-view: root.current-view;
+                icon-trash: root.icon-trash;
                 detail-requested(id) => {
                     root.prev-view = root.current-view;
                     root.detail-requested(id);

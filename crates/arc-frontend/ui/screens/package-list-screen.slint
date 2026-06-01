@@ -1,10 +1,12 @@
-import { ListView, HorizontalBox, VerticalBox, Button } from "std-widgets.slint";
+import { ListView, VerticalBox } from "std-widgets.slint";
+import { Palette, HorizontalBox } from "std-widgets.slint";
 import { PackageItem } from "../types.slint";
 
 export component PackageListScreen inherits Rectangle {
     in property <[PackageItem]> packages;
     in property <bool> is-loading;
     in property <string> current-view;
+    in property <image> icon-trash;
 
     callback detail-requested(string);
     callback install-requested(string);
@@ -13,68 +15,143 @@ export component PackageListScreen inherits Rectangle {
 
     if root.is-loading: VerticalBox {
         alignment: center;
-        Text { text: "Loading..."; horizontal-alignment: center; }
+        Text {
+            text: "Loading...";
+            horizontal-alignment: center;
+        }
     }
 
     if !root.is-loading && root.packages.length == 0: VerticalBox {
         alignment: center;
         Text {
-            text: root.current-view == "search"
-                ? "No packages found.\nSearch for an application to get started."
-                : (root.current-view == "updates" ? "Everything is up to date." : "No applications installed.");
+            text: root.current-view == "search" ? "No packages found.\nSearch for an application to get started." : (root.current-view == "updates" ? "Everything is up to date." : "No applications installed.");
             horizontal-alignment: center;
+            color: Palette.foreground.transparentize(0.4);
         }
     }
 
     if !root.is-loading && root.packages.length > 0: ListView {
         for pkg[i] in root.packages: Rectangle {
-            height: 56px;
+            height: i == 0 ? 84px : 72px;
 
-            TouchArea {
-                clicked => {
-                    if root.current-view != "updates" {
-                        root.detail-requested(pkg.id);
+            card := Rectangle {
+                x: 16px;
+                y: i == 0 ? 17px : 5px;
+                width: parent.width - 32px;
+                height: 62px;
+                border-radius: 10px;
+                background: row-ta.has-hover ? #80808028 : #80808016;
+                border-width: 1px;
+                border-color: row-ta.has-hover ? #80808040 : #80808028;
+
+                row-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        if root.current-view != "updates" {
+                            root.detail-requested(pkg.id);
+                        }
                     }
                 }
-            }
 
-            HorizontalBox {
-                padding: 8px;
-                padding-left: 20px;
-                padding-right: 20px;
-                spacing: 10px;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 12px;
 
-                Image {
-                    source: pkg.icon;
-                    width: 40px;
-                    height: 40px;
-                    vertical-alignment: center;
-                }
+                    VerticalLayout {
+                        alignment: center;
 
-                VerticalBox {
-                    horizontal-stretch: 1;
-                    alignment: center;
-                    spacing: 2px;
-                    Text { text: pkg.name != "" ? pkg.name : pkg.id; font-weight: 600; overflow: elide; }
-                    Text { text: pkg.description; font-size: 11px; overflow: elide; }
-                }
+                        // Icon
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            border-radius: 8px;
+                            background: #80808015;
+                            border-width: 1px;
+                            border-color: #80808020;
 
-                Text {
-                    text: pkg.version;
-                    min-width: 80px;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
+                            Image {
+                                source: pkg.icon;
+                                width: 32px;
+                                height: 32px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                image-fit: contain;
+                            }
+                        }
+                    }
 
-                Button {
-                    text: root.current-view == "updates" ? "Update" : (pkg.installed ? "Remove" : "Install");
-                    clicked => {
-                        if root.current-view == "updates" {
-                            root.update-requested(pkg.id);
-                        } else if pkg.installed {
-                            root.remove-requested(pkg.id);
-                        } else {
-                            root.install-requested(pkg.id);
+                    // Name + description
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: pkg.name != "" ? pkg.name : pkg.id;
+                            font-size: 13px;
+                            font-weight: 600;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            text: pkg.description;
+                            font-size: 11px;
+                            color: Palette.foreground.transparentize(0.45);
+                            overflow: elide;
+                        }
+                    }
+
+                    // Version
+                    Text {
+                        text: pkg.version;
+                        font-size: 11px;
+                        color: Palette.foreground.transparentize(0.5);
+                        vertical-alignment: center;
+                        horizontal-alignment: right;
+                        min-width: 60px;
+                    }
+
+                    // Action button
+                    VerticalLayout {
+                        alignment: center;
+
+                        Rectangle {
+                            width: pkg.installed && root.current-view != "updates" ? 30px : 80px;
+                            height: 30px;
+                            border-radius: 7px;
+                            background: pkg.installed ? (action-ta.has-hover ? #dc2626 : #ef4444) : (action-ta.has-hover ? #80808035 : #80808020);
+                            border-width: pkg.installed ? 0px : 1px;
+                            border-color: #80808040;
+
+                            action-ta := TouchArea {
+                                clicked => {
+                                    if root.current-view == "updates" {
+                                        root.update-requested(pkg.id);
+                                    } else if pkg.installed {
+                                        root.remove-requested(pkg.id);
+                                    } else {
+                                        root.install-requested(pkg.id);
+                                    }
+                                }
+                            }
+
+                            if pkg.installed && root.current-view != "updates": Image {
+                                source: root.icon-trash;
+                                width: 14px;
+                                height: 14px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                colorize: white;
+                            }
+
+                            if !pkg.installed || root.current-view == "updates": Text {
+                                text: root.current-view == "updates" ? "Update" : "Install";
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: Palette.foreground.transparentize(0.1);
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
                         }
                     }
                 }

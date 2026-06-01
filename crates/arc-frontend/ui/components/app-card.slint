@@ -13,20 +13,34 @@ export component AppCard inherits Rectangle {
     border-color: #00000022;
 
     TouchArea {
-        clicked => { root.clicked(root.card.id); }
+        clicked => {
+            root.clicked(root.card.id);
+        }
     }
 
     VerticalBox {
         alignment: center;
-        padding: root.is-small ? 8px : 12px;
-        spacing: root.is-small ? 4px : 6px;
+        padding: root.is-small ? 12px : 16px;
+        spacing: root.is-small ? 8px : 10px;
 
         HorizontalBox {
             alignment: center;
-            Image {
-                source: root.card.icon;
-                width: root.is-small ? 32px : 64px;
-                height: root.is-small ? 32px : 64px;
+            Rectangle {
+                width: root.is-small ? 42px : 76px;
+                height: root.is-small ? 42px : 76px;
+                border-radius: root.is-small ? 10px : 16px;
+                background: #80808012;
+                border-width: 1px;
+                border-color: #80808025;
+
+                Image {
+                    source: root.card.icon;
+                    width: root.is-small ? 30px : 60px;
+                    height: root.is-small ? 30px : 60px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    image-fit: contain;
+                }
             }
         }
 
