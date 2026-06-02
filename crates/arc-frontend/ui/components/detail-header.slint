@@ -11,6 +11,12 @@ export component DetailHeader inherits Rectangle {
     in property <string> settings-preferred;
     in property <bool> has-extensions: false;
     in property <image> icon-trash;
+    in property <string> tr-back: "Back";
+    in property <string> tr-install: "Install";
+    in property <string> tr-run: "Run";
+    in property <string> tr-cancel: "Cancel";
+    in property <string> tr-working: "Working...";
+    in property <string> tr-verified: "Verified developer";
 
     callback back-clicked();
     callback install-requested(string);
@@ -71,7 +77,7 @@ export component DetailHeader inherits Rectangle {
                     }
 
                     Text {
-                        text: "Back";
+                        text: root.tr-back;
                         font-size: 13px;
                         vertical-alignment: center;
                         color: Palette.foreground.transparentize(0.2);
@@ -154,7 +160,7 @@ export component DetailHeader inherits Rectangle {
                             tt-text := Text {
                                 x: 6px;
                                 y: (parent.height - self.preferred-height) / 2;
-                                text: "Verified developer";
+                                text: root.tr-verified;
                                 font-size: 11px;
                                 color: Palette.background;
                             }
@@ -263,7 +269,7 @@ export component DetailHeader inherits Rectangle {
                         }
 
                         Text {
-                            text: "Install";
+                            text: root.tr-install;
                             font-size: 13px;
                             font-weight: 600;
                             color: root.btn-active-id == "" ?
@@ -287,7 +293,7 @@ export component DetailHeader inherits Rectangle {
                         }
 
                         run-label := Text {
-                            text: "Run";
+                            text: root.tr-run;
                             font-size: 13px;
                             font-weight: 600;
                             color: white;
@@ -310,7 +316,7 @@ export component DetailHeader inherits Rectangle {
                     }
 
                     cancel-detail-label := Text {
-                        text: "Cancel";
+                        text: root.tr-cancel;
                         font-size: 13px;
                         font-weight: 600;
                         color: white;
@@ -320,7 +326,7 @@ export component DetailHeader inherits Rectangle {
                 }
 
                 if root.detail-busy && root.detail-app.flatpak-id == "" && root.detail-app.appimage-id == "": Text {
-                    text: "Working...";
+                    text: root.tr-working;
                     font-size: 13px;
                     color: Palette.foreground.transparentize(0.4);
                     vertical-alignment: center;

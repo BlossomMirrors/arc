@@ -3,6 +3,7 @@ import { AppCardData } from "../types.slint";
 
 export component Carousel inherits Rectangle {
     in property <[AppCardData]> items;
+    in property <string> tr-installed: "Installed";
     callback item-clicked(string);
 
     height: 192px;
@@ -24,6 +25,7 @@ export component Carousel inherits Rectangle {
             width: 180px;
             height: 192px;
             card: app;
+            tr-installed: root.tr-installed;
             clicked(id) => { root.item-clicked(id); }
         }
     }

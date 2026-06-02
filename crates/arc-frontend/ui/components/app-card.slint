@@ -5,6 +5,7 @@ import { Badge } from "badge.slint";
 export component AppCard inherits Rectangle {
     in property <AppCardData> card;
     in property <bool> is-small: false;
+    in property <string> tr-installed: "Installed";
     callback clicked(string);
 
     border-radius: 10px;
@@ -68,7 +69,7 @@ export component AppCard inherits Rectangle {
             Badge {
                 has-icon: true;
                 icon: @image-url("../../assets/check.svg");
-                label: "Installed";
+                label: root.tr-installed;
             }
         }
     }

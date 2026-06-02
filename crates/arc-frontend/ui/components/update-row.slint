@@ -3,6 +3,7 @@ import { PackageItem } from "../types.slint";
 
 export component UpdateRow inherits Rectangle {
     in property <PackageItem> item;
+    in property <string> tr-update: "Update";
     callback update-clicked(string);
 
     height: 64px;
@@ -74,7 +75,7 @@ export component UpdateRow inherits Rectangle {
                 }
 
                 btn-label := Text {
-                    text: "Update";
+                    text: root.tr-update;
                     font-size: 12px;
                     font-weight: 600;
                     color: white;

@@ -1,0 +1,251 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en\n"
+
+msgid "Loading..."
+msgstr ""
+
+msgid "Loading…"
+msgstr ""
+
+msgid "Back"
+msgstr ""
+
+msgid "Install"
+msgstr ""
+
+msgid "Remove"
+msgstr ""
+
+msgid "Update"
+msgstr ""
+
+msgid "Cancel"
+msgstr ""
+
+msgid "Run"
+msgstr ""
+
+msgid "Working..."
+msgstr ""
+
+msgid "Verified developer"
+msgstr ""
+
+msgid "Extensions"
+msgstr ""
+
+msgid "Website"
+msgstr ""
+
+msgid "Installed"
+msgstr ""
+
+msgid "Search for applications..."
+msgstr ""
+
+msgid "No packages found.\nSearch for an application to get started."
+msgstr ""
+
+msgid "Everything is up to date."
+msgstr ""
+
+msgid "No applications installed."
+msgstr ""
+
+msgid "Discover Great Software"
+msgstr ""
+
+msgid "Install apps from Flathub and your system repositories"
+msgstr ""
+
+msgid "Popular"
+msgstr ""
+
+msgid "Recently Added"
+msgstr ""
+
+msgid "Categories"
+msgstr ""
+
+msgid "Downloads & Updates"
+msgstr ""
+
+msgid "Checking..."
+msgstr ""
+
+msgid "Check for Updates"
+msgstr ""
+
+msgid "Active ("
+msgstr ""
+
+msgid "Pending ("
+msgstr ""
+
+msgid "Completed ("
+msgstr ""
+
+msgid "Clear All"
+msgstr ""
+
+msgid "Updates Available ("
+msgstr ""
+
+msgid "Update All"
+msgstr ""
+
+msgid "No active downloads"
+msgstr ""
+
+msgid "Installs and updates will appear here"
+msgstr ""
+
+msgid "Removed"
+msgstr ""
+
+msgid "Failed"
+msgstr ""
+
+msgid "Queued"
+msgstr ""
+
+msgid "Removing"
+msgstr ""
+
+msgid "Updating"
+msgstr ""
+
+msgid "Installing"
+msgstr ""
+
+msgid "License Agreement"
+msgstr ""
+
+msgid " requires you to accept its End User License Agreement before installing."
+msgstr ""
+
+msgid "Read License Agreement →"
+msgstr ""
+
+msgid "Accept & Install"
+msgstr ""
+
+msgid "Install Flatpak Bundle"
+msgstr ""
+
+msgid "This will install the bundled Flatpak application on your system."
+msgstr ""
+
+msgid "Install AppImage"
+msgstr ""
+
+msgid "This will register the AppImage so it appears in your app launcher."
+msgstr ""
+
+msgid "Install Package"
+msgstr ""
+
+msgid "Choose how you'd like to install this package file."
+msgstr ""
+
+msgid "Install Bundle"
+msgstr ""
+
+msgid "Install as AppImage"
+msgstr ""
+
+msgid "Install via Distrobox"
+msgstr ""
+
+msgid " from Arc Software instead"
+msgstr ""
+
+msgid "Searching Flathub for an alternative..."
+msgstr ""
+
+msgid "Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust."
+msgstr ""
+
+msgid "Add Repository"
+msgstr ""
+
+msgid "Unknown repository"
+msgstr ""
+
+msgid "This will add the repository to your Flatpak user installation and make its applications available to install."
+msgstr ""
+
+msgid "Adding a third-party repository gives it the ability to distribute software to your system. Only add repositories from sources you trust."
+msgstr ""
+
+msgid "Contains repository"
+msgstr ""
+
+msgid "Install Application"
+msgstr ""
+
+msgid "Settings"
+msgstr ""
+
+msgid "GENERAL"
+msgstr ""
+
+msgid "Auto-updates"
+msgstr ""
+
+msgid "Automatically update installed apps in the background"
+msgstr ""
+
+msgid "Security warnings"
+msgstr ""
+
+msgid "Show warnings when installing third-party software or adding repositories"
+msgstr ""
+
+msgid "DOWNLOADS"
+msgstr ""
+
+msgid "Concurrent downloads"
+msgstr ""
+
+msgid "Maximum number of simultaneous downloads (1-16)"
+msgstr ""
+
+msgid "REPOSITORIES"
+msgstr ""
+
+msgid "Protected"
+msgstr ""
+
+msgid "ADD REPOSITORY"
+msgstr ""
+
+msgid "Name"
+msgstr ""
+
+msgid "URL"
+msgstr ""
+
+msgid "DANGER ZONE"
+msgstr ""
+
+msgid "Force updates"
+msgstr ""
+
+msgid "Runs flatpak update -y directly, bypassing the daemon"
+msgstr ""
+
+msgid "Force Update"
+msgstr ""
+
+msgid "Restart daemon"
+msgstr ""
+
+msgid "Kills the running arc-daemon and starts a fresh one in the background"
+msgstr ""
+
+msgid "Restart"
+msgstr ""

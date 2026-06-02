@@ -5,6 +5,10 @@ export component AddFlatpakRepoScreen inherits Rectangle {
     in property <string> repo-url;
 
     in property <bool> show-security-warning: true;
+    in property <string> tr-add-repo: "Add Repository";
+    in property <string> tr-unknown-repo: "Unknown repository";
+    in property <string> tr-repo-add-desc: "This will add the repository to your Flatpak user installation and make its applications available to install.";
+    in property <string> tr-repo-warning: "Adding a third-party repository gives it the ability to distribute software to your system. Only add repositories from sources you trust.";
 
     callback confirmed();
     callback cancelled();
@@ -37,14 +41,14 @@ export component AddFlatpakRepoScreen inherits Rectangle {
         }
 
         Text {
-            text: "Add Repository";
+            text: root.tr-add-repo;
             font-size: 20px;
             font-weight: 700;
             horizontal-alignment: center;
         }
 
         Text {
-            text: root.repo-title != "" ? root.repo-title : "Unknown repository";
+            text: root.repo-title != "" ? root.repo-title : root.tr-unknown-repo;
             font-size: 14px;
             font-weight: 600;
             horizontal-alignment: center;
@@ -59,7 +63,7 @@ export component AddFlatpakRepoScreen inherits Rectangle {
         }
 
         Text {
-            text: "This will add the repository to your Flatpak user installation and make its applications available to install.";
+            text: root.tr-repo-add-desc;
             font-size: 13px;
             color: Palette.foreground.transparentize(0.25);
             horizontal-alignment: center;
@@ -90,7 +94,7 @@ export component AddFlatpakRepoScreen inherits Rectangle {
                     }
 
                     Text {
-                        text: "Adding a third-party repository gives it the ability to distribute software to your system. Only add repositories from sources you trust.";
+                        text: root.tr-repo-warning;
                         font-size: 11px;
                         color: #f97316;
                         wrap: word-wrap;
@@ -117,7 +121,7 @@ export component AddFlatpakRepoScreen inherits Rectangle {
                 }
 
                 Text {
-                    text: "Add Repository";
+                    text: root.tr-add-repo;
                     font-size: 13px;
                     font-weight: 600;
                     color: white;

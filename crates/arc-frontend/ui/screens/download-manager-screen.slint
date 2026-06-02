@@ -11,6 +11,27 @@ export component DownloadManagerScreen inherits Rectangle {
     in property <bool> updates-loading: false;
     in property <bool> updates-all-queued: false;
 
+    in property <string> tr-downloads: "Downloads & Updates";
+    in property <string> tr-checking: "Checking...";
+    in property <string> tr-check-updates: "Check for Updates";
+    in property <string> tr-active-prefix: "Active (";
+    in property <string> tr-pending-prefix: "Pending (";
+    in property <string> tr-completed-prefix: "Completed (";
+    in property <string> tr-clear-all: "Clear All";
+    in property <string> tr-updates-available-prefix: "Updates Available (";
+    in property <string> tr-update-all: "Update All";
+    in property <string> tr-no-downloads: "No active downloads";
+    in property <string> tr-downloads-empty: "Installs and updates will appear here";
+    in property <string> tr-update: "Update";
+    in property <string> tr-cancel: "Cancel";
+    in property <string> tr-removed: "Removed";
+    in property <string> tr-installed: "Installed";
+    in property <string> tr-failed: "Failed";
+    in property <string> tr-queued: "Queued";
+    in property <string> tr-removing: "Removing";
+    in property <string> tr-updating: "Updating";
+    in property <string> tr-installing: "Installing";
+
     callback clear-completed-requested();
     callback update-all-requested();
     callback update-requested(string);
@@ -39,7 +60,7 @@ export component DownloadManagerScreen inherits Rectangle {
                 spacing: 12px;
 
                 Text {
-                    text: "Downloads & Updates";
+                    text: root.tr-downloads;
                     font-size: 20px;
                     font-weight: 700;
                     horizontal-stretch: 1;
@@ -62,7 +83,7 @@ export component DownloadManagerScreen inherits Rectangle {
                     }
 
                     check-label := Text {
-                        text: root.updates-loading ? "Checking..." : "Check for Updates";
+                        text: root.updates-loading ? root.tr-checking : root.tr-check-updates;
                         font-size: 12px;
                         color: root.updates-loading ? Palette.foreground.transparentize(0.5) : Palette.foreground.transparentize(0.1);
                         x: (parent.width - self.width) / 2;
@@ -82,7 +103,7 @@ export component DownloadManagerScreen inherits Rectangle {
                     padding-bottom: 8px;
 
                     Text {
-                        text: "Active (" + root.active-transactions.length + ")";
+                        text: root.tr-active-prefix + root.active-transactions.length + ")";
                         font-size: 11px;
                         font-weight: 700;
                         color: Palette.foreground.transparentize(0.4);
@@ -92,6 +113,10 @@ export component DownloadManagerScreen inherits Rectangle {
 
                 for tx[i] in root.active-transactions: TransactionRow {
                     item: tx;
+                    tr-removed: root.tr-removed; tr-installed: root.tr-installed;
+                    tr-failed: root.tr-failed; tr-queued: root.tr-queued;
+                    tr-removing: root.tr-removing; tr-updating: root.tr-updating;
+                    tr-installing: root.tr-installing; tr-cancel: root.tr-cancel;
                     cancel-clicked(id) => { root.cancel-requested(id); }
                     detail-requested(id) => { root.detail-requested(id); }
                 }
@@ -108,7 +133,7 @@ export component DownloadManagerScreen inherits Rectangle {
                     padding-bottom: 8px;
 
                     Text {
-                        text: "Pending (" + root.pending-transactions.length + ")";
+                        text: root.tr-pending-prefix + root.pending-transactions.length + ")";
                         font-size: 11px;
                         font-weight: 700;
                         color: Palette.foreground.transparentize(0.4);
@@ -118,6 +143,10 @@ export component DownloadManagerScreen inherits Rectangle {
 
                 for tx[i] in root.pending-transactions: TransactionRow {
                     item: tx;
+                    tr-removed: root.tr-removed; tr-installed: root.tr-installed;
+                    tr-failed: root.tr-failed; tr-queued: root.tr-queued;
+                    tr-removing: root.tr-removing; tr-updating: root.tr-updating;
+                    tr-installing: root.tr-installing; tr-cancel: root.tr-cancel;
                     cancel-clicked(id) => { root.cancel-requested(id); }
                     detail-requested(id) => { root.detail-requested(id); }
                 }
@@ -135,7 +164,7 @@ export component DownloadManagerScreen inherits Rectangle {
                     spacing: 12px;
 
                     Text {
-                        text: "Completed (" + root.completed-transactions.length + ")";
+                        text: root.tr-completed-prefix + root.completed-transactions.length + ")";
                         font-size: 11px;
                         font-weight: 700;
                         color: Palette.foreground.transparentize(0.4);
@@ -158,7 +187,7 @@ export component DownloadManagerScreen inherits Rectangle {
                         }
 
                         clr-label := Text {
-                            text: "Clear All";
+                            text: root.tr-clear-all;
                             font-size: 11px;
                             color: Palette.foreground.transparentize(0.3);
                             x: (parent.width - self.width) / 2;
@@ -169,6 +198,10 @@ export component DownloadManagerScreen inherits Rectangle {
 
                 for tx[i] in root.completed-transactions: TransactionRow {
                     item: tx;
+                    tr-removed: root.tr-removed; tr-installed: root.tr-installed;
+                    tr-failed: root.tr-failed; tr-queued: root.tr-queued;
+                    tr-removing: root.tr-removing; tr-updating: root.tr-updating;
+                    tr-installing: root.tr-installing; tr-cancel: root.tr-cancel;
                     detail-requested(id) => { root.detail-requested(id); }
                 }
             }
@@ -185,7 +218,7 @@ export component DownloadManagerScreen inherits Rectangle {
                     spacing: 12px;
 
                     Text {
-                        text: "Updates Available (" + root.available-updates.length + ")";
+                        text: root.tr-updates-available-prefix + root.available-updates.length + ")";
                         font-size: 11px;
                         font-weight: 700;
                         color: Palette.foreground.transparentize(0.4);
@@ -207,7 +240,7 @@ export component DownloadManagerScreen inherits Rectangle {
                         }
 
                         upd-all-label := Text {
-                            text: "Update All";
+                            text: root.tr-update-all;
                             font-size: 11px;
                             font-weight: 600;
                             color: root.updates-all-queued ? #ffffff80 : white;
@@ -219,6 +252,7 @@ export component DownloadManagerScreen inherits Rectangle {
 
                 for pkg[i] in root.available-updates: UpdateRow {
                     item: pkg;
+                    tr-update: root.tr-update;
                     update-clicked(id) => {
                         root.update-requested(id);
                     }
@@ -233,7 +267,7 @@ export component DownloadManagerScreen inherits Rectangle {
                 padding-bottom: 80px;
 
                 Text {
-                    text: "No active downloads";
+                    text: root.tr-no-downloads;
                     font-size: 16px;
                     font-weight: 600;
                     horizontal-alignment: center;
@@ -241,7 +275,7 @@ export component DownloadManagerScreen inherits Rectangle {
                 }
 
                 Text {
-                    text: "Installs and updates will appear here";
+                    text: root.tr-downloads-empty;
                     font-size: 12px;
                     horizontal-alignment: center;
                     color: Palette.foreground.transparentize(0.55);

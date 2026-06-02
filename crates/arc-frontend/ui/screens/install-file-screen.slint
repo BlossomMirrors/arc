@@ -10,6 +10,19 @@ export component InstallFileScreen inherits Rectangle {
     in property <image> icon-package;
     in property <bool> show-security-warning: true;
 
+    in property <string> tr-install-flatpak-bundle: "Install Flatpak Bundle";
+    in property <string> tr-install-flatpak-bundle-desc: "This will install the bundled Flatpak application on your system.";
+    in property <string> tr-install-appimage: "Install AppImage";
+    in property <string> tr-install-appimage-desc: "This will register the AppImage so it appears in your app launcher.";
+    in property <string> tr-install-package: "Install Package";
+    in property <string> tr-install-package-desc: "Choose how you'd like to install this package file.";
+    in property <string> tr-install-bundle: "Install Bundle";
+    in property <string> tr-install-as-appimage: "Install as AppImage";
+    in property <string> tr-install-distrobox: "Install via Distrobox";
+    in property <string> tr-install-from-suffix: " from Arc Software instead";
+    in property <string> tr-searching-flathub: "Searching Flathub for an alternative...";
+    in property <string> tr-file-security: "Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust.";
+
     callback distrobox-requested();
     callback appimage-requested();
     callback flatpak-requested();
@@ -17,10 +30,10 @@ export component InstallFileScreen inherits Rectangle {
     callback cancelled();
 
     private property <string> screen-title:
-        root.install-file-is-flatpak-bundle ? "Install Flatpak Bundle" : root.install-file-is-appimage ? "Install AppImage" : "Install Package";
+        root.install-file-is-flatpak-bundle ? root.tr-install-flatpak-bundle : root.install-file-is-appimage ? root.tr-install-appimage : root.tr-install-package;
 
     private property <string> screen-description:
-        root.install-file-is-flatpak-bundle ? "This will install the bundled Flatpak application on your system." : root.install-file-is-appimage ? "This will register the AppImage so it appears in your app launcher." : "Choose how you'd like to install this package file.";
+        root.install-file-is-flatpak-bundle ? root.tr-install-flatpak-bundle-desc : root.install-file-is-appimage ? root.tr-install-appimage-desc : root.tr-install-package-desc;
 
     VerticalLayout {
         alignment: center;
@@ -91,7 +104,7 @@ export component InstallFileScreen inherits Rectangle {
                     }
 
                     Text {
-                        text: "Install Bundle";
+                        text: root.tr-install-bundle;
                         font-size: 13px;
                         font-weight: 600;
                         color: white;
@@ -117,7 +130,7 @@ export component InstallFileScreen inherits Rectangle {
                     }
 
                     Text {
-                        text: "Install as AppImage";
+                        text: root.tr-install-as-appimage;
                         font-size: 13px;
                         font-weight: 600;
                         color: white;
@@ -143,7 +156,7 @@ export component InstallFileScreen inherits Rectangle {
                     }
 
                     Text {
-                        text: "Install via Distrobox";
+                        text: root.tr-install-distrobox;
                         font-size: 13px;
                         font-weight: 600;
                         color: white;
@@ -171,7 +184,7 @@ export component InstallFileScreen inherits Rectangle {
                     }
 
                     Text {
-                        text: "Install " + root.install-file-flatpak-name + " from Arc Software instead";
+                        text: "Install " + root.install-file-flatpak-name + root.tr-install-from-suffix;
                         font-size: 13px;
                         font-weight: 600;
                         color: Palette.foreground.transparentize(0.1);
@@ -188,7 +201,7 @@ export component InstallFileScreen inherits Rectangle {
             if !root.install-file-is-appimage && !root.install-file-is-flatpak-bundle && !root.install-file-has-flatpak && !root.install-file-flatpak-searched: HorizontalLayout {
                 alignment: center;
                 Text {
-                    text: "Searching Flathub for an alternative...";
+                    text: root.tr-searching-flathub;
                     font-size: 12px;
                     color: Palette.foreground.transparentize(0.5);
                     horizontal-alignment: center;
@@ -220,7 +233,7 @@ export component InstallFileScreen inherits Rectangle {
                     }
 
                     Text {
-                        text: "Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust.";
+                        text: root.tr-file-security;
                         font-size: 11px;
                         color: #f97316;
                         wrap: word-wrap;

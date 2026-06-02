@@ -9,6 +9,8 @@ path = "src/main.rs"
 
 [dependencies]
 libarc = { path = "../libarc" }
+tr = { version = "0.1", default-features = false }
+sys-locale = "0.3"
 slint = "1"
 zbus = { version = "5", features = ["tokio"] }
 tokio = { version = "1", features = ["full"] }
@@ -25,3 +27,4 @@ icon-loader = "0.4"
 
 [build-dependencies]
 slint-build = "1"
+include-po = "0.2"

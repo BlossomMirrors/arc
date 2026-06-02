@@ -4,6 +4,7 @@ import { AppCard } from "app-card.slint";
 // Thin wrapper PopularCard is AppCard with is-small: true.
 export component PopularCard inherits Rectangle {
     in property <AppCardData> card;
+    in property <string> tr-installed: "Installed";
     callback clicked(string);
 
     AppCard {
@@ -11,6 +12,7 @@ export component PopularCard inherits Rectangle {
         height: parent.height;
         card: root.card;
         is-small: true;
+        tr-installed: root.tr-installed;
         clicked(id) => {
             root.clicked(id);
         }

@@ -75,6 +75,90 @@ export component AppWindow inherits Window {
     in-out property <string> detail-transaction-id: "";
     in-out property <int> update-count: 0;
 
+    // Translations
+    in-out property <string> tr-install: "Install";
+    in-out property <string> tr-remove: "Remove";
+    in-out property <string> tr-update: "Update";
+    in-out property <string> tr-cancel: "Cancel";
+    in-out property <string> tr-loading: "Loading...";
+    in-out property <string> tr-installed: "Installed";
+    in-out property <string> tr-back: "Back";
+    in-out property <string> tr-run: "Run";
+    in-out property <string> tr-working: "Working...";
+    in-out property <string> tr-verified: "Verified developer";
+    in-out property <string> tr-website: "Website";
+    in-out property <string> tr-extensions: "Extensions";
+    in-out property <string> tr-restart: "Restart";
+    in-out property <string> tr-name: "Name";
+    in-out property <string> tr-url: "URL";
+    in-out property <string> tr-discover: "Discover Great Software";
+    in-out property <string> tr-discover-sub: "Install apps from Flathub and your system repositories";
+    in-out property <string> tr-popular: "Popular";
+    in-out property <string> tr-recently-added: "Recently Added";
+    in-out property <string> tr-categories: "Categories";
+    in-out property <string> tr-no-packages: "No packages found.\nSearch for an application to get started.";
+    in-out property <string> tr-up-to-date: "Everything is up to date.";
+    in-out property <string> tr-no-installed: "No applications installed.";
+    in-out property <string> tr-downloads: "Downloads & Updates";
+    in-out property <string> tr-checking: "Checking...";
+    in-out property <string> tr-check-updates: "Check for Updates";
+    in-out property <string> tr-active-prefix: "Active (";
+    in-out property <string> tr-pending-prefix: "Pending (";
+    in-out property <string> tr-completed-prefix: "Completed (";
+    in-out property <string> tr-clear-all: "Clear All";
+    in-out property <string> tr-updates-available-prefix: "Updates Available (";
+    in-out property <string> tr-update-all: "Update All";
+    in-out property <string> tr-no-downloads: "No active downloads";
+    in-out property <string> tr-downloads-empty: "Installs and updates will appear here";
+    in-out property <string> tr-removed: "Removed";
+    in-out property <string> tr-failed: "Failed";
+    in-out property <string> tr-queued: "Queued";
+    in-out property <string> tr-removing: "Removing";
+    in-out property <string> tr-updating: "Updating";
+    in-out property <string> tr-installing: "Installing";
+    in-out property <string> tr-license: "License Agreement";
+    in-out property <string> tr-eula-requires: " requires you to accept its End User License Agreement before installing.";
+    in-out property <string> tr-read-license: "Read License Agreement →";
+    in-out property <string> tr-accept-install: "Accept & Install";
+    in-out property <string> tr-install-flatpak-bundle: "Install Flatpak Bundle";
+    in-out property <string> tr-install-flatpak-bundle-desc: "This will install the bundled Flatpak application on your system.";
+    in-out property <string> tr-install-appimage: "Install AppImage";
+    in-out property <string> tr-install-appimage-desc: "This will register the AppImage so it appears in your app launcher.";
+    in-out property <string> tr-install-package: "Install Package";
+    in-out property <string> tr-install-package-desc: "Choose how you'd like to install this package file.";
+    in-out property <string> tr-install-bundle: "Install Bundle";
+    in-out property <string> tr-install-as-appimage: "Install as AppImage";
+    in-out property <string> tr-install-distrobox: "Install via Distrobox";
+    in-out property <string> tr-install-from-suffix: " from Arc Software instead";
+    in-out property <string> tr-searching-flathub: "Searching Flathub for an alternative...";
+    in-out property <string> tr-file-security: "Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust.";
+    in-out property <string> tr-add-repo: "Add Repository";
+    in-out property <string> tr-unknown-repo: "Unknown repository";
+    in-out property <string> tr-repo-add-desc: "This will add the repository to your Flatpak user installation and make its applications available to install.";
+    in-out property <string> tr-repo-warning: "Adding a third-party repository gives it the ability to distribute software to your system. Only add repositories from sources you trust.";
+    in-out property <string> tr-contains-repo: "Contains repository";
+    in-out property <string> tr-install-application: "Install Application";
+    in-out property <string> tr-settings: "Settings";
+    in-out property <string> tr-general: "GENERAL";
+    in-out property <string> tr-auto-updates: "Auto-updates";
+    in-out property <string> tr-auto-updates-desc: "Automatically update installed apps in the background";
+    in-out property <string> tr-security-warnings: "Security warnings";
+    in-out property <string> tr-security-warnings-desc: "Show warnings when installing third-party software or adding repositories";
+    in-out property <string> tr-downloads-section: "DOWNLOADS";
+    in-out property <string> tr-concurrent: "Concurrent downloads";
+    in-out property <string> tr-concurrent-desc: "Maximum number of simultaneous downloads (1-16)";
+    in-out property <string> tr-repositories: "REPOSITORIES";
+    in-out property <string> tr-loading-ellipsis: "Loading…";
+    in-out property <string> tr-protected: "Protected";
+    in-out property <string> tr-add-repo-section: "ADD REPOSITORY";
+    in-out property <string> tr-danger-zone: "DANGER ZONE";
+    in-out property <string> tr-force-updates: "Force updates";
+    in-out property <string> tr-force-updates-desc: "Runs flatpak update -y directly, bypassing the daemon";
+    in-out property <string> tr-force-update: "Force Update";
+    in-out property <string> tr-restart-daemon: "Restart daemon";
+    in-out property <string> tr-restart-daemon-desc: "Kills the running arc-daemon and starts a fresh one in the background";
+    in-out property <string> tr-search-placeholder: "Search for applications...";
+
     in-out property <[TransactionItem]> active-transactions: [];
     in-out property <[TransactionItem]> pending-transactions: [];
     in-out property <[TransactionItem]> completed-transactions: [];
@@ -149,6 +233,9 @@ export component AppWindow inherits Window {
             icon-home: root.icon-home;
             icon-search: root.icon-search;
             icon-settings: root.icon-settings;
+            tr-search-placeholder: root.tr-search-placeholder;
+            tr-installed: root.tr-installed;
+            tr-downloads: root.tr-downloads;
             search-requested(text) => {
                 root.current-view = "search";
                 root.search-requested(text);
@@ -182,6 +269,13 @@ export component AppWindow inherits Window {
                 recent-apps: root.recent-apps;
                 categories: root.categories;
                 home-loading: root.home-loading;
+                tr-loading: root.tr-loading;
+                tr-installed: root.tr-installed;
+                tr-discover: root.tr-discover;
+                tr-discover-sub: root.tr-discover-sub;
+                tr-popular: root.tr-popular;
+                tr-recently-added: root.tr-recently-added;
+                tr-categories: root.tr-categories;
                 detail-requested(id) => {
                     root.prev-view = "home";
                     root.detail-requested(id);
@@ -199,6 +293,12 @@ export component AppWindow inherits Window {
                 is-loading: root.is-loading;
                 current-view: root.current-view;
                 icon-trash: root.icon-trash;
+                tr-loading: root.tr-loading;
+                tr-no-packages: root.tr-no-packages;
+                tr-up-to-date: root.tr-up-to-date;
+                tr-no-installed: root.tr-no-installed;
+                tr-install: root.tr-install;
+                tr-update: root.tr-update;
                 detail-requested(id) => {
                     root.prev-view = root.current-view;
                     root.detail-requested(id);
@@ -227,6 +327,16 @@ export component AppWindow inherits Window {
                 detail-description-blocks: root.detail-description-blocks;
                 settings-preferred: root.settings-preferred;
                 icon-trash: root.icon-trash;
+                tr-loading: root.tr-loading;
+                tr-website: root.tr-website;
+                tr-extensions: root.tr-extensions;
+                tr-install: root.tr-install;
+                tr-remove: root.tr-remove;
+                tr-back: root.tr-back;
+                tr-run: root.tr-run;
+                tr-cancel: root.tr-cancel;
+                tr-working: root.tr-working;
+                tr-verified: root.tr-verified;
                 back-clicked => {
                     if root.prev-view == "home" {
                         root.back-to-home();
@@ -268,6 +378,26 @@ export component AppWindow inherits Window {
                 available-updates: root.available-updates;
                 updates-loading: root.updates-loading;
                 updates-all-queued: root.updates-all-queued;
+                tr-downloads: root.tr-downloads;
+                tr-checking: root.tr-checking;
+                tr-check-updates: root.tr-check-updates;
+                tr-active-prefix: root.tr-active-prefix;
+                tr-pending-prefix: root.tr-pending-prefix;
+                tr-completed-prefix: root.tr-completed-prefix;
+                tr-clear-all: root.tr-clear-all;
+                tr-updates-available-prefix: root.tr-updates-available-prefix;
+                tr-update-all: root.tr-update-all;
+                tr-no-downloads: root.tr-no-downloads;
+                tr-downloads-empty: root.tr-downloads-empty;
+                tr-update: root.tr-update;
+                tr-cancel: root.tr-cancel;
+                tr-removed: root.tr-removed;
+                tr-installed: root.tr-installed;
+                tr-failed: root.tr-failed;
+                tr-queued: root.tr-queued;
+                tr-removing: root.tr-removing;
+                tr-updating: root.tr-updating;
+                tr-installing: root.tr-installing;
                 clear-completed-requested => {
                     root.clear-completed-requested();
                 }
@@ -300,6 +430,18 @@ export component AppWindow inherits Window {
                 install-file-flatpak-name: root.install-file-flatpak-name;
                 install-file-is-appimage: root.install-file-is-appimage;
                 install-file-is-flatpak-bundle: root.install-file-is-flatpak-bundle;
+                tr-install-flatpak-bundle: root.tr-install-flatpak-bundle;
+                tr-install-flatpak-bundle-desc: root.tr-install-flatpak-bundle-desc;
+                tr-install-appimage: root.tr-install-appimage;
+                tr-install-appimage-desc: root.tr-install-appimage-desc;
+                tr-install-package: root.tr-install-package;
+                tr-install-package-desc: root.tr-install-package-desc;
+                tr-install-bundle: root.tr-install-bundle;
+                tr-install-as-appimage: root.tr-install-as-appimage;
+                tr-install-distrobox: root.tr-install-distrobox;
+                tr-install-from-suffix: root.tr-install-from-suffix;
+                tr-searching-flathub: root.tr-searching-flathub;
+                tr-file-security: root.tr-file-security;
                 distrobox-requested => {
                     root.install-file-distrobox-requested();
                 }
@@ -323,6 +465,10 @@ export component AppWindow inherits Window {
                 show-security-warning: root.settings-show-security-warnings;
                 repo-title: root.add-repo-title;
                 repo-url: root.add-repo-url;
+                tr-add-repo: root.tr-add-repo;
+                tr-unknown-repo: root.tr-unknown-repo;
+                tr-repo-add-desc: root.tr-repo-add-desc;
+                tr-repo-warning: root.tr-repo-warning;
                 confirmed => {
                     root.add-repo-confirmed();
                 }
@@ -337,6 +483,9 @@ export component AppWindow inherits Window {
                 app-name: root.install-flatpakref-name;
                 app-id: root.install-flatpakref-app-id;
                 repo-url: root.install-flatpakref-repo-url;
+                tr-install-application: root.tr-install-application;
+                tr-contains-repo: root.tr-contains-repo;
+                tr-install: root.tr-install;
                 confirmed => {
                     root.install-flatpakref-confirmed();
                 }
@@ -349,6 +498,11 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 detail-app: root.detail-app;
+                tr-license: root.tr-license;
+                tr-eula-requires: root.tr-eula-requires;
+                tr-read-license: root.tr-read-license;
+                tr-cancel: root.tr-cancel;
+                tr-accept-install: root.tr-accept-install;
                 confirmed => {
                     root.eula-confirmed();
                 }
@@ -364,6 +518,30 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 settings-preferred <=> root.settings-preferred;
+                tr-settings: root.tr-settings;
+                tr-general: root.tr-general;
+                tr-auto-updates: root.tr-auto-updates;
+                tr-auto-updates-desc: root.tr-auto-updates-desc;
+                tr-security-warnings: root.tr-security-warnings;
+                tr-security-warnings-desc: root.tr-security-warnings-desc;
+                tr-downloads-section: root.tr-downloads-section;
+                tr-concurrent: root.tr-concurrent;
+                tr-concurrent-desc: root.tr-concurrent-desc;
+                tr-repositories: root.tr-repositories;
+                tr-loading-ellipsis: root.tr-loading-ellipsis;
+                tr-protected: root.tr-protected;
+                tr-remove: root.tr-remove;
+                tr-add-repo-section: root.tr-add-repo-section;
+                tr-name: root.tr-name;
+                tr-url: root.tr-url;
+                tr-add-repo: root.tr-add-repo;
+                tr-danger-zone: root.tr-danger-zone;
+                tr-force-updates: root.tr-force-updates;
+                tr-force-updates-desc: root.tr-force-updates-desc;
+                tr-force-update: root.tr-force-update;
+                tr-restart-daemon: root.tr-restart-daemon;
+                tr-restart-daemon-desc: root.tr-restart-daemon-desc;
+                tr-restart: root.tr-restart;
                 settings-ignore-native-pref <=> root.settings-ignore-native-pref;
                 settings-auto-updates <=> root.settings-auto-updates;
                 settings-concurrent-downloads <=> root.settings-concurrent-downloads;

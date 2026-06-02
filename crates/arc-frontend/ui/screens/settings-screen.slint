@@ -34,6 +34,31 @@ export component SettingsScreen inherits Rectangle {
     in-out property <[RemoteItem]> settings-remotes: [];
     in-out property <bool> settings-remotes-loading: false;
 
+    in property <string> tr-settings: "Settings";
+    in property <string> tr-general: "GENERAL";
+    in property <string> tr-auto-updates: "Auto-updates";
+    in property <string> tr-auto-updates-desc: "Automatically update installed apps in the background";
+    in property <string> tr-security-warnings: "Security warnings";
+    in property <string> tr-security-warnings-desc: "Show warnings when installing third-party software or adding repositories";
+    in property <string> tr-downloads-section: "DOWNLOADS";
+    in property <string> tr-concurrent: "Concurrent downloads";
+    in property <string> tr-concurrent-desc: "Maximum number of simultaneous downloads (1-16)";
+    in property <string> tr-repositories: "REPOSITORIES";
+    in property <string> tr-loading-ellipsis: "Loading…";
+    in property <string> tr-protected: "Protected";
+    in property <string> tr-remove: "Remove";
+    in property <string> tr-add-repo-section: "ADD REPOSITORY";
+    in property <string> tr-name: "Name";
+    in property <string> tr-url: "URL";
+    in property <string> tr-add-repo: "Add Repository";
+    in property <string> tr-danger-zone: "DANGER ZONE";
+    in property <string> tr-force-updates: "Force updates";
+    in property <string> tr-force-updates-desc: "Runs flatpak update -y directly, bypassing the daemon";
+    in property <string> tr-force-update: "Force Update";
+    in property <string> tr-restart-daemon: "Restart daemon";
+    in property <string> tr-restart-daemon-desc: "Kills the running arc-daemon and starts a fresh one in the background";
+    in property <string> tr-restart: "Restart";
+
     callback back-clicked();
     callback save-settings(string, bool, bool, int, bool);
     callback load-remotes();
@@ -67,7 +92,7 @@ export component SettingsScreen inherits Rectangle {
                 spacing: 12px;
                 alignment: start;
                 Text {
-                    text: "Settings";
+                    text: root.tr-settings;
                     font-size: 20px;
                     font-weight: 700;
                     vertical-alignment: center;
@@ -76,7 +101,7 @@ export component SettingsScreen inherits Rectangle {
 
             // GENERAL
             SectionLabel {
-                text: "GENERAL";
+                text: root.tr-general;
             }
 
             HorizontalBox {
@@ -89,11 +114,11 @@ export component SettingsScreen inherits Rectangle {
                     padding: 0;
                     horizontal-stretch: 1;
                     Text {
-                        text: "Auto-updates";
+                        text: root.tr-auto-updates;
                     }
 
                     Text {
-                        text: "Automatically update installed apps in the background";
+                        text: root.tr-auto-updates-desc;
                         font-size: 11px;
                         color: Palette.foreground.transparentize(0.4);
                         wrap: word-wrap;
@@ -124,11 +149,11 @@ export component SettingsScreen inherits Rectangle {
                     padding: 0;
                     horizontal-stretch: 1;
                     Text {
-                        text: "Security warnings";
+                        text: root.tr-security-warnings;
                     }
 
                     Text {
-                        text: "Show warnings when installing third-party software or adding repositories";
+                        text: root.tr-security-warnings-desc;
                         font-size: 11px;
                         color: Palette.foreground.transparentize(0.4);
                         wrap: word-wrap;
@@ -151,7 +176,7 @@ export component SettingsScreen inherits Rectangle {
 
             // DOWNLOADS
             SectionLabel {
-                text: "DOWNLOADS";
+                text: root.tr-downloads-section;
                 padding-bottom: 0px;
             }
 
@@ -165,11 +190,11 @@ export component SettingsScreen inherits Rectangle {
                     padding: 0;
                     horizontal-stretch: 1;
                     Text {
-                        text: "Concurrent downloads";
+                        text: root.tr-concurrent;
                     }
 
                     Text {
-                        text: "Maximum number of simultaneous downloads (1-16)";
+                        text: root.tr-concurrent-desc;
                         font-size: 11px;
                         color: Palette.foreground.transparentize(0.4);
                     }
@@ -248,7 +273,7 @@ export component SettingsScreen inherits Rectangle {
                 padding-bottom: 6px;
                 alignment: start;
                 Text {
-                    text: "REPOSITORIES";
+                    text: root.tr-repositories;
                     font-size: 10px;
                     font-weight: 700;
                     color: Palette.foreground.transparentize(0.45);
@@ -258,7 +283,7 @@ export component SettingsScreen inherits Rectangle {
                 }
 
                 if root.settings-remotes-loading: Text {
-                    text: "Loading…";
+                    text: root.tr-loading-ellipsis;
                     font-size: 11px;
                     color: Palette.foreground.transparentize(0.4);
                     vertical-alignment: center;
@@ -299,7 +324,7 @@ export component SettingsScreen inherits Rectangle {
                         border-radius: 4px;
                         background: Palette.foreground.transparentize(0.88);
                         Text {
-                            text: "Protected";
+                            text: root.tr-protected;
                             font-size: 10px;
                             color: Palette.foreground.transparentize(0.4);
                             horizontal-alignment: center;
@@ -312,7 +337,7 @@ export component SettingsScreen inherits Rectangle {
                     padding: 0;
                     horizontal-stretch: 0;
                     Button {
-                        text: "Remove";
+                        text: root.tr-remove;
                         clicked => {
                             root.remove-remote(repo.name);
                         }
@@ -322,7 +347,7 @@ export component SettingsScreen inherits Rectangle {
 
             // ADD REPOSITORY
             SectionLabel {
-                text: "ADD REPOSITORY";
+                text: root.tr-add-repo-section;
             }
 
             HorizontalBox {
@@ -331,7 +356,7 @@ export component SettingsScreen inherits Rectangle {
                 padding-right: 0;
                 spacing: 12px;
                 Text {
-                    text: "Name";
+                    text: root.tr-name;
                     vertical-alignment: center;
                     min-width: 48px;
                 }
@@ -349,7 +374,7 @@ export component SettingsScreen inherits Rectangle {
                 padding-right: 0;
                 spacing: 12px;
                 Text {
-                    text: "URL";
+                    text: root.tr-url;
                     vertical-alignment: center;
                     min-width: 48px;
                 }
@@ -368,7 +393,7 @@ export component SettingsScreen inherits Rectangle {
                 padding-bottom: 4px;
                 alignment: start;
                 Button {
-                    text: "Add Repository";
+                    text: root.tr-add-repo;
                     enabled: root.new-repo-name != "" && root.new-repo-url != "";
                     clicked => {
                         root.add-remote(root.new-repo-name, root.new-repo-url);
@@ -393,7 +418,7 @@ export component SettingsScreen inherits Rectangle {
                     padding-bottom: 6px;
 
                     Text {
-                        text: "DANGER ZONE";
+                        text: root.tr-danger-zone;
                         font-size: 10px;
                         font-weight: 700;
                         color: #ef4444;
@@ -429,9 +454,9 @@ export component SettingsScreen inherits Rectangle {
                             spacing: 2px;
                             padding: 0;
                             horizontal-stretch: 1;
-                            Text { text: "Force updates"; }
+                            Text { text: root.tr-force-updates; }
                             Text {
-                                text: "Runs flatpak update -y directly, bypassing the daemon";
+                                text: root.tr-force-updates-desc;
                                 font-size: 11px;
                                 color: Palette.foreground.transparentize(0.4);
                                 wrap: word-wrap;
@@ -454,7 +479,7 @@ export component SettingsScreen inherits Rectangle {
                                 }
 
                                 Text {
-                                    text: "Force Update";
+                                    text: root.tr-force-update;
                                     font-size: 12px;
                                     font-weight: 600;
                                     color: white;
@@ -475,9 +500,9 @@ export component SettingsScreen inherits Rectangle {
                             spacing: 2px;
                             padding: 0;
                             horizontal-stretch: 1;
-                            Text { text: "Restart daemon"; }
+                            Text { text: root.tr-restart-daemon; }
                             Text {
-                                text: "Kills the running arc-daemon and starts a fresh one in the background";
+                                text: root.tr-restart-daemon-desc;
                                 font-size: 11px;
                                 color: Palette.foreground.transparentize(0.4);
                                 wrap: word-wrap;
@@ -500,7 +525,7 @@ export component SettingsScreen inherits Rectangle {
                                 }
 
                                 Text {
-                                    text: "Restart";
+                                    text: root.tr-restart;
                                     font-size: 12px;
                                     font-weight: 600;
                                     color: white;

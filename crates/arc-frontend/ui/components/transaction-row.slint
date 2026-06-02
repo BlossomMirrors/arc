@@ -3,6 +3,14 @@ import { TransactionItem } from "../types.slint";
 
 export component TransactionRow inherits Rectangle {
     in property <TransactionItem> item;
+    in property <string> tr-removed: "Removed";
+    in property <string> tr-installed: "Installed";
+    in property <string> tr-failed: "Failed";
+    in property <string> tr-queued: "Queued";
+    in property <string> tr-removing: "Removing";
+    in property <string> tr-updating: "Updating";
+    in property <string> tr-installing: "Installing";
+    in property <string> tr-cancel: "Cancel";
     private property <int> pct: root.item.progress * 100;
 
     callback cancel-clicked(string);
@@ -69,7 +77,7 @@ export component TransactionRow inherits Rectangle {
                 alignment: center;
 
                 Text {
-                    text: root.item.status == "completed" ? (root.item.tx-type == "remove" ? "Removed" : "Installed") : root.item.status == "failed" ? "Failed" : root.item.status == "pending" ? "Queued" : root.item.tx-type == "remove" ? "Removing" : root.item.tx-type == "update" ? "Updating" : "Installing";
+                    text: root.item.status == "completed" ? (root.item.tx-type == "remove" ? root.tr-removed : root.tr-installed) : root.item.status == "failed" ? root.tr-failed : root.item.status == "pending" ? root.tr-queued : root.item.tx-type == "remove" ? root.tr-removing : root.item.tx-type == "update" ? root.tr-updating : root.tr-installing;
                     font-size: 12px;
                     color: root.item.status == "failed" ? #ef4444 : Palette.foreground.transparentize(0.45);
                     vertical-alignment: center;
@@ -101,7 +109,7 @@ export component TransactionRow inherits Rectangle {
                     }
 
                     cancel-label := Text {
-                        text: "Cancel";
+                        text: root.tr-cancel;
                         font-size: 12px;
                         font-weight: 600;
                         color: white;

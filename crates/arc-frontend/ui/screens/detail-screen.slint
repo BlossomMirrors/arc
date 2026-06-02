@@ -15,6 +15,16 @@ export component DetailScreen inherits Rectangle {
     in property <[ExtensionItem]> detail-extensions;
     in property <[DescriptionBlock]> detail-description-blocks;
     in property <image> icon-trash;
+    in property <string> tr-loading: "Loading...";
+    in property <string> tr-website: "Website";
+    in property <string> tr-extensions: "Extensions";
+    in property <string> tr-install: "Install";
+    in property <string> tr-remove: "Remove";
+    in property <string> tr-back: "Back";
+    in property <string> tr-run: "Run";
+    in property <string> tr-cancel: "Cancel";
+    in property <string> tr-working: "Working...";
+    in property <string> tr-verified: "Verified developer";
 
     callback back-clicked();
     callback install-requested(string);
@@ -56,6 +66,12 @@ export component DetailScreen inherits Rectangle {
                 settings-preferred: root.settings-preferred;
                 has-extensions: root.detail-extensions.length > 0;
                 icon-trash: root.icon-trash;
+                tr-back: root.tr-back;
+                tr-install: root.tr-install;
+                tr-run: root.tr-run;
+                tr-cancel: root.tr-cancel;
+                tr-working: root.tr-working;
+                tr-verified: root.tr-verified;
                 back-clicked => {
                     root.back-clicked();
                 }
@@ -167,7 +183,7 @@ export component DetailScreen inherits Rectangle {
                     alignment: start;
 
                     Text {
-                        text: "Website";
+                        text: root.tr-website;
                         font-size: 12px;
                         font-weight: 600;
                         color: Palette.foreground.transparentize(0.3);
@@ -237,7 +253,7 @@ export component DetailScreen inherits Rectangle {
                     spacing: 8px;
 
                     Text {
-                        text: "Extensions";
+                        text: root.tr-extensions;
                         font-size: 16px;
                         font-weight: 700;
                         vertical-alignment: center;
@@ -306,7 +322,7 @@ export component DetailScreen inherits Rectangle {
                                     }
 
                                     Text {
-                                        text: "Install";
+                                        text: root.tr-install;
                                         font-size: 13px;
                                         font-weight: 600;
                                         color: white;
@@ -328,7 +344,7 @@ export component DetailScreen inherits Rectangle {
                                     }
 
                                     Text {
-                                        text: "Remove";
+                                        text: root.tr-remove;
                                         font-size: 13px;
                                         font-weight: 600;
                                         color: white;

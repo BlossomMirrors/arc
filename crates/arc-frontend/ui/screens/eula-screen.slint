@@ -6,6 +6,12 @@ import { Badge } from "../components/badge.slint";
 export component EulaScreen inherits Rectangle {
     in property <AppDetailData> detail-app;
 
+    in property <string> tr-license: "License Agreement";
+    in property <string> tr-eula-requires: " requires you to accept its End User License Agreement before installing.";
+    in property <string> tr-read-license: "Read License Agreement →";
+    in property <string> tr-cancel: "Cancel";
+    in property <string> tr-accept-install: "Accept & Install";
+
     callback confirmed();
     callback cancelled();
     callback open-url-requested(string);
@@ -37,14 +43,14 @@ export component EulaScreen inherits Rectangle {
         }
 
         Text {
-            text: "License Agreement";
+            text: root.tr-license;
             font-size: 20px;
             font-weight: 700;
             horizontal-alignment: center;
         }
 
         Text {
-            text: root.detail-app.name + " requires you to accept its End User License Agreement before installing.";
+            text: root.detail-app.name + root.tr-eula-requires;
             font-size: 13px;
             color: Palette.foreground.transparentize(0.25);
             horizontal-alignment: center;
@@ -70,7 +76,7 @@ export component EulaScreen inherits Rectangle {
                 }
 
                 eula-label := Text {
-                    text: "Read License Agreement →";
+                    text: root.tr-read-license;
                     font-size: 12px;
                     color: #3b82f6;
                     horizontal-alignment: center;
@@ -98,7 +104,7 @@ export component EulaScreen inherits Rectangle {
                 }
 
                 Text {
-                    text: "Cancel";
+                    text: root.tr-cancel;
                     font-size: 13px;
                     font-weight: 600;
                     color: Palette.foreground.transparentize(0.2);
@@ -120,7 +126,7 @@ export component EulaScreen inherits Rectangle {
                 }
 
                 Text {
-                    text: "Accept & Install";
+                    text: root.tr-accept-install;
                     font-size: 13px;
                     font-weight: 600;
                     color: white;

@@ -10,6 +10,13 @@ export component HomeScreen inherits Rectangle {
     in property <[AppCardData]> recent-apps;
     in property <[CategoryItem]> categories;
     in property <bool> home-loading;
+    in property <string> tr-loading: "Loading...";
+    in property <string> tr-installed: "Installed";
+    in property <string> tr-discover: "Discover Great Software";
+    in property <string> tr-discover-sub: "Install apps from Flathub and your system repositories";
+    in property <string> tr-popular: "Popular";
+    in property <string> tr-recently-added: "Recently Added";
+    in property <string> tr-categories: "Categories";
 
     callback detail-requested(string);
     callback category-selected(string);
@@ -19,7 +26,7 @@ export component HomeScreen inherits Rectangle {
     if root.home-loading: VerticalBox {
         alignment: center;
         Text {
-            text: "Loading...";
+            text: root.tr-loading;
             horizontal-alignment: center;
         }
     }
@@ -42,7 +49,7 @@ export component HomeScreen inherits Rectangle {
                 VerticalBox {
                     alignment: center;
                     Text {
-                        text: "Discover Great Software";
+                        text: root.tr-discover;
                         font-size: 22px;
                         font-weight: 700;
                         color: white;
@@ -50,7 +57,7 @@ export component HomeScreen inherits Rectangle {
                     }
 
                     Text {
-                        text: "Install apps from Flathub and your system repositories";
+                        text: root.tr-discover-sub;
                         font-size: 13px;
                         color: #ffffffcc;
                         horizontal-alignment: center;
@@ -63,7 +70,7 @@ export component HomeScreen inherits Rectangle {
                 spacing: 4px;
 
                 Text {
-                    text: "Popular";
+                    text: root.tr-popular;
                     font-size: 16px;
                     font-weight: 700;
                 }
@@ -78,6 +85,7 @@ export component HomeScreen inherits Rectangle {
                         width: (parent.width + 12px) / 5 - 12px;
                         height: 152px;
                         card: app;
+                        tr-installed: root.tr-installed;
                         clicked(id) => {
                             root.detail-requested(id);
                         }
@@ -90,7 +98,7 @@ export component HomeScreen inherits Rectangle {
                 spacing: 8px;
 
                 Text {
-                    text: "Recently Added";
+                    text: root.tr-recently-added;
                     font-size: 16px;
                     font-weight: 700;
                 }
@@ -98,6 +106,7 @@ export component HomeScreen inherits Rectangle {
                 Carousel {
                     width: parent.width;
                     items: root.recent-apps;
+                    tr-installed: root.tr-installed;
                     item-clicked(id) => {
                         root.detail-requested(id);
                     }
@@ -109,7 +118,7 @@ export component HomeScreen inherits Rectangle {
                 spacing: 24px;
 
                 Text {
-                    text: "Categories";
+                    text: root.tr-categories;
                     font-size: 16px;
                     font-weight: 700;
                 }

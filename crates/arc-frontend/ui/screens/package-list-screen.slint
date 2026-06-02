@@ -7,6 +7,12 @@ export component PackageListScreen inherits Rectangle {
     in property <bool> is-loading;
     in property <string> current-view;
     in property <image> icon-trash;
+    in property <string> tr-loading: "Loading...";
+    in property <string> tr-no-packages: "No packages found.\nSearch for an application to get started.";
+    in property <string> tr-up-to-date: "Everything is up to date.";
+    in property <string> tr-no-installed: "No applications installed.";
+    in property <string> tr-install: "Install";
+    in property <string> tr-update: "Update";
 
     callback detail-requested(string);
     callback install-requested(string);
@@ -24,7 +30,7 @@ export component PackageListScreen inherits Rectangle {
     if !root.is-loading && root.packages.length == 0: VerticalBox {
         alignment: center;
         Text {
-            text: root.current-view == "search" ? "No packages found.\nSearch for an application to get started." : (root.current-view == "updates" ? "Everything is up to date." : "No applications installed.");
+            text: root.current-view == "search" ? root.tr-no-packages : (root.current-view == "updates" ? root.tr-up-to-date : root.tr-no-installed);
             horizontal-alignment: center;
             color: Palette.foreground.transparentize(0.4);
         }
@@ -145,7 +151,7 @@ export component PackageListScreen inherits Rectangle {
                             }
 
                             if !pkg.installed || root.current-view == "updates": Text {
-                                text: root.current-view == "updates" ? "Update" : "Install";
+                                text: root.current-view == "updates" ? root.tr-update : root.tr-install;
                                 font-size: 12px;
                                 font-weight: 600;
                                 color: Palette.foreground.transparentize(0.1);

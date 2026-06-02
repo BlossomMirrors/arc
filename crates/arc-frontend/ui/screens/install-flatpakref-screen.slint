@@ -7,6 +7,10 @@ export component InstallFlatpakrefScreen inherits Rectangle {
     in property <string> app-id;
     in property <string> repo-url;
 
+    in property <string> tr-install-application: "Install Application";
+    in property <string> tr-contains-repo: "Contains repository";
+    in property <string> tr-install: "Install";
+
     callback confirmed();
     callback cancelled();
 
@@ -16,7 +20,7 @@ export component InstallFlatpakrefScreen inherits Rectangle {
         spacing: 20px;
 
         Text {
-            text: "Install Application";
+            text: root.tr-install-application;
             font-size: 22px;
             font-weight: 700;
             horizontal-alignment: center;
@@ -43,7 +47,7 @@ export component InstallFlatpakrefScreen inherits Rectangle {
             Badge {
                 has-icon: true;
                 icon: @image-url("../../assets/warning.svg");
-                label: "Contains repository";
+                label: root.tr-contains-repo;
                 accent: #eab308;
             }
         }
@@ -57,7 +61,7 @@ export component InstallFlatpakrefScreen inherits Rectangle {
         }
 
         Button {
-            text: "Install";
+            text: root.tr-install;
             clicked => {
                 root.confirmed();
             }
