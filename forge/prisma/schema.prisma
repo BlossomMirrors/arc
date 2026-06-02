@@ -48,6 +48,12 @@ model Account {
   updatedAt             DateTime
 }
 
+model WhitelistEntry {
+  id        String   @id @default(cuid())
+  value     String   @unique
+  createdAt DateTime @default(now())
+}
+
 model Verification {
   id         String    @id
   identifier String

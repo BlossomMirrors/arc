@@ -57,6 +57,11 @@ export type Session = Prisma.SessionModel
  */
 export type Account = Prisma.AccountModel
 /**
+ * Model WhitelistEntry
+ * 
+ */
+export type WhitelistEntry = Prisma.WhitelistEntryModel
+/**
  * Model Verification
  * 
  */

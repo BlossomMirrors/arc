@@ -54,6 +54,7 @@ export const ModelName = {
   User: 'User',
   Session: 'Session',
   Account: 'Account',
+  WhitelistEntry: 'WhitelistEntry',
   Verification: 'Verification'
 } as const
 
@@ -117,6 +118,15 @@ export const AccountScalarFieldEnum = {
 } as const
 
 export type AccountScalarFieldEnum = (typeof AccountScalarFieldEnum)[keyof typeof AccountScalarFieldEnum]
+
+
+export const WhitelistEntryScalarFieldEnum = {
+  id: 'id',
+  value: 'value',
+  createdAt: 'createdAt'
+} as const
+
+export type WhitelistEntryScalarFieldEnum = (typeof WhitelistEntryScalarFieldEnum)[keyof typeof WhitelistEntryScalarFieldEnum]
 
 
 export const VerificationScalarFieldEnum = {

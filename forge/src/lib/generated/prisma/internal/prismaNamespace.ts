@@ -387,6 +387,7 @@ export const ModelName = {
   User: 'User',
   Session: 'Session',
   Account: 'Account',
+  WhitelistEntry: 'WhitelistEntry',
   Verification: 'Verification'
 } as const
 
@@ -403,7 +404,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "session" | "account" | "verification"
+    modelProps: "user" | "session" | "account" | "whitelistEntry" | "verification"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -629,6 +630,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    WhitelistEntry: {
+      payload: Prisma.$WhitelistEntryPayload<ExtArgs>
+      fields: Prisma.WhitelistEntryFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.WhitelistEntryFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$WhitelistEntryPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.WhitelistEntryFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$WhitelistEntryPayload>
+        }
+        findFirst: {
+          args: Prisma.WhitelistEntryFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$WhitelistEntryPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.WhitelistEntryFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$WhitelistEntryPayload>
+        }
+        findMany: {
+          args: Prisma.WhitelistEntryFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$WhitelistEntryPayload>[]
+        }
+        create: {
+          args: Prisma.WhitelistEntryCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$WhitelistEntryPayload>
+        }
+        createMany: {
+          args: Prisma.WhitelistEntryCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.WhitelistEntryCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$WhitelistEntryPayload>[]
+        }
+        delete: {
+          args: Prisma.WhitelistEntryDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$WhitelistEntryPayload>
+        }
+        update: {
+          args: Prisma.WhitelistEntryUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$WhitelistEntryPayload>
+        }
+        deleteMany: {
+          args: Prisma.WhitelistEntryDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.WhitelistEntryUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.WhitelistEntryUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$WhitelistEntryPayload>[]
+        }
+        upsert: {
+          args: Prisma.WhitelistEntryUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$WhitelistEntryPayload>
+        }
+        aggregate: {
+          args: Prisma.WhitelistEntryAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateWhitelistEntry>
+        }
+        groupBy: {
+          args: Prisma.WhitelistEntryGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.WhitelistEntryGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.WhitelistEntryCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.WhitelistEntryCountAggregateOutputType> | number
+        }
+      }
+    }
     Verification: {
       payload: Prisma.$VerificationPayload<ExtArgs>
       fields: Prisma.VerificationFieldRefs
@@ -786,6 +861,15 @@ export const AccountScalarFieldEnum = {
 } as const
 
 export type AccountScalarFieldEnum = (typeof AccountScalarFieldEnum)[keyof typeof AccountScalarFieldEnum]
+
+
+export const WhitelistEntryScalarFieldEnum = {
+  id: 'id',
+  value: 'value',
+  createdAt: 'createdAt'
+} as const
+
+export type WhitelistEntryScalarFieldEnum = (typeof WhitelistEntryScalarFieldEnum)[keyof typeof WhitelistEntryScalarFieldEnum]
 
 
 export const VerificationScalarFieldEnum = {
@@ -991,6 +1075,7 @@ export type GlobalOmitConfig = {
   user?: Prisma.UserOmit
   session?: Prisma.SessionOmit
   account?: Prisma.AccountOmit
+  whitelistEntry?: Prisma.WhitelistEntryOmit
   verification?: Prisma.VerificationOmit
 }
 
