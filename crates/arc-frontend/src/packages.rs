@@ -1,5 +1,112 @@
-use crate::appstream_db::AppStreamDb;
 use crate::helpers::check_flathub_verification;
+
+fn push_decoded(text: &str, out: &mut String) {
+    let mut rest = text;
+    while !rest.is_empty() {
+        match rest.find('&') {
+            None => {
+                out.push_str(rest);
+                break;
+            }
+            Some(pos) => {
+                out.push_str(&rest[..pos]);
+                rest = &rest[pos..];
+                if rest.starts_with("&amp;") {
+                    out.push('&');
+                    rest = &rest[5..];
+                } else if rest.starts_with("&lt;") {
+                    out.push('<');
+                    rest = &rest[4..];
+                } else if rest.starts_with("&gt;") {
+                    out.push('>');
+                    rest = &rest[4..];
+                } else if rest.starts_with("&quot;") {
+                    out.push('"');
+                    rest = &rest[6..];
+                } else if rest.starts_with("&apos;") {
+                    out.push('\'');
+                    rest = &rest[6..];
+                } else {
+                    out.push('&');
+                    rest = &rest[1..];
+                }
+            }
+        }
+    }
+}
+
+pub(crate) struct DescBlock {
+    text: String,
+    is_list_item: bool,
+    is_heading: bool,
+}
+
+fn parse_heading(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.starts_with("===") && s.ends_with("===") && s.len() > 6 {
+        Some(s.trim_matches('=').trim().to_string())
+    } else {
+        None
+    }
+}
+
+fn html_to_blocks(html: &str) -> Vec<DescBlock> {
+    let mut blocks: Vec<DescBlock> = Vec::new();
+    let mut current = String::new();
+    let mut rest = html;
+    while !rest.is_empty() {
+        match rest.find('<') {
+            None => { push_decoded(rest, &mut current); break; }
+            Some(tag_start) => {
+                push_decoded(&rest[..tag_start], &mut current);
+                rest = &rest[tag_start + 1..];
+                let tag_end = match rest.find('>') {
+                    Some(e) => e,
+                    None => { current.push('<'); continue; }
+                };
+                let raw_tag = rest[..tag_end].trim();
+                let closing = raw_tag.starts_with('/');
+                let name = raw_tag.trim_start_matches('/')
+                    .split_ascii_whitespace().next().unwrap_or("")
+                    .to_ascii_lowercase();
+                match (closing, name.as_str()) {
+                    (false, "li") => {
+                        let t = current.trim().to_string();
+                        if !t.is_empty() { blocks.push(DescBlock { text: t, is_list_item: false, is_heading: false }); }
+                        current.clear();
+                    }
+                    (true, "li") => {
+                        let t = current.trim().to_string();
+                        if !t.is_empty() { blocks.push(DescBlock { text: t, is_list_item: true, is_heading: false }); }
+                        current.clear();
+                    }
+                    (true, "p") => {
+                        let t = current.trim().to_string();
+                        if !t.is_empty() {
+                            if let Some(heading) = parse_heading(&t) {
+                                blocks.push(DescBlock { text: heading, is_list_item: false, is_heading: true });
+                            } else {
+                                blocks.push(DescBlock { text: t, is_list_item: false, is_heading: false });
+                            }
+                        }
+                        current.clear();
+                    }
+                    (true, "h1") | (true, "h2") | (true, "h3") => {
+                        let t = current.trim().to_string();
+                        if !t.is_empty() { blocks.push(DescBlock { text: t, is_list_item: false, is_heading: true }); }
+                        current.clear();
+                    }
+                    _ => {}
+                }
+                rest = &rest[tag_end + 1..];
+            }
+        }
+    }
+    let t = current.trim().to_string();
+    if !t.is_empty() { blocks.push(DescBlock { text: t, is_list_item: false, is_heading: false }); }
+    blocks
+}
+
 use crate::icons::{self, RawIcon};
 use crate::transactions::{has_ongoing_transaction_for_package, TxStore};
 use futures_util::future::join_all;
@@ -34,7 +141,7 @@ pub struct RawCategoryData {
 pub struct RawDetailData {
     pub name: String,
     pub developer: String,
-    pub description: String,
+    pub description_blocks: Vec<DescBlock>,
     pub summary: String,
     pub version: String,
     pub icon: Option<RawIcon>,
@@ -93,6 +200,17 @@ impl RawCard {
 }
 
 #[derive(serde::Deserialize)]
+struct AppMetadata {
+    summary: String,
+    description: String,
+    license: Option<String>,
+    eula_url: Option<String>,
+    homepage_url: Option<String>,
+    content_rating: String,
+    developer_name: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
 struct DaemonHomeEntry {
     id: String,
     name: String,
@@ -110,8 +228,6 @@ pub async fn load_home(
     app_weak: slint::Weak<crate::AppWindow>,
     proxy: Option<ArcDaemonProxy<'static>>,
 ) {
-    // Try the daemon first — it eagerly parses appstream on startup so this is
-    // typically instant. Fall back to local parsing only if the daemon is unavailable.
     let (popular_apps, recent_apps): (Vec<DaemonHomeEntry>, Vec<DaemonHomeEntry>) =
         if let Some(ref p) = proxy {
             p.get_home_apps(10, 20)
@@ -119,53 +235,9 @@ pub async fn load_home(
                 .ok()
                 .and_then(|json| serde_json::from_str::<DaemonHomeData>(&json).ok())
                 .map(|d| (d.popular, d.recent))
-                .unwrap_or_else(|| {
-                    let db = AppStreamDb::get_static();
-                    let pop = db
-                        .get_popular_apps(10)
-                        .into_iter()
-                        .map(|e| DaemonHomeEntry {
-                            id: e.id,
-                            name: e.name,
-                            summary: e.summary,
-                            icon_url: e.icon_url,
-                        })
-                        .collect();
-                    let rec = db
-                        .get_recent_apps(20)
-                        .into_iter()
-                        .map(|e| DaemonHomeEntry {
-                            id: e.id,
-                            name: e.name,
-                            summary: e.summary,
-                            icon_url: e.icon_url,
-                        })
-                        .collect();
-                    (pop, rec)
-                })
+                .unwrap_or_default()
         } else {
-            let db = AppStreamDb::get_static();
-            let pop = db
-                .get_popular_apps(10)
-                .into_iter()
-                .map(|e| DaemonHomeEntry {
-                    id: e.id,
-                    name: e.name,
-                    summary: e.summary,
-                    icon_url: e.icon_url,
-                })
-                .collect();
-            let rec = db
-                .get_recent_apps(20)
-                .into_iter()
-                .map(|e| DaemonHomeEntry {
-                    id: e.id,
-                    name: e.name,
-                    summary: e.summary,
-                    icon_url: e.icon_url,
-                })
-                .collect();
-            (pop, rec)
+            (vec![], vec![])
         };
 
     let installed_ids: std::collections::HashSet<String> = if let Some(ref p) = proxy {
@@ -411,33 +483,36 @@ pub async fn load_detail(
     app_weak: slint::Weak<crate::AppWindow>,
 ) {
     let app_id = id.to_string();
-    let appstream_db = AppStreamDb::get_static();
 
-    let app_name = appstream_db
-        .find_by_id(&id)
-        .map(|a| a.name.clone())
-        .unwrap_or_else(|| id.split(';').next().unwrap_or(&id).to_string());
+    let app_name = app_id.split(';').next().unwrap_or(&app_id).to_string();
 
-    let (search_pkgs, installed_pkgs): (Vec<Package>, Vec<Package>) = if let Some(ref p) = proxy {
-        tokio::join!(
-            async {
-                p.search(&app_name)
-                    .await
-                    .ok()
-                    .and_then(|j| serde_json::from_str(&j).ok())
-                    .unwrap_or_default()
-            },
-            async {
-                p.list_installed()
-                    .await
-                    .ok()
-                    .and_then(|j| serde_json::from_str(&j).ok())
-                    .unwrap_or_default()
-            }
-        )
-    } else {
-        (vec![], vec![])
-    };
+    let (search_pkgs, installed_pkgs, metadata): (Vec<Package>, Vec<Package>, Option<AppMetadata>) =
+        if let Some(ref p) = proxy {
+            tokio::join!(
+                async {
+                    p.search(&app_name)
+                        .await
+                        .ok()
+                        .and_then(|j| serde_json::from_str(&j).ok())
+                        .unwrap_or_default()
+                },
+                async {
+                    p.list_installed()
+                        .await
+                        .ok()
+                        .and_then(|j| serde_json::from_str(&j).ok())
+                        .unwrap_or_default()
+                },
+                async {
+                    p.get_app_metadata(&app_id)
+                        .await
+                        .ok()
+                        .and_then(|j| serde_json::from_str(&j).ok())
+                }
+            )
+        } else {
+            (vec![], vec![], None)
+        };
 
     let name_lower = app_name.to_lowercase();
     let all_pkgs: Vec<&Package> = search_pkgs.iter().chain(installed_pkgs.iter()).collect();
@@ -467,15 +542,14 @@ pub async fn load_detail(
             && (p.id == app_id.as_str() || p.name.to_lowercase() == name_lower)
     });
 
-    let appstream_info = appstream_db.find_by_id(&app_id);
-
     let (developer, verified) = if appimage_pkg.is_some() {
         (String::new(), false)
     } else if let Some(fp_pkg) = &flatpak_pkg {
         let remote = fp_pkg.remote.as_deref().unwrap_or("");
-        let dev_name = appstream_info
+        let dev_name = metadata
             .as_ref()
-            .and_then(|a| a.id.split('.').last().map(|s| s.to_string()))
+            .and_then(|m| m.developer_name.clone())
+            .or_else(|| fp_pkg.id.split('.').last().map(|s| s.to_string()))
             .unwrap_or_else(|| fp_pkg.name.clone());
 
         if remote == "blossomos" {
@@ -488,9 +562,9 @@ pub async fn load_detail(
             (dev_name, false)
         }
     } else {
-        let dev_name = appstream_info
+        let dev_name = metadata
             .as_ref()
-            .and_then(|a| a.id.split('.').last().map(|s| s.to_string()))
+            .and_then(|m| m.developer_name.clone())
             .unwrap_or_else(|| app_name.clone());
         (dev_name, false)
     };
@@ -559,37 +633,21 @@ pub async fn load_detail(
         None
     };
 
-    let icon = icon.or_else(|| {
-        appstream_info.as_ref().and_then(|info| {
-            info.icon_url.as_ref().and_then(|url| {
-                if url.starts_with("local:") {
-                    icons::load_local_flatpak_icon(&info.id)
-                } else {
-                    let url = url.clone();
-                    let rt = tokio::runtime::Handle::current();
-                    rt.block_on(icons::load_icon(&url))
-                }
-            })
-        })
-    });
-
     let name = flatpak_pkg
         .or(native_pkg)
         .or(lutris_pkg)
         .or(appimage_pkg)
         .map(|p| p.name.clone())
-        .or_else(|| appstream_info.as_ref().map(|a| a.name.clone()))
         .unwrap_or_else(|| app_name.clone());
 
-    let description = if flatpak_pkg.is_some() {
-        String::new()
-    } else {
+    let plain_description: Option<String> = if flatpak_pkg.is_none() {
         native_pkg
             .or(lutris_pkg)
             .or(appimage_pkg)
             .map(|p| p.description.clone())
-            .or_else(|| appstream_info.as_ref().map(|a| a.summary.clone()))
-            .unwrap_or_default()
+            .filter(|s| !s.is_empty())
+    } else {
+        None
     };
 
     let version = flatpak_pkg
@@ -608,10 +666,14 @@ pub async fn load_detail(
     let raw = RawDetailData {
         name,
         developer,
-        description,
-        summary: appstream_info
+        description_blocks: metadata
             .as_ref()
-            .map(|a| a.summary.clone())
+            .map(|m| html_to_blocks(&m.description))
+            .or_else(|| plain_description.map(|t| vec![DescBlock { text: t, is_list_item: false, is_heading: false }]))
+            .unwrap_or_default(),
+        summary: metadata
+            .as_ref()
+            .map(|m| m.summary.clone())
             .unwrap_or_default(),
         version,
         icon,
@@ -624,21 +686,21 @@ pub async fn load_detail(
         lutris_installed,
         appimage_installed,
         verified,
-        license: appstream_info
+        license: metadata
             .as_ref()
-            .and_then(|a| a.license.clone())
+            .and_then(|m| m.license.clone())
             .unwrap_or_default(),
-        eula_url: appstream_info
+        eula_url: metadata
             .as_ref()
-            .and_then(|a| a.eula_url.clone())
+            .and_then(|m| m.eula_url.clone())
             .unwrap_or_default(),
-        homepage_url: appstream_info
+        homepage_url: metadata
             .as_ref()
-            .and_then(|a| a.homepage_url.clone())
+            .and_then(|m| m.homepage_url.clone())
             .unwrap_or_default(),
-        content_rating: appstream_info
+        content_rating: metadata
             .as_ref()
-            .map(|a| a.content_rating_age.clone())
+            .map(|m| m.content_rating.clone())
             .unwrap_or_default(),
     };
 
@@ -648,14 +710,23 @@ pub async fn load_detail(
         raw.appimage_id.clone()
     };
     let flatpak_id_for_extensions = raw.flatpak_id.clone();
+    let description_blocks: Vec<crate::DescriptionBlock> = raw
+        .description_blocks
+        .into_iter()
+        .map(|b| crate::DescriptionBlock {
+            text: b.text.into(),
+            is_list_item: b.is_list_item,
+            is_heading: b.is_heading,
+        })
+        .collect();
     let _ = app_weak.upgrade_in_event_loop(move |app| {
         app.set_detail_screenshots([].as_slice().into());
         app.set_detail_extensions([].as_slice().into());
+        app.set_detail_description_blocks(description_blocks.as_slice().into());
         app.set_detail_app(crate::AppDetailData {
             id: Default::default(),
             name: raw.name.into(),
             developer: raw.developer.into(),
-            description: raw.description.into(),
             summary: raw.summary.into(),
             version: raw.version.into(),
             icon: raw

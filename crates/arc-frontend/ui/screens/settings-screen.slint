@@ -39,9 +39,12 @@ export component SettingsScreen inherits Rectangle {
     callback load-remotes();
     callback add-remote(string, string);
     callback remove-remote(string);
+    callback force-update-requested();
+    callback restart-daemon-requested();
 
     property <string> new-repo-name: "";
     property <string> new-repo-url: "";
+    property <bool> danger-zone-open: false;
 
     init => {
         root.load-remotes();
@@ -240,7 +243,6 @@ export component SettingsScreen inherits Rectangle {
 
             // REPOSITORIES
             HorizontalBox {
-                padding-left: 0;
                 padding-right: 0;
                 padding-top: 20px;
                 padding-bottom: 6px;
@@ -372,6 +374,141 @@ export component SettingsScreen inherits Rectangle {
                         root.add-remote(root.new-repo-name, root.new-repo-url);
                         root.new-repo-name = "";
                         root.new-repo-url = "";
+                    }
+                }
+            }
+
+            // DANGER ZONE (collapsible)
+            Rectangle {
+                height: dz-header.preferred-height;
+
+                dz-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.danger-zone-open = !root.danger-zone-open; }
+                }
+
+                dz-header := HorizontalBox {
+                    padding-right: 0;
+                    padding-top: 28px;
+                    padding-bottom: 6px;
+
+                    Text {
+                        text: "DANGER ZONE";
+                        font-size: 10px;
+                        font-weight: 700;
+                        color: #ef4444;
+                        letter-spacing: 0.8px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+
+                    Text {
+                        text: root.danger-zone-open ? "▲" : "▼";
+                        font-size: 9px;
+                        color: white;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle {
+                clip: true;
+                height: root.danger-zone-open ? dz-content.preferred-height : 0px;
+                animate height { duration: 200ms; easing: ease-in-out; }
+
+                dz-content := VerticalLayout {
+                    spacing: 0px;
+
+                    HorizontalBox {
+                        padding: 10px;
+                        padding-left: 20px;
+                        padding-right: 0;
+                        spacing: 12px;
+
+                        VerticalBox {
+                            spacing: 2px;
+                            padding: 0;
+                            horizontal-stretch: 1;
+                            Text { text: "Force updates"; }
+                            Text {
+                                text: "Runs flatpak update -y directly, bypassing the daemon";
+                                font-size: 11px;
+                                color: Palette.foreground.transparentize(0.4);
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        VerticalBox {
+                            alignment: center;
+                            padding: 0;
+                            horizontal-stretch: 0;
+
+                            Rectangle {
+                                width: 110px;
+                                height: 30px;
+                                border-radius: 7px;
+                                background: force-ta.has-hover ? #dc2626 : #ef4444;
+
+                                force-ta := TouchArea {
+                                    clicked => { root.force-update-requested(); }
+                                }
+
+                                Text {
+                                    text: "Force Update";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: white;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalBox {
+                        padding: 10px;
+                        padding-left: 20px;
+                        padding-right: 0;
+                        spacing: 12px;
+
+                        VerticalBox {
+                            spacing: 2px;
+                            padding: 0;
+                            horizontal-stretch: 1;
+                            Text { text: "Restart daemon"; }
+                            Text {
+                                text: "Kills the running arc-daemon and starts a fresh one in the background";
+                                font-size: 11px;
+                                color: Palette.foreground.transparentize(0.4);
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        VerticalBox {
+                            alignment: center;
+                            padding: 0;
+                            horizontal-stretch: 0;
+
+                            Rectangle {
+                                width: 110px;
+                                height: 30px;
+                                border-radius: 7px;
+                                background: restart-ta.has-hover ? #dc2626 : #ef4444;
+
+                                restart-ta := TouchArea {
+                                    clicked => { root.restart-daemon-requested(); }
+                                }
+
+                                Text {
+                                    text: "Restart";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: white;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
                     }
                 }
             }

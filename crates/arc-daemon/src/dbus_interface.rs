@@ -465,7 +465,6 @@ impl ArcDaemonInterface {
 
     async fn get_app_info(&self, package_id: String) -> String {
         info!("GetAppInfo: {}", package_id);
-        // Go directly to provider for all app types
         match self.provider.get_app_info(&package_id).await {
             Ok(Some(package)) => {
                 serde_json::to_string(&Some(package)).unwrap_or_else(|_| "null".to_string())
@@ -476,6 +475,18 @@ impl ArcDaemonInterface {
                 "null".to_string()
             }
         }
+    }
+
+    async fn get_app_metadata(&self, package_id: String) -> String {
+        info!("GetAppMetadata: {}", package_id);
+        tokio::task::spawn_blocking(move || {
+            crate::appstream_db::AppStreamDb::get_static()
+                .find_by_id(&package_id)
+                .and_then(|e| serde_json::to_string(&e).ok())
+                .unwrap_or_else(|| "null".to_string())
+        })
+        .await
+        .unwrap_or_else(|_| "null".to_string())
     }
 
     async fn list_installed(&self) -> String {

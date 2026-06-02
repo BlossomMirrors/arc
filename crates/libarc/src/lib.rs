@@ -27,6 +27,7 @@ pub trait ArcDaemon {
     async fn search(&self, query: &str) -> zbus::Result<String>;
     async fn search_category(&self, category: &str) -> zbus::Result<String>;
     async fn get_app_info(&self, package_id: &str) -> zbus::Result<String>;
+    async fn get_app_metadata(&self, package_id: &str) -> zbus::Result<String>;
     async fn list_installed(&self) -> zbus::Result<String>;
     async fn list_updates(&self) -> zbus::Result<String>;
     async fn update_package(&self, package_id: &str) -> zbus::Result<String>;

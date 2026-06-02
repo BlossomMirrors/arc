@@ -7,11 +7,16 @@ export struct PackageItem {
     icon: image,
 }
 
+export struct DescriptionBlock {
+    text: string,
+    is-list-item: bool,
+    is-heading: bool,
+}
+
 export struct AppDetailData {
     id: string,
     name: string,
     developer: string,
-    description: string,
     summary: string,
     version: string,
     icon: image,

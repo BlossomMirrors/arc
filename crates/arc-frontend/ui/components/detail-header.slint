@@ -10,6 +10,7 @@ export component DetailHeader inherits Rectangle {
     in property <string> detail-transaction-id;
     in property <string> settings-preferred;
     in property <bool> has-extensions: false;
+    in property <image> icon-trash;
 
     callback back-clicked();
     callback install-requested(string);
@@ -129,12 +130,35 @@ export component DetailHeader inherits Rectangle {
                         vertical-alignment: center;
                     }
 
-                    if root.detail-app.verified: Image {
-                        source: @image-url("../../assets/verified.svg");
+                    if root.detail-app.verified: Rectangle {
                         width: 14px;
                         height: 14px;
-                        vertical-alignment: center;
-                        colorize: #0d6efd;
+
+                        Image {
+                            source: @image-url("../../assets/verified.svg");
+                            width: 14px;
+                            height: 14px;
+                            colorize: #0d6efd;
+                        }
+
+                        verified-ta := TouchArea {}
+
+                        if verified-ta.has-hover: Rectangle {
+                            x: 0px;
+                            y: 20px;
+                            width: tt-text.preferred-width + 12px;
+                            height: 22px;
+                            background: Palette.foreground;
+                            border-radius: 4px;
+
+                            tt-text := Text {
+                                x: 6px;
+                                y: (parent.height - self.preferred-height) / 2;
+                                text: "Verified developer";
+                                font-size: 11px;
+                                color: Palette.background;
+                            }
+                        }
                     }
                 }
 
@@ -192,7 +216,33 @@ export component DetailHeader inherits Rectangle {
                         }
                     }
 
-                    if !root.btn-is-appimage || root.btn-is-installed: Rectangle {
+                    if root.btn-is-installed: Rectangle {
+                        width: root.shared-btn-height;
+                        height: root.shared-btn-height;
+                        border-radius: 8px;
+                        background: root.btn-active-id == "" ? #80808030 :
+                            (remove-ta.has-hover ? #dc2626 : #ef4444);
+                        border-width: root.btn-active-id == "" ? 1px : 0px;
+                        border-color: #80808040;
+
+                        remove-ta := TouchArea {
+                            enabled: root.btn-active-id != "";
+                            clicked => {
+                                root.remove-requested(root.btn-active-id);
+                            }
+                        }
+
+                        Image {
+                            source: root.icon-trash;
+                            width: 14px;
+                            height: 14px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            colorize: root.btn-active-id == "" ? Palette.foreground.transparentize(0.6) : white;
+                        }
+                    }
+
+                    if !root.btn-is-appimage && !root.btn-is-installed: Rectangle {
                         width: root.shared-btn-width;
                         height: root.shared-btn-height;
                         border-radius: 8px;
@@ -204,9 +254,7 @@ export component DetailHeader inherits Rectangle {
                         install-ta := TouchArea {
                             enabled: root.btn-active-id != "";
                             clicked => {
-                                if root.btn-is-installed {
-                                    root.remove-requested(root.btn-active-id);
-                                } else if root.detail-app.eula-url != "" {
+                                if root.detail-app.eula-url != "" {
                                     root.eula-requested();
                                 } else {
                                     root.install-requested(root.btn-active-id);
@@ -215,7 +263,7 @@ export component DetailHeader inherits Rectangle {
                         }
 
                         Text {
-                            text: root.btn-is-installed ? "Remove" : "Install";
+                            text: "Install";
                             font-size: 13px;
                             font-weight: 600;
                             color: root.btn-active-id == "" ?

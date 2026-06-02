@@ -1,4 +1,4 @@
-use appstream::enums::{ComponentKind, ImageKind};
+use appstream::enums::{ComponentKind, ContentAttribute, ContentState, ImageKind, ProjectUrl};
 use appstream::{Collection, Component};
 use libarc::{Package, Provider};
 use std::path::{Path, PathBuf};
@@ -17,9 +17,15 @@ pub struct AppStreamEntry {
     pub id: String,
     pub name: String,
     pub summary: String,
+    pub description: String,
     pub icon_url: Option<String>,
     pub remote: Option<String>,
     pub screenshots: Vec<String>,
+    pub license: Option<String>,
+    pub eula_url: Option<String>,
+    pub homepage_url: Option<String>,
+    pub content_rating: String,
+    pub developer_name: Option<String>,
 }
 
 impl AppStreamDb {
@@ -126,22 +132,56 @@ impl AppStreamDb {
     }
 }
 
-fn component_to_entry(c: &Component, remote: Option<String>) -> AppStreamEntry {
-    // Extract icon URL from the first available icon
-    // AppStream icons can be local (name only) or remote (full URL)
-    let icon_url = c.icons.first().and_then(|icon| {
-        // Prefer remote URLs, fall back to local icon names
-        match icon {
-            appstream::enums::Icon::Remote { url, .. } => Some(url.to_string()),
-            appstream::enums::Icon::Local { path, .. } => Some(format!("local:{}", path.display())),
-            appstream::enums::Icon::Cached { path, .. } => {
-                Some(format!("local:{}", path.display()))
-            }
-            appstream::enums::Icon::Stock(name) => Some(format!("local:{}", name)),
+fn attr_severity(attr: &ContentAttribute) -> u8 {
+    fn state_sev(s: &ContentState) -> u8 {
+        match s {
+            ContentState::None => 0,
+            ContentState::Mild => 1,
+            ContentState::Moderate => 2,
+            ContentState::Intense => 3,
         }
+    }
+    match attr {
+        ContentAttribute::ViolenceCartoon(s)
+        | ContentAttribute::ViolenceFantasy(s)
+        | ContentAttribute::ViolenceRealistic(s)
+        | ContentAttribute::ViolenceBloodshed(s)
+        | ContentAttribute::ViolenceSexual(s)
+        | ContentAttribute::ViolenceDesecration(s)
+        | ContentAttribute::ViolenceSlavery(s)
+        | ContentAttribute::ViolenceWorship(s)
+        | ContentAttribute::DrugsAlcohol(s)
+        | ContentAttribute::DrugsNarcotics(s)
+        | ContentAttribute::DrugsTobacco(s)
+        | ContentAttribute::SexNudity(s)
+        | ContentAttribute::SexThemes(s)
+        | ContentAttribute::SexHomosexuality(s)
+        | ContentAttribute::SexProstitution(s)
+        | ContentAttribute::SexAdultery(s)
+        | ContentAttribute::SexAppearance(s)
+        | ContentAttribute::LanguageProfanity(s)
+        | ContentAttribute::LanguageHumor(s)
+        | ContentAttribute::LanguageDiscrimination(s)
+        | ContentAttribute::SocialChat(s)
+        | ContentAttribute::SocialInfo(s)
+        | ContentAttribute::SocialAudio(s)
+        | ContentAttribute::SocialLocation(s)
+        | ContentAttribute::SocialContacts(s)
+        | ContentAttribute::MoneyAdvertising(s)
+        | ContentAttribute::MoneyPurchasing(s)
+        | ContentAttribute::MoneyGambling(s) => state_sev(s),
+        _ => 0,
+    }
+}
+
+fn component_to_entry(c: &Component, remote: Option<String>) -> AppStreamEntry {
+    let icon_url = c.icons.first().and_then(|icon| match icon {
+        appstream::enums::Icon::Remote { url, .. } => Some(url.to_string()),
+        appstream::enums::Icon::Local { path, .. } => Some(format!("local:{}", path.display())),
+        appstream::enums::Icon::Cached { path, .. } => Some(format!("local:{}", path.display())),
+        appstream::enums::Icon::Stock(name) => Some(format!("local:{}", name)),
     });
 
-    // Pick the source image URL from each screenshot; fall back to first thumbnail
     let screenshots: Vec<String> = c
         .screenshots
         .iter()
@@ -155,9 +195,36 @@ fn component_to_entry(c: &Component, remote: Option<String>) -> AppStreamEntry {
         .take(5)
         .collect();
 
+    let (license, eula_url) = match c.project_license.as_ref().map(|l| l.to_string()) {
+        Some(l) if l.starts_with("LicenseRef-proprietary=http") => {
+            let url = l.strip_prefix("LicenseRef-proprietary=").unwrap_or("").to_string();
+            (Some("Proprietary".to_string()), Some(url))
+        }
+        Some(l) if l.contains("LicenseRef-proprietary") => (Some("Proprietary".to_string()), None),
+        other => (other, None),
+    };
+
+    let homepage_url = c.urls.iter().find_map(|u| match u {
+        ProjectUrl::Homepage(url) => Some(url.to_string()),
+        _ => None,
+    });
+
+    let content_rating = c
+        .content_rating
+        .as_ref()
+        .map(|rating| {
+            let max = rating.attributes.iter().map(attr_severity).max().unwrap_or(0);
+            match max {
+                3 => "18+".to_string(),
+                2 => "12+".to_string(),
+                1 => "7+".to_string(),
+                _ => "All ages".to_string(),
+            }
+        })
+        .unwrap_or_default();
+
     AppStreamEntry {
         id: c.id.to_string(),
-        // get_default() returns the untranslated string, good enough for search
         name: c.name.get_default().cloned().unwrap_or_default(),
         summary: c
             .summary
@@ -165,9 +232,24 @@ fn component_to_entry(c: &Component, remote: Option<String>) -> AppStreamEntry {
             .and_then(|s| s.get_default())
             .cloned()
             .unwrap_or_default(),
+        description: c
+            .description
+            .as_ref()
+            .and_then(|d| d.get_default())
+            .cloned()
+            .unwrap_or_default(),
         icon_url,
         remote,
         screenshots,
+        license,
+        eula_url,
+        homepage_url,
+        content_rating,
+        developer_name: c
+            .developer_name
+            .as_ref()
+            .and_then(|d| d.get_default())
+            .cloned(),
     }
 }
 

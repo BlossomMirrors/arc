@@ -22,6 +22,7 @@ import {
     TransactionItem,
     RemoteItem,
     ExtensionItem,
+    DescriptionBlock,
 } from "types.slint";
 export {
     PackageItem,
@@ -31,6 +32,7 @@ export {
     TransactionItem,
     RemoteItem,
     ExtensionItem,
+    DescriptionBlock,
 } from "types.slint";
 
 export component AppWindow inherits Window {
@@ -67,6 +69,7 @@ export component AppWindow inherits Window {
 
     in-out property <[image]> detail-screenshots: [];
     in-out property <[ExtensionItem]> detail-extensions: [];
+    in-out property <[DescriptionBlock]> detail-description-blocks: [];
     in-out property <bool> detail-busy: false;
     in-out property <float> detail-progress: 0;
     in-out property <string> detail-transaction-id: "";
@@ -122,6 +125,8 @@ export component AppWindow inherits Window {
     callback install-flatpakref-cancelled();
     callback eula-confirmed();
     callback eula-cancelled();
+    callback force-update-requested();
+    callback restart-daemon-requested();
     callback open-url-requested(string);
     callback launch-requested(string);
     callback install-extension-requested(string);
@@ -219,7 +224,9 @@ export component AppWindow inherits Window {
                 detail-transaction-id: root.detail-transaction-id;
                 detail-screenshots: root.detail-screenshots;
                 detail-extensions: root.detail-extensions;
+                detail-description-blocks: root.detail-description-blocks;
                 settings-preferred: root.settings-preferred;
+                icon-trash: root.icon-trash;
                 back-clicked => {
                     if root.prev-view == "home" {
                         root.back-to-home();
@@ -378,6 +385,8 @@ export component AppWindow inherits Window {
                 remove-remote(name) => {
                     root.remove-remote(name);
                 }
+                force-update-requested => { root.force-update-requested(); }
+                restart-daemon-requested => { root.restart-daemon-requested(); }
             }
         }
     }

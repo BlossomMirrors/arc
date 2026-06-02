@@ -1,5 +1,5 @@
 import { Palette, HorizontalBox, ScrollView } from "std-widgets.slint";
-import { AppDetailData, ExtensionItem } from "../types.slint";
+import { AppDetailData, ExtensionItem, DescriptionBlock } from "../types.slint";
 import { DetailHeader } from "../components/detail-header.slint";
 import { ScreenshotCarousel } from "../components/screenshot-carousel.slint";
 import { Lightbox } from "../components/lightbox.slint";
@@ -13,6 +13,8 @@ export component DetailScreen inherits Rectangle {
     in property <[image]> detail-screenshots;
     in property <string> settings-preferred;
     in property <[ExtensionItem]> detail-extensions;
+    in property <[DescriptionBlock]> detail-description-blocks;
+    in property <image> icon-trash;
 
     callback back-clicked();
     callback install-requested(string);
@@ -53,6 +55,7 @@ export component DetailScreen inherits Rectangle {
                 detail-transaction-id: root.detail-transaction-id;
                 settings-preferred: root.settings-preferred;
                 has-extensions: root.detail-extensions.length > 0;
+                icon-trash: root.icon-trash;
                 back-clicked => {
                     root.back-clicked();
                 }
@@ -90,20 +93,6 @@ export component DetailScreen inherits Rectangle {
                 }
             }
 
-            if root.detail-app.description != "": VerticalLayout {
-                padding-left: 30px;
-                padding-right: 30px;
-                padding-top: 16px;
-                padding-bottom: 12px;
-
-                Text {
-                    text: root.detail-app.description;
-                    font-size: 12px;
-                    wrap: word-wrap;
-                    color: Palette.foreground.transparentize(0.25);
-                }
-            }
-
             HorizontalBox {
                 padding-left: 30px;
                 padding-right: 30px;
@@ -114,6 +103,49 @@ export component DetailScreen inherits Rectangle {
                     screenshot-clicked(i) => {
                         root.lightbox-index = i;
                         root.lightbox-visible = true;
+                    }
+                }
+            }
+
+            if root.detail-description-blocks.length > 0: VerticalLayout {
+                padding-left: 30px;
+                padding-right: 30px;
+                padding-top: 16px;
+                padding-bottom: 12px;
+                spacing: 4px;
+
+                for block in root.detail-description-blocks: VerticalLayout {
+                    if block.is-heading: Text {
+                        text: block.text;
+                        font-size: 13px;
+                        font-weight: 700;
+                        wrap: word-wrap;
+                        color: Palette.foreground.transparentize(0.05);
+                    }
+                    if !block.is-list-item && !block.is-heading: Text {
+                        text: block.text;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                        color: Palette.foreground.transparentize(0.25);
+                    }
+                    if block.is-list-item: HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 8px;
+                        Text {
+                            text: "•";
+                            font-size: 12px;
+                            color: Palette.foreground.transparentize(0.25);
+                            horizontal-stretch: 0;
+                            vertical-alignment: top;
+                            min-width: 10px;
+                        }
+                        Text {
+                            text: block.text;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                            color: Palette.foreground.transparentize(0.25);
+                            horizontal-stretch: 1;
+                        }
                     }
                 }
             }

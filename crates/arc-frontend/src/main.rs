@@ -1,4 +1,3 @@
-mod appstream_db;
 mod helpers;
 mod icons;
 mod packages;
@@ -225,31 +224,7 @@ fn main() -> Result<()> {
                     vec![]
                 };
 
-                // Fall back to local AppStream DB when daemon is unavailable or returns nothing
-                let all_pkgs = if daemon_pkgs.is_empty() {
-                    let q = query_str.clone();
-                    tokio::task::spawn_blocking(move || {
-                        appstream_db::AppStreamDb::get_static()
-                            .search_apps(&q)
-                            .into_iter()
-                            .map(|e| libarc::Package {
-                                id: e.id,
-                                name: e.name,
-                                version: String::new(),
-                                description: e.summary,
-                                provider: libarc::Provider::Flatpak,
-                                installed: false,
-                                icon_url: e.icon_url,
-                                remote: e.remote,
-                                screenshots: vec![],
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .await
-                    .unwrap_or_default()
-                } else {
-                    daemon_pkgs
-                };
+                let all_pkgs = daemon_pkgs;
 
                 let all_pkgs = helpers::dedup_by_preference(all_pkgs, &s);
                 let raw_pkgs = load_package_icons(all_pkgs).await;
@@ -710,6 +685,7 @@ fn main() -> Result<()> {
 
             if let Some(app_ref) = app_weak.upgrade() {
                 app_ref.set_detail_screenshots([].as_slice().into());
+                app_ref.set_detail_description_blocks([].as_slice().into());
                 app_ref.set_detail_loading(true);
                 app_ref.set_current_view("detail".into());
             }
@@ -806,7 +782,11 @@ fn main() -> Result<()> {
     {
         let settings = settings.clone();
         app.on_save_settings(
-            move |preferred, ignore_native_pref, auto_updates, concurrent_downloads, show_security_warnings| {
+            move |preferred,
+                  ignore_native_pref,
+                  auto_updates,
+                  concurrent_downloads,
+                  show_security_warnings| {
                 let mut s = settings.lock().unwrap();
                 s.preferred_provider = if preferred == "Native" {
                     Provider::Distrobox
@@ -906,6 +886,46 @@ fn main() -> Result<()> {
                     } else {
                     }
                 });
+            });
+        });
+    }
+
+    {
+        let rt_handle = rt.handle().clone();
+        app.on_force_update_requested(move || {
+            rt_handle.spawn(async move {
+                let _ = tokio::process::Command::new("flatpak")
+                    .args(["update", "-y"])
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            });
+        });
+    }
+
+    {
+        let rt_handle = rt.handle().clone();
+        app.on_restart_daemon_requested(move || {
+            rt_handle.spawn(async move {
+                // Kill existing daemon
+                let _ = tokio::process::Command::new("pkill")
+                    .args(["-x", "arc-daemon"])
+                    .status()
+                    .await;
+
+                // Brief pause to let it exit cleanly
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+
+                // Spawn detached via setsid so it is NOT a child of this process.
+                // setsid creates a new session; --fork ensures the original setsid
+                // process exits immediately, leaving the daemon under init/systemd.
+                let _ = std::process::Command::new("setsid")
+                    .args(["--fork", "/usr/bin/arc-daemon"])
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
             });
         });
     }
