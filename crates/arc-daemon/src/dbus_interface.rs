@@ -320,6 +320,73 @@ impl ArcDaemonInterface {
         tx_id.to_string()
     }
 
+    async fn remove_package_with_data(
+        &self,
+        package_id: String,
+        delete_data: bool,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> String {
+        info!("RemovePackageWithData: {} delete_data={}", package_id, delete_data);
+        let (tx, _cancel_token) = self
+            .transaction_manager
+            .create(
+                TransactionType::Remove,
+                package_id.clone(),
+                provider_from_id(&package_id),
+            )
+            .await;
+        let tx_id = tx.id;
+
+        let provider = self.provider.clone();
+        let tm = self.transaction_manager.clone();
+        let emitter = emitter.to_owned();
+
+        tokio::spawn(async move {
+            let _ =
+                Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
+            tm.update_progress(tx_id, 10).await;
+            let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 10).await;
+
+            match provider.remove(&package_id).await {
+                Ok(()) => {
+                    if delete_data {
+                        if let Some(home) = std::env::var_os("HOME") {
+                            let data_dir = std::path::PathBuf::from(home)
+                                .join(".var/app")
+                                .join(&package_id);
+                            if data_dir.exists() {
+                                let _ = std::fs::remove_dir_all(&data_dir);
+                            }
+                        }
+                    }
+                    provider.invalidate_package_cache().await;
+                    tm.complete(tx_id, true, "Removal successful".to_string()).await;
+                    let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
+                    let _ = Self::transaction_finished(
+                        &emitter,
+                        tx_id.to_string(),
+                        true,
+                        "Removal successful".to_string(),
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    error!("Remove failed: {}", e);
+                    tm.complete(tx_id, false, e.to_string()).await;
+                    let _ = Self::transaction_finished(
+                        &emitter,
+                        tx_id.to_string(),
+                        false,
+                        e.to_string(),
+                    )
+                    .await;
+                }
+            }
+        });
+
+        tx_id.to_string()
+    }
+
     async fn update_package(
         &self,
         package_id: String,

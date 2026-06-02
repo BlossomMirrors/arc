@@ -24,6 +24,7 @@ pub trait ArcDaemon {
     async fn install_package(&self, package_id: &str) -> zbus::Result<String>;
     async fn install_flatpakref(&self, url: &str) -> zbus::Result<String>;
     async fn remove_package(&self, package_id: &str) -> zbus::Result<String>;
+    async fn remove_package_with_data(&self, package_id: &str, delete_data: bool) -> zbus::Result<String>;
     async fn search(&self, query: &str) -> zbus::Result<String>;
     async fn search_category(&self, category: &str) -> zbus::Result<String>;
     async fn get_app_info(&self, package_id: &str) -> zbus::Result<String>;

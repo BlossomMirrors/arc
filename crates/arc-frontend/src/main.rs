@@ -77,7 +77,6 @@ fn apply_translations(app: &AppWindow) {
     app.set_tr_install_bundle(tr!("Install Bundle").into());
     app.set_tr_install_as_appimage(tr!("Install as AppImage").into());
     app.set_tr_install_distrobox(tr!("Install via Distrobox").into());
-    app.set_tr_install_from_suffix(tr!(" from Arc Software instead").into());
     app.set_tr_searching_flathub(tr!("Searching Flathub for an alternative...").into());
     app.set_tr_file_security(tr!("Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust.").into());
     app.set_tr_add_repo(tr!("Add Repository").into());
@@ -108,6 +107,17 @@ fn apply_translations(app: &AppWindow) {
     app.set_tr_search_placeholder(tr!("Search for applications...").into());
     app.set_tr_proprietary(tr!("Proprietary").into());
     app.set_tr_all_ages(tr!("All ages").into());
+    app.set_tr_uninstall(tr!("Uninstall").into());
+    app.set_tr_install_from_suffix(tr!(" from Arc Software instead").into());
+    // Verb-final languages (German, etc.) translate this sentinel to a non-empty value.
+    // When detected, clear the verb prefix so the name leads and the suffix carries the verb.
+    if tr!("verb_final_word_order") != "verb_final_word_order" {
+        app.set_tr_install_from_prefix("".into());
+        app.set_tr_uninstall_title_prefix("".into());
+        app.set_tr_uninstall_title_suffix(tr!("uninstall_suffix").into());
+    }
+    app.set_tr_delete_data(tr!("Also delete app data").into());
+    app.set_tr_delete_data_desc(tr!("Removes settings and saved data").into());
 }
 
 fn main() -> Result<()> {
@@ -525,11 +535,35 @@ fn main() -> Result<()> {
 
     {
         let app_weak = app.as_weak();
+
+        app.on_remove_requested(move |pkg_id| {
+            let pkg_id_str = pkg_id.to_string();
+            let Some(app) = app_weak.upgrade() else { return };
+            let display_name = get_display_name(&app, &pkg_id_str);
+            let icon = {
+                let pkgs = app.get_packages();
+                let count = pkgs.row_count();
+                (0..count)
+                    .filter_map(|i| pkgs.row_data(i))
+                    .find(|p| p.id.as_str() == pkg_id_str)
+                    .map(|p| p.icon)
+                    .unwrap_or_else(|| app.get_detail_app().icon)
+            };
+            app.set_remove_dialog_pkg_id(pkg_id.clone());
+            app.set_remove_dialog_name(display_name.into());
+            app.set_remove_dialog_icon(icon);
+            app.set_remove_dialog_delete_data(true);
+            app.set_show_remove_dialog(true);
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
         let store = tx_store.clone();
 
-        app.on_remove_requested(move |pkg_id| {
+        app.on_remove_confirmed(move |pkg_id, delete_data| {
             let pkg_id_str = pkg_id.to_string();
             let in_detail = app_weak
                 .upgrade()
@@ -539,12 +573,13 @@ fn main() -> Result<()> {
                 .upgrade()
                 .map(|a| get_display_name(&a, &pkg_id_str))
                 .unwrap_or_else(|| pkg_id_str.clone());
+            let tx_type = if delete_data { "remove_with_data" } else { "remove" }.to_string();
 
             begin_transaction(
                 pkg_id_str,
                 String::new(),
                 display_name,
-                "remove".to_string(),
+                tx_type,
                 false,
                 in_detail,
                 false,

@@ -317,6 +317,7 @@ pub fn begin_transaction(
                 "install" => p.install_package(&pkg_id).await.ok(),
                 "flatpakref" => p.install_flatpakref(&pkg_id).await.ok(),
                 "remove" => p.remove_package(&pkg_id).await.ok(),
+                "remove_with_data" => p.remove_package_with_data(&pkg_id, true).await.ok(),
                 "update" => p.update_package(&pkg_id).await.ok(),
                 "bundle" => p.install_flatpak_bundle(&pkg_id).await.ok(),
                 _ => None,

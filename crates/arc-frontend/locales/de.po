@@ -161,7 +161,7 @@ msgid "Install via Distrobox"
 msgstr "Über Distrobox installieren"
 
 msgid " from Arc Software instead"
-msgstr " stattdessen aus Arc Software installieren"
+msgstr " aus Arc Software installieren"
 
 msgid "Searching Flathub for an alternative..."
 msgstr "Suche nach einer Alternative auf Flathub..."
@@ -255,3 +255,18 @@ msgstr "Proprietär"
 
 msgid "All ages"
 msgstr "Alle Altersgruppen"
+
+msgid "Uninstall"
+msgstr "Deinstallieren"
+
+msgid "uninstall_suffix"
+msgstr " deinstallieren"
+
+msgid "verb_final_word_order"
+msgstr "ja"
+
+msgid "Also delete app data"
+msgstr "App-Daten ebenfalls löschen"
+
+msgid "Removes settings and saved data"
+msgstr "Entfernt Einstellungen und gespeicherte Daten"

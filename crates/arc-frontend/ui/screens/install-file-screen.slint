@@ -19,6 +19,7 @@ export component InstallFileScreen inherits Rectangle {
     in property <string> tr-install-bundle: "Install Bundle";
     in property <string> tr-install-as-appimage: "Install as AppImage";
     in property <string> tr-install-distrobox: "Install via Distrobox";
+    in property <string> tr-install-from-prefix: "Install ";
     in property <string> tr-install-from-suffix: " from Arc Software instead";
     in property <string> tr-searching-flathub: "Searching Flathub for an alternative...";
     in property <string> tr-file-security: "Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust.";
@@ -184,7 +185,7 @@ export component InstallFileScreen inherits Rectangle {
                     }
 
                     Text {
-                        text: "Install " + root.install-file-flatpak-name + root.tr-install-from-suffix;
+                        text: root.tr-install-from-prefix + root.install-file-flatpak-name + root.tr-install-from-suffix;
                         font-size: 13px;
                         font-weight: 600;
                         color: Palette.foreground.transparentize(0.1);
