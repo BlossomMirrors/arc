@@ -70,6 +70,30 @@ fn detect_locales() -> Vec<String> {
     candidates
 }
 
+// Convert a BCP-47 / POSIX language tag into AppStream locale candidates.
+// "de-DE" or "de_DE" → ["de_DE", "de"]; "de" → ["de"]; "" or "en" → [].
+pub fn parse_locale_candidates(lang: &str) -> Vec<String> {
+    let normalized = lang.replace('-', "_");
+    let base = normalized
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .split('@')
+        .next()
+        .unwrap_or("")
+        .trim();
+    if base.is_empty() || base == "C" || base == "POSIX" || base.starts_with("en") {
+        return vec![];
+    }
+    let mut candidates = vec![base.to_string()];
+    if let Some(lang_only) = base.split('_').next() {
+        if lang_only != base {
+            candidates.push(lang_only.to_string());
+        }
+    }
+    candidates
+}
+
 // Return the best available translation for the given locale candidates,
 // falling back to the AppStream default locale ("C" = English).
 fn localize_ts<'a>(ts: &'a TranslatableString, locales: &[String]) -> Option<&'a str> {
@@ -114,102 +138,72 @@ impl AppStreamDb {
     }
 
     pub fn get_popular_apps(&self, limit: usize) -> Vec<AppStreamEntry> {
+        self.get_popular_apps_with_locales(limit, &self.locales)
+    }
+
+    pub fn get_popular_apps_with_locales(&self, limit: usize, locales: &[String]) -> Vec<AppStreamEntry> {
         self.components
             .iter()
-            .filter(|(c, _)| {
-                matches!(
-                    c.kind,
-                    ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication
-                )
-            })
+            .filter(|(c, _)| matches!(c.kind, ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication))
             .take(limit)
-            .map(|(c, remote)| {
-                component_to_entry(c, remote.clone(), &self.locales, &self.descriptions)
-            })
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions))
             .collect()
     }
 
     pub fn get_recent_apps(&self, limit: usize) -> Vec<AppStreamEntry> {
+        self.get_recent_apps_with_locales(limit, &self.locales)
+    }
+
+    pub fn get_recent_apps_with_locales(&self, limit: usize, locales: &[String]) -> Vec<AppStreamEntry> {
         self.components
             .iter()
-            .filter(|(c, _)| {
-                matches!(
-                    c.kind,
-                    ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication
-                )
-            })
+            .filter(|(c, _)| matches!(c.kind, ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication))
             .rev()
             .take(limit)
-            .map(|(c, remote)| {
-                component_to_entry(c, remote.clone(), &self.locales, &self.descriptions)
-            })
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions))
             .collect()
     }
 
     pub fn search_apps(&self, query: &str) -> Vec<AppStreamEntry> {
+        self.search_apps_with_locales(query, &self.locales)
+    }
+
+    pub fn search_apps_with_locales(&self, query: &str, locales: &[String]) -> Vec<AppStreamEntry> {
         let q = query.to_lowercase();
         self.components
             .iter()
-            .filter(|(c, _)| {
-                matches!(
-                    c.kind,
-                    ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication
-                )
-            })
+            .filter(|(c, _)| matches!(c.kind, ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication))
             .filter(|(c, _)| {
                 let id = c.id.to_string().to_lowercase();
-
-                let name_default = c
-                    .name
-                    .get_default()
-                    .map(|s| s.to_lowercase())
-                    .unwrap_or_default();
-                let name_localized = self
-                    .locales
-                    .iter()
-                    .find_map(|l| c.name.get_for_locale(l))
-                    .map(|s| s.to_lowercase())
-                    .unwrap_or_default();
-
-                let summary_default = c
-                    .summary
-                    .as_ref()
-                    .and_then(|s| s.get_default())
-                    .map(|s| s.to_lowercase())
-                    .unwrap_or_default();
-                let summary_localized = c
-                    .summary
-                    .as_ref()
-                    .and_then(|s| self.locales.iter().find_map(|l| s.get_for_locale(l)))
-                    .map(|s| s.to_lowercase())
-                    .unwrap_or_default();
-
-                id.contains(&q)
-                    || name_default.contains(&q)
-                    || name_localized.contains(&q)
-                    || summary_default.contains(&q)
-                    || summary_localized.contains(&q)
+                let name_default = c.name.get_default().map(|s| s.to_lowercase()).unwrap_or_default();
+                let name_localized = locales.iter().find_map(|l| c.name.get_for_locale(l)).map(|s| s.to_lowercase()).unwrap_or_default();
+                let summary_default = c.summary.as_ref().and_then(|s| s.get_default()).map(|s| s.to_lowercase()).unwrap_or_default();
+                let summary_localized = c.summary.as_ref().and_then(|s| locales.iter().find_map(|l| s.get_for_locale(l))).map(|s| s.to_lowercase()).unwrap_or_default();
+                id.contains(&q) || name_default.contains(&q) || name_localized.contains(&q) || summary_default.contains(&q) || summary_localized.contains(&q)
             })
-            .map(|(c, remote)| {
-                component_to_entry(c, remote.clone(), &self.locales, &self.descriptions)
-            })
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions))
             .collect()
     }
 
     pub fn find_by_id(&self, id: &str) -> Option<AppStreamEntry> {
+        self.find_by_id_with_locales(id, &self.locales)
+    }
+
+    pub fn find_by_id_with_locales(&self, id: &str, locales: &[String]) -> Option<AppStreamEntry> {
         let with_desktop = format!("{}.desktop", id);
         self.components
             .iter()
-            .find(|(c, _)| {
-                let cid = c.id.to_string();
-                cid == id || cid == with_desktop
-            })
-            .map(|(c, remote)| component_to_entry(c, remote.clone(), &self.locales, &self.descriptions))
+            .find(|(c, _)| { let cid = c.id.to_string(); cid == id || cid == with_desktop })
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions))
     }
 
     // Fallback for installed apps absent from any AppStream catalog.
     // Every installed Flatpak exports its own metainfo file; we parse that directly.
     pub fn load_from_exported_metainfo(&self, id: &str) -> Option<AppStreamEntry> {
+        self.load_from_exported_metainfo_with_locales(id, &self.locales)
+    }
+
+    pub fn load_from_exported_metainfo_with_locales(&self, id: &str, locales: &[String]) -> Option<AppStreamEntry> {
         let mut dirs = vec![
             PathBuf::from("/var/lib/flatpak/exports/share/metainfo"),
             PathBuf::from("/var/lib/flatpak/exports/share/appdata"),
@@ -224,7 +218,7 @@ impl AppStreamDb {
                 let path = dir.join(format!("{}{}", id, suffix));
                 if !path.exists() { continue; }
                 let Ok(bytes) = std::fs::read(&path) else { continue; };
-                if let Some(entry) = parse_metainfo_bytes(id, &bytes, &self.locales) {
+                if let Some(entry) = parse_metainfo_bytes(id, &bytes, locales) {
                     return Some(entry);
                 }
             }
@@ -233,22 +227,15 @@ impl AppStreamDb {
     }
 
     pub fn get_apps_by_category(&self, category: &str) -> Vec<AppStreamEntry> {
+        self.get_apps_by_category_with_locales(category, &self.locales)
+    }
+
+    pub fn get_apps_by_category_with_locales(&self, category: &str, locales: &[String]) -> Vec<AppStreamEntry> {
         self.components
             .iter()
-            .filter(|(c, _)| {
-                matches!(
-                    c.kind,
-                    ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication
-                )
-            })
-            .filter(|(c, _)| {
-                c.categories
-                    .iter()
-                    .any(|cat| format!("{:?}", cat).to_lowercase() == category.to_lowercase())
-            })
-            .map(|(c, remote)| {
-                component_to_entry(c, remote.clone(), &self.locales, &self.descriptions)
-            })
+            .filter(|(c, _)| matches!(c.kind, ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication))
+            .filter(|(c, _)| c.categories.iter().any(|cat| format!("{:?}", cat).to_lowercase() == category.to_lowercase()))
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions))
             .collect()
     }
 }

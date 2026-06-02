@@ -28,6 +28,8 @@ libflatpak = "0.7"
 appstream = { version = "0.2", features = ["gzip"] }
 xmltree = "0.10"
 reqwest = { version = "0.12", features = ["rustls-tls", "stream", "json"] }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }
 serde_yaml = "0.9"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 resvg = "0.44"
