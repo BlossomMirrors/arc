@@ -300,6 +300,13 @@ fn search_flatpak_icon_dir(base: impl AsRef<Path>, icon_name: &str) -> Option<Pa
                             if p.exists() {
                                 return Some(p);
                             }
+                            // Some AppStream catalogs store icon files with a legacy
+                            // ".desktop" suffix (e.g. "io.github.flattool.Warehouse.desktop.png")
+                            // even though the canonical app ID omits it.
+                            let p2 = size_dir.join(format!("{}.desktop.{}", icon_name, ext));
+                            if p2.exists() {
+                                return Some(p2);
+                            }
                         }
                     }
                 }
@@ -359,7 +366,7 @@ pub fn load_local_flatpak_icon(app_id: &str) -> Option<RawIcon> {
         PathBuf::from("/var/lib/flatpak"),
     ];
     for base in &bases {
-        for size in &["128x128", "256x256", "96x96", "64x64", "48x48", "32x32"] {
+        for size in &["128x128", "256x256", "96x96", "64x64", "48x48", "32x32", "scalable"] {
             for ext in &["png", "svg", "svgz"] {
                 let p = base
                     .join("app")

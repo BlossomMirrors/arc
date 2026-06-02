@@ -1,4 +1,4 @@
-use appstream::enums::{ComponentKind, ContentAttribute, ContentState, ImageKind, ProjectUrl};
+use appstream::enums::{Bundle, ComponentKind, ContentAttribute, ContentState, ImageKind, ProjectUrl};
 use appstream::{Collection, Component, MarkupTranslatableString, TranslatableString};
 use libarc::{Package, Provider};
 use std::collections::HashMap;
@@ -197,10 +197,39 @@ impl AppStreamDb {
     }
 
     pub fn find_by_id(&self, id: &str) -> Option<AppStreamEntry> {
+        let with_desktop = format!("{}.desktop", id);
         self.components
             .iter()
-            .find(|(c, _)| c.id.to_string() == id)
+            .find(|(c, _)| {
+                let cid = c.id.to_string();
+                cid == id || cid == with_desktop
+            })
             .map(|(c, remote)| component_to_entry(c, remote.clone(), &self.locales, &self.descriptions))
+    }
+
+    // Fallback for installed apps absent from any AppStream catalog.
+    // Every installed Flatpak exports its own metainfo file; we parse that directly.
+    pub fn load_from_exported_metainfo(&self, id: &str) -> Option<AppStreamEntry> {
+        let mut dirs = vec![
+            PathBuf::from("/var/lib/flatpak/exports/share/metainfo"),
+            PathBuf::from("/var/lib/flatpak/exports/share/appdata"),
+        ];
+        if let Some(home) = std::env::var_os("HOME") {
+            let h = PathBuf::from(home);
+            dirs.push(h.join(".local/share/flatpak/exports/share/metainfo"));
+            dirs.push(h.join(".local/share/flatpak/exports/share/appdata"));
+        }
+        for dir in &dirs {
+            for suffix in &[".metainfo.xml", ".appdata.xml"] {
+                let path = dir.join(format!("{}{}", id, suffix));
+                if !path.exists() { continue; }
+                let Ok(bytes) = std::fs::read(&path) else { continue; };
+                if let Some(entry) = parse_metainfo_bytes(id, &bytes, &self.locales) {
+                    return Some(entry);
+                }
+            }
+        }
+        None
     }
 
     pub fn get_apps_by_category(&self, category: &str) -> Vec<AppStreamEntry> {
@@ -222,6 +251,115 @@ impl AppStreamDb {
             })
             .collect()
     }
+}
+
+// Parse a single metainfo/appdata XML file and build an AppStreamEntry.
+// The `id` argument is the canonical app ID (i.e. what we searched the file by)
+// and is used directly rather than reading the potentially-.desktop-suffixed <id> element.
+fn parse_metainfo_bytes(id: &str, bytes: &[u8], locales: &[String]) -> Option<AppStreamEntry> {
+    let Ok(root) = xmltree::Element::parse(bytes) else { return None; };
+
+    // Pick the best-matching localized value for a repeating tag (e.g. <name xml:lang="de">).
+    let pick = |tag: &str| -> String {
+        let mut default_val = String::new();
+        let mut by_lang: HashMap<String, String> = HashMap::new();
+        for child in root.children.iter().filter_map(|n| n.as_element()) {
+            if child.name != tag { continue; }
+            let text = child.get_text().map(|t| t.trim().to_string()).unwrap_or_default();
+            if let Some(lang) = child.attributes.get("lang") {
+                by_lang.insert(lang.clone(), text);
+            } else {
+                default_val = text;
+            }
+        }
+        locales.iter().find_map(|l| by_lang.get(l)).cloned().unwrap_or(default_val)
+    };
+
+    let name = pick("name");
+    let summary = pick("summary");
+    let developer_name = root.children.iter().filter_map(|n| n.as_element()).find_map(|e| {
+        if e.name == "developer_name" {
+            e.get_text().map(|t| t.trim().to_string())
+        } else if e.name == "developer" {
+            e.children.iter().filter_map(|n| n.as_element())
+                .find(|c| c.name == "name")
+                .and_then(|c| c.get_text())
+                .map(|t| t.trim().to_string())
+        } else {
+            None
+        }
+    });
+
+    // Description via the same locale-aware xmltree extractor used for catalog files.
+    let mut desc_map: HashMap<String, HashMap<String, String>> = HashMap::new();
+    extract_descriptions(bytes, &mut desc_map);
+    // The map may be keyed by the .desktop-suffixed ID from the <id> element.
+    let comp_id = root.children.iter().filter_map(|n| n.as_element())
+        .find(|e| e.name == "id")
+        .and_then(|e| e.get_text())
+        .map(|t| t.trim().to_string())
+        .unwrap_or_else(|| id.to_string());
+    let description = desc_map.get(comp_id.as_str())
+        .and_then(|lm| locales.iter().find_map(|l| lm.get(l)).or_else(|| lm.get("C")))
+        .cloned()
+        .unwrap_or_default();
+
+    let license_raw = root.children.iter().filter_map(|n| n.as_element())
+        .find(|e| e.name == "project_license")
+        .and_then(|e| e.get_text())
+        .map(|t| t.trim().to_string());
+    let (license, eula_url) = match license_raw {
+        Some(l) if l.starts_with("LicenseRef-proprietary=http") => {
+            let url = l.strip_prefix("LicenseRef-proprietary=").unwrap_or("").to_string();
+            (Some("Proprietary".to_string()), Some(url))
+        }
+        Some(l) if l.contains("LicenseRef-proprietary") => (Some("Proprietary".to_string()), None),
+        other => (other, None),
+    };
+
+    let homepage_url = root.children.iter().filter_map(|n| n.as_element())
+        .find(|e| e.name == "url" && e.attributes.get("type").map(|t| t == "homepage").unwrap_or(false))
+        .and_then(|e| e.get_text())
+        .map(|t| t.trim().to_string());
+
+    let content_rating = root.children.iter().filter_map(|n| n.as_element())
+        .find(|e| e.name == "content_rating")
+        .map(|rating| {
+            let max = rating.children.iter().filter_map(|n| n.as_element())
+                .filter_map(|e| e.get_text().map(|t| t.trim().to_string()))
+                .map(|v| match v.as_str() { "intense" => 3u8, "moderate" => 2, "mild" => 1, _ => 0 })
+                .max().unwrap_or(0);
+            match max { 3 => "18+", 2 => "12+", 1 => "7+", _ => "All ages" }.to_string()
+        })
+        .unwrap_or_default();
+
+    let screenshots: Vec<String> = root.children.iter().filter_map(|n| n.as_element())
+        .find(|e| e.name == "screenshots")
+        .map(|ss| {
+            ss.children.iter().filter_map(|n| n.as_element())
+                .filter(|e| e.name == "screenshot")
+                .filter_map(|sc| sc.children.iter().filter_map(|n| n.as_element())
+                    .find(|e| e.name == "image")
+                    .and_then(|img| img.get_text())
+                    .map(|t| t.trim().to_string()))
+                .take(5).collect()
+        })
+        .unwrap_or_default();
+
+    Some(AppStreamEntry {
+        id: id.to_string(),
+        name,
+        summary,
+        description,
+        icon_url: None,
+        remote: None,
+        screenshots,
+        license,
+        eula_url,
+        homepage_url,
+        content_rating,
+        developer_name,
+    })
 }
 
 fn element_to_html(e: &xmltree::Element) -> String {
@@ -381,12 +519,18 @@ fn component_to_entry(
     locales: &[String],
     descriptions: &HashMap<String, HashMap<String, String>>,
 ) -> AppStreamEntry {
-    let icon_url = c.icons.first().and_then(|icon| match icon {
+    // Prefer a remote 128×128 URL — local cached files may not be downloaded yet.
+    // Fall back to the first available icon (cached → local → stock) otherwise.
+    let icon_url = c.icons.iter().find_map(|icon| match icon {
+        appstream::enums::Icon::Remote { url, width, .. }
+            if width.map(|w| w >= 96).unwrap_or(true) => Some(url.to_string()),
+        _ => None,
+    }).or_else(|| c.icons.first().and_then(|icon| match icon {
         appstream::enums::Icon::Remote { url, .. } => Some(url.to_string()),
         appstream::enums::Icon::Local { path, .. } => Some(format!("local:{}", path.display())),
         appstream::enums::Icon::Cached { path, .. } => Some(format!("local:{}", path.display())),
         appstream::enums::Icon::Stock(name) => Some(format!("local:{}", name)),
-    });
+    }));
 
     let screenshots: Vec<String> = c
         .screenshots
@@ -458,8 +602,17 @@ fn component_to_entry(
         }
     };
 
+    // Use the Flatpak bundle reference as the canonical app ID when available.
+    // AppStream catalogs often store a legacy ".desktop" suffix in the component ID
+    // (e.g. "io.github.flattool.Warehouse.desktop") while the actual Flatpak app ID
+    // omits it ("io.github.flattool.Warehouse"). The bundle ref is authoritative.
+    let canonical_id = c.bundles.iter().find_map(|b| match b {
+        Bundle::Flatpak { reference, .. } => reference.split('/').nth(1).map(|s| s.to_string()),
+        _ => None,
+    }).unwrap_or_else(|| c.id.to_string());
+
     AppStreamEntry {
-        id: c.id.to_string(),
+        id: canonical_id,
         name: localize_ts(&c.name, locales)
             .unwrap_or_default()
             .to_string(),

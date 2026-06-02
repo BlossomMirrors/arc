@@ -471,9 +471,18 @@ pub async fn load_package_icons(pkgs: Vec<libarc::Package>) -> Vec<RawPackage> {
             match pkg.provider {
                 Provider::Flatpak => {
                     let id = pkg.id.clone();
-                    tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
+                    let icon_url = pkg.icon_url.clone();
+                    let local = tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
                         .await
-                        .unwrap_or(None)
+                        .unwrap_or(None);
+                    if local.is_some() {
+                        local
+                    } else {
+                        match icon_url.as_deref() {
+                            Some(url) if !url.starts_with("local:") => icons::load_icon(url).await,
+                            _ => None,
+                        }
+                    }
                 }
                 Provider::Lutris => {
                     if let Some(url) = &pkg.icon_url {
@@ -639,9 +648,19 @@ pub async fn load_detail(
 
     let icon = if !flatpak_id.is_empty() {
         let fid = flatpak_id.clone();
-        tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&fid))
+        let remote_icon_url = flatpak_pkg.and_then(|p| p.icon_url.clone())
+            .filter(|u| !u.starts_with("local:"));
+        let local = tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&fid))
             .await
-            .unwrap_or(None)
+            .unwrap_or(None);
+        if local.is_some() {
+            local
+        } else {
+            match remote_icon_url.as_deref() {
+                Some(url) => icons::load_icon(url).await,
+                None => None,
+            }
+        }
     } else if !lutris_id.is_empty() {
         if let Some(lutris) = &lutris_pkg {
             if let Some(icon_url) = &lutris.icon_url {

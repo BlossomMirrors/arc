@@ -480,8 +480,9 @@ impl ArcDaemonInterface {
     async fn get_app_metadata(&self, package_id: String) -> String {
         info!("GetAppMetadata: {}", package_id);
         tokio::task::spawn_blocking(move || {
-            crate::appstream_db::AppStreamDb::get_static()
-                .find_by_id(&package_id)
+            let db = crate::appstream_db::AppStreamDb::get_static();
+            db.find_by_id(&package_id)
+                .or_else(|| db.load_from_exported_metainfo(&package_id))
                 .and_then(|e| serde_json::to_string(&e).ok())
                 .unwrap_or_else(|| "null".to_string())
         })

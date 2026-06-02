@@ -156,7 +156,7 @@ export component DetailHeader inherits Rectangle {
                             y: 20px;
                             width: tt-text.preferred-width + 12px;
                             height: 22px;
-                            background: Palette.foreground;
+                            background: Palette.color-scheme == ColorScheme.dark ? #e2e8f0 : #1e293b;
                             border-radius: 4px;
 
                             tt-text := Text {
@@ -164,7 +164,7 @@ export component DetailHeader inherits Rectangle {
                                 y: (parent.height - self.preferred-height) / 2;
                                 text: root.tr-verified;
                                 font-size: 11px;
-                                color: Palette.background;
+                                color: Palette.color-scheme == ColorScheme.dark ? #1e293b : #f1f5f9;
                             }
                         }
                     }

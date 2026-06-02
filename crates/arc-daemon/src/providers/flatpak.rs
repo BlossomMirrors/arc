@@ -156,23 +156,31 @@ impl FlatpakProvider {
 
             Ok(app_ids
                 .into_iter()
-                .map(|id| {
+                .filter_map(|id| {
                     let is_installed = installed_ids.contains(&id);
-                    // enrich with appstream metadata if we have it, otherwise
-                    // just return a bare package with the id as the name
-                    db.find_by_id(&id)
-                        .map(|e| entry_to_flatpak_package(e, is_installed))
-                        .unwrap_or_else(|| Package {
-                            name: id.clone(),
-                            id: id.clone(),
-                            version: String::new(),
-                            description: String::new(),
-                            provider: libarc::Provider::Flatpak,
-                            installed: is_installed,
-                            icon_url: None,
-                            remote: None,
-                            screenshots: vec![],
-                        })
+                    if let Some(entry) = db.find_by_id(&id) {
+                        Some(entry_to_flatpak_package(entry, is_installed))
+                    } else if is_installed {
+                        // Installed but absent from any catalog — try the exported metainfo.
+                        let pkg = db.load_from_exported_metainfo(&id)
+                            .map(|e| entry_to_flatpak_package(e, true))
+                            .unwrap_or_else(|| Package {
+                                name: id.clone(),
+                                id: id.clone(),
+                                version: String::new(),
+                                description: String::new(),
+                                provider: libarc::Provider::Flatpak,
+                                installed: true,
+                                icon_url: None,
+                                remote: None,
+                                screenshots: vec![],
+                            });
+                        Some(pkg)
+                    } else {
+                        // Not installed and no catalog entry — skip so it doesn't
+                        // show up as a nameless ghost in search results.
+                        None
+                    }
                 })
                 .collect())
         })
