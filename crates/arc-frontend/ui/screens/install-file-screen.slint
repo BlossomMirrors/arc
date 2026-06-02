@@ -1,4 +1,4 @@
-import { VerticalBox, Button } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
 
 export component InstallFileScreen inherits Rectangle {
     in property <string> install-file-name;
@@ -7,6 +7,8 @@ export component InstallFileScreen inherits Rectangle {
     in property <bool> install-file-is-appimage;
     in property <bool> install-file-flatpak-searched;
     in property <bool> install-file-is-flatpak-bundle;
+    in property <image> icon-package;
+    in property <bool> show-security-warning: true;
 
     callback distrobox-requested();
     callback appimage-requested();
@@ -14,58 +16,219 @@ export component InstallFileScreen inherits Rectangle {
     callback bundle-requested();
     callback cancelled();
 
-    VerticalBox {
+    private property <string> screen-title:
+        root.install-file-is-flatpak-bundle ? "Install Flatpak Bundle" : root.install-file-is-appimage ? "Install AppImage" : "Install Package";
+
+    private property <string> screen-description:
+        root.install-file-is-flatpak-bundle ? "This will install the bundled Flatpak application on your system." : root.install-file-is-appimage ? "This will register the AppImage so it appears in your app launcher." : "Choose how you'd like to install this package file.";
+
+    VerticalLayout {
         alignment: center;
         padding: 48px;
         spacing: 20px;
 
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 80px;
+                height: 80px;
+                border-radius: 16px;
+                background: #80808012;
+                border-width: 1px;
+                border-color: #80808025;
+
+                Image {
+                    source: root.icon-package;
+                    width: 44px;
+                    height: 44px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    image-fit: contain;
+                    colorize: Palette.foreground.transparentize(0.15);
+                }
+            }
+        }
+
         Text {
-            text: root.install-file-is-flatpak-bundle ? "Install Flatpak Bundle"
-                : root.install-file-is-appimage ? "Install AppImage"
-                : "Install Package";
-            font-size: 22px;
+            text: root.screen-title;
+            font-size: 20px;
             font-weight: 700;
             horizontal-alignment: center;
         }
 
         Text {
             text: root.install-file-name;
-            font-size: 13px;
-            color: #888;
+            font-size: 12px;
+            color: Palette.foreground.transparentize(0.45);
             horizontal-alignment: center;
             overflow: elide;
         }
 
-        if root.install-file-is-flatpak-bundle: Button {
-            text: "Install as Flatpak Bundle";
-            clicked => { root.bundle-requested(); }
-        }
-
-        if root.install-file-is-appimage && !root.install-file-is-flatpak-bundle: Button {
-            text: "Install as AppImage";
-            clicked => { root.appimage-requested(); }
-        }
-
-        if !root.install-file-is-appimage && !root.install-file-is-flatpak-bundle: Button {
-            text: "Install via Distrobox";
-            clicked => { root.distrobox-requested(); }
-        }
-
-        if root.install-file-has-flatpak && !root.install-file-is-flatpak-bundle: Button {
-            text: "Install " + root.install-file-flatpak-name + " from Flathub instead";
-            clicked => { root.flatpak-requested(); }
-        }
-
-        if !root.install-file-is-appimage && !root.install-file-is-flatpak-bundle && !root.install-file-has-flatpak && !root.install-file-flatpak-searched: Text {
-            text: "Searching for Flathub alternative...";
-            font-size: 11px;
-            color: #888;
+        Text {
+            text: root.screen-description;
+            font-size: 13px;
+            color: Palette.foreground.transparentize(0.25);
             horizontal-alignment: center;
+            wrap: word-wrap;
         }
 
-        Button {
-            text: "Cancel";
-            clicked => { root.cancelled(); }
+        VerticalLayout {
+            spacing: 10px;
+
+            // Flatpak bundle
+            if root.install-file-is-flatpak-bundle: HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 280px;
+                    height: 40px;
+                    border-radius: 10px;
+                    background: btn-bundle-ta.has-hover ? #2563eb : #3b82f6;
+
+                    btn-bundle-ta := TouchArea {
+                        clicked => {
+                            root.bundle-requested();
+                        }
+                    }
+
+                    Text {
+                        text: "Install Bundle";
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: white;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // AppImage primary action
+            if root.install-file-is-appimage && !root.install-file-is-flatpak-bundle: HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 280px;
+                    height: 40px;
+                    border-radius: 10px;
+                    background: btn-appimage-ta.has-hover ? #2563eb : #3b82f6;
+
+                    btn-appimage-ta := TouchArea {
+                        clicked => {
+                            root.appimage-requested();
+                        }
+                    }
+
+                    Text {
+                        text: "Install as AppImage";
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: white;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Distrobox (regular package)
+            if !root.install-file-is-appimage && !root.install-file-is-flatpak-bundle: HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 280px;
+                    height: 40px;
+                    border-radius: 10px;
+                    background: btn-distrobox-ta.has-hover ? #2563eb : #3b82f6;
+
+                    btn-distrobox-ta := TouchArea {
+                        clicked => {
+                            root.distrobox-requested();
+                        }
+                    }
+
+                    Text {
+                        text: "Install via Distrobox";
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: white;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Flathub alternative
+            if root.install-file-has-flatpak && !root.install-file-is-flatpak-bundle: HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 280px;
+                    height: 40px;
+                    border-radius: 10px;
+                    background: btn-flatpak-ta.has-hover ? #80808030 : #80808018;
+                    border-width: 1px;
+                    border-color: #80808035;
+
+                    btn-flatpak-ta := TouchArea {
+                        clicked => {
+                            root.flatpak-requested();
+                        }
+                    }
+
+                    Text {
+                        text: "Install " + root.install-file-flatpak-name + " from Arc Software instead";
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: Palette.foreground.transparentize(0.1);
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        width: parent.width - 16px;
+                        x: 8px;
+                    }
+                }
+            }
+
+            // Searching indicator
+            if !root.install-file-is-appimage && !root.install-file-is-flatpak-bundle && !root.install-file-has-flatpak && !root.install-file-flatpak-searched: HorizontalLayout {
+                alignment: center;
+                Text {
+                    text: "Searching Flathub for an alternative...";
+                    font-size: 12px;
+                    color: Palette.foreground.transparentize(0.5);
+                    horizontal-alignment: center;
+                }
+            }
+        }
+
+        if root.show-security-warning: HorizontalLayout {
+            alignment: center;
+
+            Rectangle {
+                width: 320px;
+                border-radius: 10px;
+                background: #f9731610;
+                border-width: 1px;
+                border-color: #f9731630;
+
+                HorizontalLayout {
+                    padding: 12px;
+                    spacing: 10px;
+
+                    Image {
+                        source: @image-url("../../assets/warning.svg");
+                        width: 16px;
+                        height: 16px;
+                        colorize: #f97316;
+                        image-fit: contain;
+                        vertical-alignment: top;
+                    }
+
+                    Text {
+                        text: "Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust.";
+                        font-size: 11px;
+                        color: #f97316;
+                        wrap: word-wrap;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
         }
     }
 }

@@ -17,11 +17,14 @@ pub struct Settings {
     pub auto_updates: bool,
     #[serde(default = "Settings::default_concurrent_downloads")]
     pub concurrent_downloads: u32,
+    #[serde(default = "Settings::default_show_security_warnings")]
+    pub show_security_warnings: bool,
 }
 
 impl Settings {
     fn default_auto_updates() -> bool { true }
     fn default_concurrent_downloads() -> u32 { 3 }
+    fn default_show_security_warnings() -> bool { true }
 }
 
 impl Default for Settings {
@@ -31,6 +34,7 @@ impl Default for Settings {
             ignore_native_preference: false,
             auto_updates: true,
             concurrent_downloads: 3,
+            show_security_warnings: true,
         }
     }
 }

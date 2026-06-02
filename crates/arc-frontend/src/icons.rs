@@ -427,6 +427,13 @@ pub fn load_ui_icon(icon_name: &str) -> Option<RawIcon> {
     find_system_icon(icon_name, 16).and_then(|path| load_icon_from_path(&path, 16))
 }
 
+pub fn load_ui_icon_large(icon_name: &str) -> Option<RawIcon> {
+    find_system_icon(icon_name, 48)
+        .and_then(|path| load_icon_from_path(&path, 48))
+        .or_else(|| find_system_icon(icon_name, 32).and_then(|path| load_icon_from_path(&path, 32)))
+        .or_else(|| find_system_icon(icon_name, 16).and_then(|path| load_icon_from_path(&path, 16)))
+}
+
 pub fn load_distrobox_icon(icon_url: Option<&str>, pkg_name: &str) -> Option<RawIcon> {
     if let Some(v) = icon_url {
         let p = Path::new(v);

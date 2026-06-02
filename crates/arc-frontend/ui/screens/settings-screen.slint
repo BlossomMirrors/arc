@@ -30,11 +30,12 @@ export component SettingsScreen inherits Rectangle {
     in-out property <bool> settings-ignore-native-pref: false;
     in-out property <bool> settings-auto-updates: true;
     in-out property <int> settings-concurrent-downloads: 3;
+    in-out property <bool> settings-show-security-warnings: true;
     in-out property <[RemoteItem]> settings-remotes: [];
     in-out property <bool> settings-remotes-loading: false;
 
     callback back-clicked();
-    callback save-settings(string, bool, bool, int);
+    callback save-settings(string, bool, bool, int, bool);
     callback load-remotes();
     callback add-remote(string, string);
     callback remove-remote(string);
@@ -104,7 +105,42 @@ export component SettingsScreen inherits Rectangle {
                         checked: root.settings-auto-updates;
                         toggled => {
                             root.settings-auto-updates = self.checked;
-                            root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads);
+                            root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads, root.settings-show-security-warnings);
+                        }
+                    }
+                }
+            }
+
+            HorizontalBox {
+                padding: 10px;
+                padding-left: 20px;
+                padding-right: 0;
+                spacing: 12px;
+                VerticalBox {
+                    spacing: 2px;
+                    padding: 0;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Security warnings";
+                    }
+
+                    Text {
+                        text: "Show warnings when installing third-party software or adding repositories";
+                        font-size: 11px;
+                        color: Palette.foreground.transparentize(0.4);
+                        wrap: word-wrap;
+                    }
+                }
+
+                VerticalBox {
+                    alignment: center;
+                    padding: 0;
+                    horizontal-stretch: 0;
+                    CheckBox {
+                        checked: root.settings-show-security-warnings;
+                        toggled => {
+                            root.settings-show-security-warnings = self.checked;
+                            root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads, root.settings-show-security-warnings);
                         }
                     }
                 }
@@ -152,7 +188,7 @@ export component SettingsScreen inherits Rectangle {
                                 if root.settings-concurrent-downloads > 1 {
                                     root.settings-concurrent-downloads -= 1;
                                 }
-                                root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads);
+                                root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads, root.settings-show-security-warnings);
                             }
                         }
 
@@ -188,7 +224,7 @@ export component SettingsScreen inherits Rectangle {
                                 if root.settings-concurrent-downloads < 16 {
                                     root.settings-concurrent-downloads += 1;
                                 }
-                                root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads);
+                                root.save-settings(root.settings-preferred, root.settings-ignore-native-pref, root.settings-auto-updates, root.settings-concurrent-downloads, root.settings-show-security-warnings);
                             }
                         }
 

@@ -1,28 +1,51 @@
-import { VerticalBox, Button } from "std-widgets.slint";
 import { Palette } from "std-widgets.slint";
 
 export component AddFlatpakRepoScreen inherits Rectangle {
     in property <string> repo-title;
     in property <string> repo-url;
 
+    in property <bool> show-security-warning: true;
+
     callback confirmed();
     callback cancelled();
 
-    VerticalBox {
+    VerticalLayout {
         alignment: center;
         padding: 48px;
         spacing: 20px;
 
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 80px;
+                height: 80px;
+                border-radius: 16px;
+                background: #80808012;
+                border-width: 1px;
+                border-color: #80808025;
+
+                Image {
+                    source: @image-url("../../assets/warning.svg");
+                    width: 40px;
+                    height: 40px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    image-fit: contain;
+                    colorize: Palette.foreground.transparentize(0.2);
+                }
+            }
+        }
+
         Text {
             text: "Add Repository";
-            font-size: 22px;
+            font-size: 20px;
             font-weight: 700;
             horizontal-alignment: center;
         }
 
         Text {
             text: root.repo-title != "" ? root.repo-title : "Unknown repository";
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 600;
             horizontal-alignment: center;
         }
@@ -36,21 +59,72 @@ export component AddFlatpakRepoScreen inherits Rectangle {
         }
 
         Text {
-            text: "This will add the repository to your Flatpak user installation.";
-            font-size: 11px;
-            color: Palette.foreground.transparentize(0.4);
+            text: "This will add the repository to your Flatpak user installation and make its applications available to install.";
+            font-size: 13px;
+            color: Palette.foreground.transparentize(0.25);
             horizontal-alignment: center;
             wrap: word-wrap;
         }
 
-        Button {
-            text: "Add Repository";
-            clicked => { root.confirmed(); }
+        if root.show-security-warning: HorizontalLayout {
+            alignment: center;
+
+            Rectangle {
+                width: 320px;
+                border-radius: 10px;
+                background: #f9731610;
+                border-width: 1px;
+                border-color: #f9731630;
+
+                HorizontalLayout {
+                    padding: 12px;
+                    spacing: 10px;
+
+                    Image {
+                        source: @image-url("../../assets/warning.svg");
+                        width: 16px;
+                        height: 16px;
+                        colorize: #f97316;
+                        image-fit: contain;
+                        vertical-alignment: top;
+                    }
+
+                    Text {
+                        text: "Adding a third-party repository gives it the ability to distribute software to your system. Only add repositories from sources you trust.";
+                        font-size: 11px;
+                        color: #f97316;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
         }
 
-        Button {
-            text: "Cancel";
-            clicked => { root.cancelled(); }
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: center;
+
+            Rectangle {
+                width: 150px;
+                height: 36px;
+                border-radius: 8px;
+                background: confirm-ta.has-hover ? #2563eb : #3b82f6;
+
+                confirm-ta := TouchArea {
+                    clicked => {
+                        root.confirmed();
+                    }
+                }
+
+                Text {
+                    text: "Add Repository";
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: white;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
         }
     }
 }

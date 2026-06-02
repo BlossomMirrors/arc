@@ -58,12 +58,9 @@ export component InstallFlatpakrefScreen inherits Rectangle {
 
         Button {
             text: "Install";
-            clicked => { root.confirmed(); }
-        }
-
-        Button {
-            text: "Cancel";
-            clicked => { root.cancelled(); }
+            clicked => {
+                root.confirmed();
+            }
         }
     }
 }

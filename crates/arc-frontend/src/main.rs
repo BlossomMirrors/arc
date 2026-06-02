@@ -47,6 +47,9 @@ fn main() -> Result<()> {
     if let Some(icon) = icons::load_ui_icon("user-trash-symbolic") {
         app.set_icon_trash(icon.to_slint_image());
     }
+    if let Some(icon) = icons::load_ui_icon_large("package-x-generic-symbolic") {
+        app.set_icon_package(icon.to_slint_image());
+    }
 
     let proxy_opt: Arc<Mutex<Option<ArcDaemonProxy<'static>>>> =
         Arc::new(Mutex::new(proxy_result.ok()));
@@ -67,6 +70,7 @@ fn main() -> Result<()> {
         app.set_settings_ignore_native_pref(s.ignore_native_preference);
         app.set_settings_auto_updates(s.auto_updates);
         app.set_settings_concurrent_downloads(s.concurrent_downloads as i32);
+        app.set_settings_show_security_warnings(s.show_security_warnings);
     }
 
     let tx_store: TxStore = Arc::new(Mutex::new(Vec::new()));
@@ -802,7 +806,7 @@ fn main() -> Result<()> {
     {
         let settings = settings.clone();
         app.on_save_settings(
-            move |preferred, ignore_native_pref, auto_updates, concurrent_downloads| {
+            move |preferred, ignore_native_pref, auto_updates, concurrent_downloads, show_security_warnings| {
                 let mut s = settings.lock().unwrap();
                 s.preferred_provider = if preferred == "Native" {
                     Provider::Distrobox
@@ -812,6 +816,7 @@ fn main() -> Result<()> {
                 s.ignore_native_preference = ignore_native_pref;
                 s.auto_updates = auto_updates;
                 s.concurrent_downloads = (concurrent_downloads as u32).max(1);
+                s.show_security_warnings = show_security_warnings;
                 let _ = s.save();
             },
         );

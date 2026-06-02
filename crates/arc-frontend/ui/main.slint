@@ -56,6 +56,7 @@ export component AppWindow inherits Window {
     in-out property <bool> settings-ignore-native-pref: false;
     in-out property <bool> settings-auto-updates: true;
     in-out property <int> settings-concurrent-downloads: 3;
+    in-out property <bool> settings-show-security-warnings: true;
     in-out property <[RemoteItem]> settings-remotes: [];
     in-out property <bool> settings-remotes-loading: false;
 
@@ -95,6 +96,7 @@ export component AppWindow inherits Window {
     in-out property <image> icon-search;
     in-out property <image> icon-settings;
     in-out property <image> icon-trash;
+    in-out property <image> icon-package;
 
     callback detail-requested(string);
     callback search-requested(string);
@@ -105,7 +107,7 @@ export component AppWindow inherits Window {
     callback refresh-updates-requested();
     callback category-selected(string);
     callback app-selected(string);
-    callback save-settings(string, bool, bool, int);
+    callback save-settings(string, bool, bool, int, bool);
     callback load-remotes();
     callback add-remote(string, string);
     callback remove-remote(string);
@@ -283,6 +285,8 @@ export component AppWindow inherits Window {
             if root.current-view == "install-file": InstallFileScreen {
                 width: parent.width;
                 height: parent.height;
+                icon-package: root.icon-package;
+                show-security-warning: root.settings-show-security-warnings;
                 install-file-name: root.install-file-name;
                 install-file-has-flatpak: root.install-file-has-flatpak;
                 install-file-flatpak-searched: root.install-file-flatpak-searched;
@@ -309,6 +313,7 @@ export component AppWindow inherits Window {
             if root.current-view == "add-repo": AddFlatpakRepoScreen {
                 width: parent.width;
                 height: parent.height;
+                show-security-warning: root.settings-show-security-warnings;
                 repo-title: root.add-repo-title;
                 repo-url: root.add-repo-url;
                 confirmed => {
@@ -355,13 +360,14 @@ export component AppWindow inherits Window {
                 settings-ignore-native-pref <=> root.settings-ignore-native-pref;
                 settings-auto-updates <=> root.settings-auto-updates;
                 settings-concurrent-downloads <=> root.settings-concurrent-downloads;
+                settings-show-security-warnings <=> root.settings-show-security-warnings;
                 settings-remotes <=> root.settings-remotes;
                 settings-remotes-loading <=> root.settings-remotes-loading;
                 back-clicked => {
                     root.current-view = root.prev-view;
                 }
-                save-settings(preferred, ignore, auto_upd, concur) => {
-                    root.save-settings(preferred, ignore, auto_upd, concur);
+                save-settings(preferred, ignore, auto_upd, concur, warnings) => {
+                    root.save-settings(preferred, ignore, auto_upd, concur, warnings);
                 }
                 load-remotes => {
                     root.load-remotes();
