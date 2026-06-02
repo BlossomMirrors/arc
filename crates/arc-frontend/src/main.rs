@@ -106,6 +106,8 @@ fn apply_translations(app: &AppWindow) {
     app.set_tr_restart_daemon(tr!("Restart daemon").into());
     app.set_tr_restart_daemon_desc(tr!("Kills the running arc-daemon and starts a fresh one in the background").into());
     app.set_tr_search_placeholder(tr!("Search for applications...").into());
+    app.set_tr_proprietary(tr!("Proprietary").into());
+    app.set_tr_all_ages(tr!("All ages").into());
 }
 
 fn main() -> Result<()> {
@@ -368,20 +370,88 @@ fn main() -> Result<()> {
                 .map(|a| get_display_name(&a, &pkg_id_str))
                 .unwrap_or_else(|| pkg_id_str.clone());
 
-            begin_transaction(
-                pkg_id_str,
-                String::new(),
-                display_name,
-                "install".to_string(),
-                true,
-                in_detail,
-                false,
-                None,
-                store.clone(),
-                proxy_arc.clone(),
-                app_weak.clone(),
-                rt_handle.clone(),
-            );
+            // Detail screen already checks EULA before emitting install-requested,
+            // so skip the async EULA fetch when coming from there.
+            if in_detail {
+                begin_transaction(
+                    pkg_id_str,
+                    String::new(),
+                    display_name,
+                    "install".to_string(),
+                    true,
+                    true,
+                    false,
+                    None,
+                    store.clone(),
+                    proxy_arc.clone(),
+                    app_weak.clone(),
+                    rt_handle.clone(),
+                );
+                return;
+            }
+
+            // For package-list installs: fetch metadata to check for EULA first.
+            let proxy = get_proxy(&proxy_arc);
+            let store_c = store.clone();
+            let proxy_arc_c = proxy_arc.clone();
+            let rt_handle_c = rt_handle.clone();
+            let app_weak_c = app_weak.clone();
+            rt_handle.spawn(async move {
+                let eula_url: String = if let Some(ref p) = proxy {
+                    p.get_app_metadata(&pkg_id_str)
+                        .await
+                        .ok()
+                        .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok())
+                        .and_then(|v| {
+                            v.get("eula_url")
+                                .and_then(|u| u.as_str())
+                                .map(|s| s.to_string())
+                        })
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+
+                if !eula_url.is_empty() {
+                    let name = display_name.clone();
+                    let id = pkg_id_str.clone();
+                    let _ = app_weak_c.upgrade_in_event_loop(move |app| {
+                        // Pick up the icon already loaded during the search.
+                        let pkg_model = app.get_packages();
+                        let pkg_icon = (0..pkg_model.row_count())
+                            .filter_map(|i| pkg_model.row_data(i))
+                            .find(|p| p.id.as_str() == id.as_str())
+                            .map(|p| p.icon);
+
+                        let mut detail = app.get_detail_app();
+                        detail.flatpak_id = id.into();
+                        detail.name = name.into();
+                        detail.eula_url = eula_url.into();
+                        if let Some(icon) = pkg_icon {
+                            detail.icon = icon;
+                        }
+                        app.set_detail_app(detail);
+                        app.set_eula_source_view(app.get_current_view());
+                        app.set_current_view("eula".into());
+                    });
+                } else {
+                    begin_transaction(
+                        pkg_id_str,
+                        String::new(),
+                        display_name,
+                        "install".to_string(),
+                        true,
+                        false,
+                        false,
+                        None,
+                        store_c,
+                        proxy_arc_c,
+                        app_weak_c,
+                        rt_handle_c,
+                    );
+                }
+            });
         });
     }
 
@@ -738,6 +808,9 @@ fn main() -> Result<()> {
                                                 .as_ref()
                                                 .map(|r| r.to_slint_image())
                                                 .unwrap_or_default(),
+                                            busy: false,
+                                            progress: 0.0,
+                                            transaction_id: Default::default(),
                                         });
                                     }
                                 }
@@ -829,26 +902,28 @@ fn main() -> Result<()> {
         let store = tx_store.clone();
 
         app.on_eula_confirmed(move || {
-            let (pkg_id, display_name, parent_id) = app_weak
+            let (pkg_id, display_name, source_view) = app_weak
                 .upgrade()
                 .map(|a| {
                     let d = a.get_detail_app();
-                    (d.flatpak_id.to_string(), d.name.to_string(), String::new())
+                    let sv = a.get_eula_source_view().to_string();
+                    (d.flatpak_id.to_string(), d.name.to_string(), sv)
                 })
                 .unwrap_or_default();
             if pkg_id.is_empty() {
                 return;
             }
+            let in_detail = source_view == "detail";
             if let Some(app_ref) = app_weak.upgrade() {
-                app_ref.set_current_view("detail".into());
+                app_ref.set_current_view(source_view.into());
             }
             begin_transaction(
                 pkg_id,
-                parent_id,
+                String::new(),
                 display_name,
                 "install".to_string(),
                 true,
-                true,
+                in_detail,
                 false,
                 None,
                 store.clone(),
@@ -864,7 +939,8 @@ fn main() -> Result<()> {
 
         app.on_eula_cancelled(move || {
             if let Some(app_ref) = app_weak.upgrade() {
-                app_ref.set_current_view("detail".into());
+                let source = app_ref.get_eula_source_view().to_string();
+                app_ref.set_current_view(source.into());
             }
         });
     }

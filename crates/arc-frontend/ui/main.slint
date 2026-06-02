@@ -52,6 +52,7 @@ export component AppWindow inherits Window {
     in-out property <bool> home-loading: false;
 
     in-out property <string> prev-view: "home";
+    in-out property <string> eula-source-view: "";
     in-out property <AppDetailData> detail-app;
     in-out property <bool> detail-loading: false;
     in-out property <string> settings-preferred: "Flatpak";
@@ -158,6 +159,8 @@ export component AppWindow inherits Window {
     in-out property <string> tr-restart-daemon: "Restart daemon";
     in-out property <string> tr-restart-daemon-desc: "Kills the running arc-daemon and starts a fresh one in the background";
     in-out property <string> tr-search-placeholder: "Search for applications...";
+    in-out property <string> tr-proprietary: "Proprietary";
+    in-out property <string> tr-all-ages: "All ages";
 
     in-out property <[TransactionItem]> active-transactions: [];
     in-out property <[TransactionItem]> pending-transactions: [];
@@ -226,7 +229,7 @@ export component AppWindow inherits Window {
         padding: 0px;
         spacing: 0px;
 
-        TopBar {
+        top-bar := TopBar {
             search-text <=> root.search-text;
             update-count: root.update-count + root.active-transaction-count;
             current-view: root.current-view;
@@ -261,6 +264,13 @@ export component AppWindow inherits Window {
         Rectangle {
             vertical-stretch: 1;
             clip: true;
+
+            // Defocus the search bar when the user clicks anywhere in the content area.
+            TouchArea {
+                width: parent.width;
+                height: parent.height;
+                clicked => { top-bar.clear-search-focus(); }
+            }
 
             if root.current-view == "home": HomeScreen {
                 width: parent.width;
@@ -299,6 +309,8 @@ export component AppWindow inherits Window {
                 tr-no-installed: root.tr-no-installed;
                 tr-install: root.tr-install;
                 tr-update: root.tr-update;
+                tr-cancel: root.tr-cancel;
+                tr-installing: root.tr-installing;
                 detail-requested(id) => {
                     root.prev-view = root.current-view;
                     root.detail-requested(id);
@@ -311,6 +323,9 @@ export component AppWindow inherits Window {
                 }
                 update-requested(id) => {
                     root.update-requested(id);
+                }
+                cancel-requested(id) => {
+                    root.cancel-requested(id);
                 }
             }
 
@@ -337,6 +352,8 @@ export component AppWindow inherits Window {
                 tr-cancel: root.tr-cancel;
                 tr-working: root.tr-working;
                 tr-verified: root.tr-verified;
+                tr-proprietary: root.tr-proprietary;
+                tr-all-ages: root.tr-all-ages;
                 back-clicked => {
                     if root.prev-view == "home" {
                         root.back-to-home();
@@ -365,6 +382,7 @@ export component AppWindow inherits Window {
                     root.remove-extension-requested(id);
                 }
                 eula-requested => {
+                    root.eula-source-view = root.current-view;
                     root.current-view = "eula";
                 }
             }

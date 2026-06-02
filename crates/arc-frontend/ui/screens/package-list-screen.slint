@@ -13,11 +13,14 @@ export component PackageListScreen inherits Rectangle {
     in property <string> tr-no-installed: "No applications installed.";
     in property <string> tr-install: "Install";
     in property <string> tr-update: "Update";
+    in property <string> tr-cancel: "Cancel";
+    in property <string> tr-installing: "Installing";
 
     callback detail-requested(string);
     callback install-requested(string);
     callback remove-requested(string);
     callback update-requested(string);
+    callback cancel-requested(string);
 
     if root.is-loading: VerticalBox {
         alignment: center;
@@ -49,11 +52,12 @@ export component PackageListScreen inherits Rectangle {
                 background: row-ta.has-hover ? #80808028 : #80808016;
                 border-width: 1px;
                 border-color: row-ta.has-hover ? #80808040 : #80808028;
+                clip: true;
 
                 row-ta := TouchArea {
                     mouse-cursor: pointer;
                     clicked => {
-                        if root.current-view != "updates" {
+                        if root.current-view != "updates" && !pkg.busy {
                             root.detail-requested(pkg.id);
                         }
                     }
@@ -67,7 +71,6 @@ export component PackageListScreen inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
 
-                        // Icon
                         Rectangle {
                             width: 40px;
                             height: 40px;
@@ -87,7 +90,6 @@ export component PackageListScreen inherits Rectangle {
                         }
                     }
 
-                    // Name + description
                     VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 1;
@@ -107,8 +109,8 @@ export component PackageListScreen inherits Rectangle {
                         }
                     }
 
-                    // Version
-                    Text {
+                    // Normal state: version text + action button
+                    if !pkg.busy: Text {
                         text: pkg.version;
                         font-size: 11px;
                         color: Palette.foreground.transparentize(0.5);
@@ -117,8 +119,7 @@ export component PackageListScreen inherits Rectangle {
                         min-width: 60px;
                     }
 
-                    // Action button
-                    VerticalLayout {
+                    if !pkg.busy: VerticalLayout {
                         alignment: center;
 
                         Rectangle {
@@ -158,6 +159,70 @@ export component PackageListScreen inherits Rectangle {
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
+                        }
+                    }
+
+                    // Busy state: status label + cancel button
+                    if pkg.busy: HorizontalLayout {
+                        spacing: 8px;
+                        alignment: center;
+
+                        Text {
+                            text: root.tr-installing;
+                            font-size: 11px;
+                            color: Palette.foreground.transparentize(0.45);
+                            vertical-alignment: center;
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+
+                            Rectangle {
+                                width: busy-cancel-label.preferred-width + 20px;
+                                height: 28px;
+                                border-radius: 6px;
+                                background: busy-cancel-ta.has-hover ? #dc2626 : #ef4444;
+
+                                busy-cancel-ta := TouchArea {
+                                    clicked => {
+                                        root.cancel-requested(pkg.transaction-id);
+                                    }
+                                }
+
+                                busy-cancel-label := Text {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: root.tr-cancel;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    color: white;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Progress bar — same style and positioning as the transaction row
+                if pkg.busy: Rectangle {
+                    x: 66px;
+                    y: parent.height - 10px;
+                    width: parent.width - 66px - 18px;
+                    height: 5px;
+                    border-radius: 3px;
+                    background: #80808028;
+
+                    Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width * pkg.progress;
+                        height: parent.height;
+                        border-radius: 3px;
+                        background: #3b82f6;
+                        animate width {
+                            duration: 600ms;
+                            easing: ease-in-out;
                         }
                     }
                 }

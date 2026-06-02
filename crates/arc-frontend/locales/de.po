@@ -249,3 +249,9 @@ msgstr "Beendet den laufenden arc-daemon und startet einen neuen im Hintergrund"
 
 msgid "Restart"
 msgstr "Neu starten"
+
+msgid "Proprietary"
+msgstr "Proprietär"
+
+msgid "All ages"
+msgstr "Alle Altersgruppen"

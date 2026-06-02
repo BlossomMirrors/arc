@@ -25,6 +25,8 @@ export component DetailScreen inherits Rectangle {
     in property <string> tr-cancel: "Cancel";
     in property <string> tr-working: "Working...";
     in property <string> tr-verified: "Verified developer";
+    in property <string> tr-proprietary: "Proprietary";
+    in property <string> tr-all-ages: "All ages";
 
     callback back-clicked();
     callback install-requested(string);
@@ -72,6 +74,8 @@ export component DetailScreen inherits Rectangle {
                 tr-cancel: root.tr-cancel;
                 tr-working: root.tr-working;
                 tr-verified: root.tr-verified;
+                tr-proprietary: root.tr-proprietary;
+                tr-all-ages: root.tr-all-ages;
                 back-clicked => {
                     root.back-clicked();
                 }
@@ -141,8 +145,11 @@ export component DetailScreen inherits Rectangle {
                     if !block.is-list-item && !block.is-heading: Text {
                         text: block.text;
                         font-size: 12px;
+                        font-weight: block.is-bold ? 700 : 400;
                         wrap: word-wrap;
-                        color: Palette.foreground.transparentize(0.25);
+                        color: block.is-bold
+                            ? Palette.foreground.transparentize(0.1)
+                            : Palette.foreground.transparentize(0.25);
                     }
                     if block.is-list-item: HorizontalLayout {
                         padding-left: 8px;
@@ -158,8 +165,11 @@ export component DetailScreen inherits Rectangle {
                         Text {
                             text: block.text;
                             font-size: 12px;
+                            font-weight: block.is-bold ? 700 : 400;
                             wrap: word-wrap;
-                            color: Palette.foreground.transparentize(0.25);
+                            color: block.is-bold
+                                ? Palette.foreground.transparentize(0.1)
+                                : Palette.foreground.transparentize(0.25);
                             horizontal-stretch: 1;
                         }
                     }

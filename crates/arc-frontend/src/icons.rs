@@ -278,23 +278,28 @@ fn search_flatpak_icon_dir(base: impl AsRef<Path>, icon_name: &str) -> Option<Pa
             if !icons_dir.exists() {
                 continue;
             }
-            for size in ["128x128", "96x96", "64x64", "48x48", "scalable"] {
-                let size_dir = icons_dir.join(size);
-                if !size_dir.exists() {
-                    continue;
-                }
-                let direct_path = size_dir.join(icon_name);
-                if direct_path.exists() {
-                    return Some(direct_path);
-                }
-                if !icon_name.ends_with(".png")
-                    && !icon_name.ends_with(".svg")
-                    && !icon_name.ends_with(".svgz")
-                {
-                    for ext in ["png", "svg", "svgz"] {
-                        let p = size_dir.join(format!("{}.{}", icon_name, ext));
-                        if p.exists() {
-                            return Some(p);
+            // Flatpak stores icons in both <icons>/<size>/ and <icons>/flatpak/<size>/.
+            // Check both roots so we don't miss apps in either location.
+            let search_roots = [icons_dir.clone(), icons_dir.join("flatpak")];
+            for root in &search_roots {
+                for size in ["128x128", "96x96", "64x64", "48x48", "scalable"] {
+                    let size_dir = root.join(size);
+                    if !size_dir.exists() {
+                        continue;
+                    }
+                    let direct_path = size_dir.join(icon_name);
+                    if direct_path.exists() {
+                        return Some(direct_path);
+                    }
+                    if !icon_name.ends_with(".png")
+                        && !icon_name.ends_with(".svg")
+                        && !icon_name.ends_with(".svgz")
+                    {
+                        for ext in ["png", "svg", "svgz"] {
+                            let p = size_dir.join(format!("{}.{}", icon_name, ext));
+                            if p.exists() {
+                                return Some(p);
+                            }
                         }
                     }
                 }

@@ -5,12 +5,16 @@ export struct PackageItem {
     description: string,
     installed: bool,
     icon: image,
+    busy: bool,
+    progress: float,
+    transaction-id: string,
 }
 
 export struct DescriptionBlock {
     text: string,
     is-list-item: bool,
     is-heading: bool,
+    is-bold: bool,
 }
 
 export struct AppDetailData {

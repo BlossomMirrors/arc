@@ -39,6 +39,45 @@ pub(crate) struct DescBlock {
     text: String,
     is_list_item: bool,
     is_heading: bool,
+    is_bold: bool,
+}
+
+// Split a block's text on `**...**` markers into bold and normal segments.
+// Headings are already bold so we skip splitting them.
+fn split_bold(text: String, is_list_item: bool, is_heading: bool) -> Vec<DescBlock> {
+    if is_heading || !text.contains("**") {
+        return vec![DescBlock { text, is_list_item, is_heading, is_bold: false }];
+    }
+    let mut result = Vec::new();
+    let mut remaining = text.as_str();
+    while !remaining.is_empty() {
+        match remaining.find("**") {
+            None => {
+                result.push(DescBlock { text: remaining.to_string(), is_list_item, is_heading, is_bold: false });
+                break;
+            }
+            Some(start) => {
+                if start > 0 {
+                    result.push(DescBlock { text: remaining[..start].to_string(), is_list_item, is_heading, is_bold: false });
+                }
+                remaining = &remaining[start + 2..];
+                match remaining.find("**") {
+                    None => {
+                        result.push(DescBlock { text: remaining.to_string(), is_list_item, is_heading, is_bold: false });
+                        break;
+                    }
+                    Some(end) => {
+                        let bold = &remaining[..end];
+                        if !bold.is_empty() {
+                            result.push(DescBlock { text: bold.to_string(), is_list_item, is_heading, is_bold: true });
+                        }
+                        remaining = &remaining[end + 2..];
+                    }
+                }
+            }
+        }
+    }
+    result
 }
 
 fn parse_heading(s: &str) -> Option<String> {
@@ -72,28 +111,28 @@ fn html_to_blocks(html: &str) -> Vec<DescBlock> {
                 match (closing, name.as_str()) {
                     (false, "li") => {
                         let t = current.trim().to_string();
-                        if !t.is_empty() { blocks.push(DescBlock { text: t, is_list_item: false, is_heading: false }); }
+                        if !t.is_empty() { blocks.extend(split_bold(t, false, false)); }
                         current.clear();
                     }
                     (true, "li") => {
                         let t = current.trim().to_string();
-                        if !t.is_empty() { blocks.push(DescBlock { text: t, is_list_item: true, is_heading: false }); }
+                        if !t.is_empty() { blocks.extend(split_bold(t, true, false)); }
                         current.clear();
                     }
                     (true, "p") => {
                         let t = current.trim().to_string();
                         if !t.is_empty() {
                             if let Some(heading) = parse_heading(&t) {
-                                blocks.push(DescBlock { text: heading, is_list_item: false, is_heading: true });
+                                blocks.push(DescBlock { text: heading, is_list_item: false, is_heading: true, is_bold: false });
                             } else {
-                                blocks.push(DescBlock { text: t, is_list_item: false, is_heading: false });
+                                blocks.extend(split_bold(t, false, false));
                             }
                         }
                         current.clear();
                     }
                     (true, "h1") | (true, "h2") | (true, "h3") => {
                         let t = current.trim().to_string();
-                        if !t.is_empty() { blocks.push(DescBlock { text: t, is_list_item: false, is_heading: true }); }
+                        if !t.is_empty() { blocks.push(DescBlock { text: t, is_list_item: false, is_heading: true, is_bold: false }); }
                         current.clear();
                     }
                     _ => {}
@@ -103,7 +142,7 @@ fn html_to_blocks(html: &str) -> Vec<DescBlock> {
         }
     }
     let t = current.trim().to_string();
-    if !t.is_empty() { blocks.push(DescBlock { text: t, is_list_item: false, is_heading: false }); }
+    if !t.is_empty() { blocks.extend(split_bold(t, false, false)); }
     blocks
 }
 
@@ -179,6 +218,9 @@ impl RawPackage {
                 .as_ref()
                 .map(|r| r.to_slint_image())
                 .unwrap_or_default(),
+            busy: false,
+            progress: 0.0,
+            transaction_id: Default::default(),
         }
     }
 }
@@ -669,7 +711,7 @@ pub async fn load_detail(
         description_blocks: metadata
             .as_ref()
             .map(|m| html_to_blocks(&m.description))
-            .or_else(|| plain_description.map(|t| vec![DescBlock { text: t, is_list_item: false, is_heading: false }]))
+            .or_else(|| plain_description.map(|t| split_bold(t, false, false)))
             .unwrap_or_default(),
         summary: metadata
             .as_ref()
@@ -717,6 +759,7 @@ pub async fn load_detail(
             text: b.text.into(),
             is_list_item: b.is_list_item,
             is_heading: b.is_heading,
+            is_bold: b.is_bold,
         })
         .collect();
     let _ = app_weak.upgrade_in_event_loop(move |app| {

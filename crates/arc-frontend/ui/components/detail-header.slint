@@ -17,6 +17,8 @@ export component DetailHeader inherits Rectangle {
     in property <string> tr-cancel: "Cancel";
     in property <string> tr-working: "Working...";
     in property <string> tr-verified: "Verified developer";
+    in property <string> tr-proprietary: "Proprietary";
+    in property <string> tr-all-ages: "All ages";
 
     callback back-clicked();
     callback install-requested(string);
@@ -179,12 +181,16 @@ export component DetailHeader inherits Rectangle {
                     }
 
                     if root.detail-app.license != "": Badge {
-                        label: root.detail-app.license;
-                        accent: #3b82f6;
+                        label: root.detail-app.license == "Proprietary"
+                            ? root.tr-proprietary
+                            : root.detail-app.license;
+                        accent: root.detail-app.license == "Proprietary" ? #ef4444 : #3b82f6;
                     }
 
                     if root.detail-app.content-rating != "": Badge {
-                        label: root.detail-app.content-rating;
+                        label: root.detail-app.content-rating == "All ages"
+                            ? root.tr-all-ages
+                            : root.detail-app.content-rating;
                         accent: root.detail-app.content-rating == "18+" ? #ef4444 : root.detail-app.content-rating == "12+" ? #f97316 : root.detail-app.content-rating == "7+" ? #eab308 : Palette.foreground.transparentize(0.4);
                     }
                 }

@@ -76,6 +76,8 @@ export component EulaScreen inherits Rectangle {
                 }
 
                 eula-label := Text {
+                    width: parent.width;
+                    height: parent.height;
                     text: root.tr-read-license;
                     font-size: 12px;
                     color: #3b82f6;
@@ -90,7 +92,7 @@ export component EulaScreen inherits Rectangle {
             alignment: center;
 
             Rectangle {
-                width: 120px;
+                width: cancel-label.preferred-width + 32px;
                 height: 36px;
                 border-radius: 8px;
                 background: cancel-ta.has-hover ? #80808025 : #80808015;
@@ -103,7 +105,9 @@ export component EulaScreen inherits Rectangle {
                     }
                 }
 
-                Text {
+                cancel-label := Text {
+                    width: parent.width;
+                    height: parent.height;
                     text: root.tr-cancel;
                     font-size: 13px;
                     font-weight: 600;
@@ -114,7 +118,7 @@ export component EulaScreen inherits Rectangle {
             }
 
             Rectangle {
-                width: 120px;
+                width: accept-label.preferred-width + 32px;
                 height: 36px;
                 border-radius: 8px;
                 background: accept-ta.has-hover ? #2563eb : #3b82f6;
@@ -125,7 +129,9 @@ export component EulaScreen inherits Rectangle {
                     }
                 }
 
-                Text {
+                accept-label := Text {
+                    width: parent.width;
+                    height: parent.height;
                     text: root.tr-accept-install;
                     font-size: 13px;
                     font-weight: 600;

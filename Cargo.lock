@@ -337,6 +337,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "xmltree",
  "zbus",
 ]
 

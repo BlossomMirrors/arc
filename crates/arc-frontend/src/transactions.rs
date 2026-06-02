@@ -79,6 +79,9 @@ pub fn add_to_available_updates(
             description: pkg.description.into(),
             installed: pkg.installed,
             icon: icon.map(|r| r.to_slint_image()).unwrap_or_default(),
+            busy: false,
+            progress: 0.0,
+            transaction_id: Default::default(),
         });
         let count = items.len() as i32;
         app.set_available_updates(items.as_slice().into());
@@ -137,35 +140,86 @@ pub fn push_transactions_to_ui(store: TxStore, app_weak: &slint::Weak<crate::App
     let active_count = (active.len() + pending.len()) as i32;
 
     let _ = app_weak.upgrade_in_event_loop(move |app| {
-        fn to_slint_items(txs: Vec<TrackedTx>) -> Vec<crate::TransactionItem> {
+        // Build a fallback icon map from already-loaded package list icons.
+        // This covers the case where a fresh install has no local icon yet.
+        let pkg_model = app.get_packages();
+        let pkg_icons: std::collections::HashMap<String, slint::Image> = (0..pkg_model.row_count())
+            .filter_map(|i| pkg_model.row_data(i))
+            .map(|p| (p.id.to_string(), p.icon))
+            .collect();
+
+        fn to_slint_items(
+            txs: Vec<TrackedTx>,
+            pkg_icons: &std::collections::HashMap<String, slint::Image>,
+        ) -> Vec<crate::TransactionItem> {
             txs.into_iter()
-                .map(|tx| crate::TransactionItem {
-                    id: tx.id.into(),
-                    pkg_id: tx.pkg_id.into(),
-                    parent_id: tx.parent_id.into(),
-                    name: tx.name.into(),
-                    icon: tx.icon.map(|r| r.to_slint_image()).unwrap_or_default(),
-                    progress: match tx.status {
-                        TxStatus::Completed | TxStatus::Failed => 1.0,
-                        _ => tx.progress,
-                    },
-                    status: match tx.status {
-                        TxStatus::Pending => "pending",
-                        TxStatus::Running => "running",
-                        TxStatus::Completed => "completed",
-                        TxStatus::Failed => "failed",
+                .map(|tx| {
+                    let icon = tx.icon.as_ref().map(|r| r.to_slint_image())
+                        .or_else(|| pkg_icons.get(&tx.pkg_id).cloned())
+                        .unwrap_or_default();
+                    crate::TransactionItem {
+                        id: tx.id.into(),
+                        pkg_id: tx.pkg_id.into(),
+                        parent_id: tx.parent_id.into(),
+                        name: tx.name.into(),
+                        icon,
+                        progress: match tx.status {
+                            TxStatus::Completed | TxStatus::Failed => 1.0,
+                            _ => tx.progress,
+                        },
+                        status: match tx.status {
+                            TxStatus::Pending => "pending",
+                            TxStatus::Running => "running",
+                            TxStatus::Completed => "completed",
+                            TxStatus::Failed => "failed",
+                        }
+                        .into(),
+                        tx_type: tx.tx_type.into(),
+                        error: tx.error.into(),
                     }
-                    .into(),
-                    tx_type: tx.tx_type.into(),
-                    error: tx.error.into(),
                 })
                 .collect()
         }
 
-        app.set_active_transactions(to_slint_items(active).as_slice().into());
-        app.set_pending_transactions(to_slint_items(pending).as_slice().into());
-        app.set_completed_transactions(to_slint_items(completed).as_slice().into());
+        app.set_active_transactions(to_slint_items(active, &pkg_icons).as_slice().into());
+        app.set_pending_transactions(to_slint_items(pending, &pkg_icons).as_slice().into());
+        app.set_completed_transactions(to_slint_items(completed, &pkg_icons).as_slice().into());
         app.set_active_transaction_count(active_count);
+
+        // Sync busy/progress into the packages list so search/installed rows show progress.
+        {
+            let model = app.get_packages();
+            let count = model.row_count();
+            if count > 0 {
+                let mut items: Vec<crate::PackageItem> =
+                    (0..count).filter_map(|i| model.row_data(i)).collect();
+                let mut changed = false;
+                for item in &mut items {
+                    let new_busy = has_ongoing_transaction_for_package(&store, item.id.as_str());
+                    let new_progress = if new_busy {
+                        progress_for_package(&store, item.id.as_str())
+                    } else {
+                        0.0
+                    };
+                    let progress_drift = new_busy && (item.progress - new_progress).abs() > 0.005;
+                    if item.busy != new_busy || progress_drift {
+                        let new_tx_id = if new_busy {
+                            transaction_id_for_package(&store, item.id.as_str())
+                        } else {
+                            String::new()
+                        };
+                        item.busy = new_busy;
+                        item.progress = new_progress;
+                        item.transaction_id = new_tx_id.into();
+                        changed = true;
+                    }
+                }
+                if changed {
+                    app.set_packages(items.as_slice().into());
+                }
+            }
+        }
+
         let detail = app.get_detail_app();
         let current_detail_pkg = if !detail.flatpak_id.is_empty() {
             detail.flatpak_id.to_string()

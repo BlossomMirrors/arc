@@ -19,7 +19,19 @@ export component TopBar inherits Rectangle {
     callback home-clicked();
     callback settings-clicked();
 
+    public function clear-search-focus() {
+        search-input.clear-focus();
+    }
+
     height: 58px;
+
+    // Full-area background touch zone — defocuses the search bar when the
+    // user clicks anywhere in the top bar that isn't an interactive element.
+    defocus-ta := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { search-input.clear-focus(); }
+    }
 
     VerticalLayout {
         padding: 0px;
@@ -38,7 +50,10 @@ export component TopBar inherits Rectangle {
                 background: home-ta.has-hover ? #80808018 : #00000000;
 
                 home-ta := TouchArea {
-                    clicked => { root.home-clicked(); }
+                    clicked => {
+                        search-input.clear-focus();
+                        root.home-clicked();
+                    }
                 }
 
                 Image {
@@ -62,10 +77,40 @@ export component TopBar inherits Rectangle {
                 clip: true;
 
                 HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 4px;
+                    padding: 0px;
                     spacing: 0px;
 
+                    // Search icon on the left — submits the query when clicked
+                    Rectangle {
+                        width: 34px;
+                        border-radius: 4px;
+                        background: search-icon-ta.has-hover ? #80808018 : #00000000;
+
+                        search-icon-ta := TouchArea {
+                            clicked => {
+                                if root.search-text != "" {
+                                    search-input.clear-focus();
+                                    root.search-requested(root.search-text);
+                                } else {
+                                    search-input.focus();
+                                }
+                            }
+                        }
+
+                        Image {
+                            width: 15px;
+                            height: 15px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            source: root.icon-search;
+                            colorize: search-input.has-focus
+                                ? Palette.selection-background
+                                : Palette.foreground.transparentize(0.4);
+                            image-fit: contain;
+                        }
+                    }
+
+                    // Text input
                     Rectangle {
                         horizontal-stretch: 1;
                         clip: true;
@@ -78,7 +123,8 @@ export component TopBar inherits Rectangle {
                             color: Palette.foreground;
                             text <=> root.search-text;
                             accepted => {
-                                if (root.search-text != "") {
+                                if root.search-text != "" {
+                                    search-input.clear-focus();
                                     root.search-requested(root.search-text);
                                 }
                             }
@@ -93,100 +139,109 @@ export component TopBar inherits Rectangle {
                         }
                     }
 
-                    Rectangle {
+                    // Clear button on the right — only visible when there is text
+                    if root.search-text != "": Rectangle {
                         width: 32px;
                         border-radius: 4px;
-                        background: search-icon-ta.has-hover ? #80808018 : #00000000;
+                        background: clear-ta.has-hover ? #80808018 : #00000000;
 
-                        search-icon-ta := TouchArea {
+                        clear-ta := TouchArea {
                             clicked => {
-                                if (root.search-text != "") {
-                                    root.search-requested(root.search-text);
-                                }
+                                root.search-text = "";
+                                search-input.focus();
                             }
                         }
 
-                        Image {
-                            width: 16px;
-                            height: 16px;
+                        Text {
+                            text: "×";
+                            font-size: 18px;
+                            color: Palette.foreground.transparentize(0.35);
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
-                            source: root.icon-search;
-                            colorize: Palette.foreground.transparentize(0.3);
-                            image-fit: contain;
                         }
                     }
                 }
             }
 
-            // Button group
+            // Tabs with sliding indicator
             Rectangle {
-                width: group-layout.preferred-width;
+                width: tabs-row.preferred-width;
                 height: 36px;
                 border-radius: 8px;
-                border-width: 1px;
-                border-color: #80808030;
                 background: #80808010;
                 clip: true;
 
-                group-layout := HorizontalLayout {
+                // Sliding pill — animates when current-view changes
+                Rectangle {
+                    x: root.current-view == "downloads"
+                        ? (2px + installed-tab.width)
+                        : 2px;
+                    y: 2px;
+                    width: root.current-view == "downloads"
+                        ? downloads-tab.width
+                        : installed-tab.width;
+                    height: parent.height - 4px;
+                    border-radius: 6px;
+                    background: (root.current-view == "installed" || root.current-view == "downloads")
+                        ? #3584e440
+                        : transparent;
+                    animate x { duration: 200ms; easing: ease-in-out; }
+                    animate width { duration: 200ms; easing: ease-in-out; }
+                    animate background { duration: 150ms; }
+                }
+
+                tabs-row := HorizontalLayout {
                     padding: 2px;
                     spacing: 0px;
 
-                    // Installed segment
-                    Rectangle {
-                        width: installed-label.preferred-width + 20px;
-                        border-top-left-radius: 6px;
-                        border-bottom-left-radius: 6px;
-                        border-top-right-radius: 0px;
-                        border-bottom-right-radius: 0px;
-                        background: root.current-view == "installed"
-                            ? #ffffff30
-                            : (installed-ta.has-hover ? #80808020 : #00000000);
+                    installed-tab := Rectangle {
+                        width: installed-label.preferred-width + 24px;
 
                         installed-ta := TouchArea {
-                            clicked => { root.installed-clicked(); }
+                            clicked => {
+                                search-input.clear-focus();
+                                root.installed-clicked();
+                            }
                         }
 
                         installed-label := Text {
+                            width: parent.width;
+                            height: parent.height;
                             text: root.tr-installed;
                             font-size: 12px;
                             color: root.current-view == "installed"
-                                ? Palette.foreground
-                                : #808080;
+                                ? #3584e4
+                                : Palette.foreground.transparentize(0.45);
                             horizontal-alignment: center;
                             vertical-alignment: center;
+                            animate color { duration: 150ms; }
                         }
                     }
 
-                    // Downloads & Updates segment
-                    Rectangle {
-                        width: dl-row.preferred-width + 20px;
-                        border-top-left-radius: 0px;
-                        border-bottom-left-radius: 0px;
-                        border-top-right-radius: 6px;
-                        border-bottom-right-radius: 6px;
-                        background: root.current-view == "downloads"
-                            ? #ffffff30
-                            : (dl-ta.has-hover ? #80808020 : #00000000);
+                    downloads-tab := Rectangle {
+                        width: dl-content.preferred-width + 24px;
 
                         dl-ta := TouchArea {
-                            clicked => { root.downloads-clicked(); }
+                            clicked => {
+                                search-input.clear-focus();
+                                root.downloads-clicked();
+                            }
                         }
 
-                        dl-row := HorizontalLayout {
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
+                        dl-content := HorizontalLayout {
+                            width: parent.width;
+                            height: parent.height;
                             spacing: 5px;
                             alignment: center;
 
                             Text {
                                 text: root.tr-downloads;
                                 font-size: 12px;
-                                    color: root.current-view == "downloads"
-                                    ? Palette.foreground
-                                    : #808080;
+                                color: root.current-view == "downloads"
+                                    ? #3584e4
+                                    : Palette.foreground.transparentize(0.45);
                                 vertical-alignment: center;
+                                animate color { duration: 150ms; }
                             }
 
                             if root.update-count > 0: Rectangle {
@@ -216,7 +271,10 @@ export component TopBar inherits Rectangle {
                 background: settings-ta.has-hover ? #80808018 : #00000000;
 
                 settings-ta := TouchArea {
-                    clicked => { root.settings-clicked(); }
+                    clicked => {
+                        search-input.clear-focus();
+                        root.settings-clicked();
+                    }
                 }
 
                 Image {
