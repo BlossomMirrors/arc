@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
-	import { LogOut } from '@lucide/svelte';
+	import { LogOut, LayoutDashboard, List, AppWindow, Layers } from '@lucide/svelte';
+	import { page } from '$app/state';
+
 	let { data, children } = $props();
 
 	const user = $derived(data.user);
@@ -8,14 +10,20 @@
 	function signOut() {
 		window.location.href = '/auth/logout';
 	}
+
+	const navItems = [
+		{ href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
+		{ href: '/dashboard/whitelist', label: 'Lutris Whitelist', icon: List },
+		{ href: '/dashboard/pwas', label: 'PWAs', icon: AppWindow },
+		{ href: '/dashboard/frontpage', label: 'Front Page Designer', icon: Layers }
+	];
 </script>
 
 <div class="flex min-h-screen flex-col">
+	<!-- Top header -->
 	<header class="border-b border-border bg-background px-6 py-3">
 		<div class="mx-auto flex w-full max-w-7xl items-center justify-between">
-			<span class="text-sm font-medium text-muted-foreground">
-				Welcome back, <span class="font-semibold text-foreground">{user.name.split(' ')[0]}</span>
-			</span>
+			<span class="font-semibold">Arc Forge</span>
 
 			<DropdownMenu.Root>
 				<DropdownMenu.Trigger
@@ -46,9 +54,32 @@
 		</div>
 	</header>
 
-	<main class="flex-1 px-6 py-8">
-		<div class="mx-auto w-full max-w-7xl">
+	<div class="mx-auto flex w-full max-w-7xl flex-1 gap-8 px-6 py-8">
+		<!-- Sidebar -->
+		<nav class="w-48 shrink-0">
+			<ul class="space-y-1">
+				{#each navItems as item (item.href)}
+					{@const active =
+						page.url.pathname === item.href ||
+						(item.href !== '/dashboard' && page.url.pathname.startsWith(item.href))}
+					<li>
+						<a
+							href={item.href}
+							class="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors {active
+								? 'bg-primary/10 font-medium text-primary'
+								: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+						>
+							<item.icon class="size-4 shrink-0" />
+							{item.label}
+						</a>
+					</li>
+				{/each}
+			</ul>
+		</nav>
+
+		<!-- Page content -->
+		<main class="min-w-0 flex-1">
 			{@render children()}
-		</div>
-	</main>
+		</main>
+	</div>
 </div>

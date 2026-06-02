@@ -54,6 +54,8 @@ export const ModelName = {
   User: 'User',
   Session: 'Session',
   Account: 'Account',
+  FrontPage: 'FrontPage',
+  PwaApp: 'PwaApp',
   WhitelistEntry: 'WhitelistEntry',
   Verification: 'Verification'
 } as const
@@ -120,6 +122,40 @@ export const AccountScalarFieldEnum = {
 export type AccountScalarFieldEnum = (typeof AccountScalarFieldEnum)[keyof typeof AccountScalarFieldEnum]
 
 
+export const FrontPageScalarFieldEnum = {
+  id: 'id',
+  sections: 'sections',
+  updatedAt: 'updatedAt'
+} as const
+
+export type FrontPageScalarFieldEnum = (typeof FrontPageScalarFieldEnum)[keyof typeof FrontPageScalarFieldEnum]
+
+
+export const PwaAppScalarFieldEnum = {
+  id: 'id',
+  appid: 'appid',
+  name: 'name',
+  summary: 'summary',
+  description: 'description',
+  iconUrl: 'iconUrl',
+  screenshots: 'screenshots',
+  homepageUrl: 'homepageUrl',
+  contentRating: 'contentRating',
+  developerName: 'developerName',
+  url: 'url',
+  color: 'color',
+  css: 'css',
+  js: 'js',
+  useragent: 'useragent',
+  widevine: 'widevine',
+  tray: 'tray',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type PwaAppScalarFieldEnum = (typeof PwaAppScalarFieldEnum)[keyof typeof PwaAppScalarFieldEnum]
+
+
 export const WhitelistEntryScalarFieldEnum = {
   id: 'id',
   value: 'value',
@@ -149,6 +185,13 @@ export const SortOrder = {
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
 
 
+export const JsonNullValueInput = {
+  JsonNull: JsonNull
+} as const
+
+export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
+
+
 export const QueryMode = {
   default: 'default',
   insensitive: 'insensitive'
@@ -163,4 +206,13 @@ export const NullsOrder = {
 } as const
 
 export type NullsOrder = (typeof NullsOrder)[keyof typeof NullsOrder]
+
+
+export const JsonNullValueFilter = {
+  DbNull: DbNull,
+  JsonNull: JsonNull,
+  AnyNull: AnyNull
+} as const
+
+export type JsonNullValueFilter = (typeof JsonNullValueFilter)[keyof typeof JsonNullValueFilter]
 

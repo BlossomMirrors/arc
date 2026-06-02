@@ -387,6 +387,8 @@ export const ModelName = {
   User: 'User',
   Session: 'Session',
   Account: 'Account',
+  FrontPage: 'FrontPage',
+  PwaApp: 'PwaApp',
   WhitelistEntry: 'WhitelistEntry',
   Verification: 'Verification'
 } as const
@@ -404,7 +406,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "session" | "account" | "whitelistEntry" | "verification"
+    modelProps: "user" | "session" | "account" | "frontPage" | "pwaApp" | "whitelistEntry" | "verification"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -627,6 +629,154 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         count: {
           args: Prisma.AccountCountArgs<ExtArgs>
           result: runtime.Types.Utils.Optional<Prisma.AccountCountAggregateOutputType> | number
+        }
+      }
+    }
+    FrontPage: {
+      payload: Prisma.$FrontPagePayload<ExtArgs>
+      fields: Prisma.FrontPageFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.FrontPageFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FrontPagePayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.FrontPageFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FrontPagePayload>
+        }
+        findFirst: {
+          args: Prisma.FrontPageFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FrontPagePayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.FrontPageFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FrontPagePayload>
+        }
+        findMany: {
+          args: Prisma.FrontPageFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FrontPagePayload>[]
+        }
+        create: {
+          args: Prisma.FrontPageCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FrontPagePayload>
+        }
+        createMany: {
+          args: Prisma.FrontPageCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.FrontPageCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FrontPagePayload>[]
+        }
+        delete: {
+          args: Prisma.FrontPageDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FrontPagePayload>
+        }
+        update: {
+          args: Prisma.FrontPageUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FrontPagePayload>
+        }
+        deleteMany: {
+          args: Prisma.FrontPageDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.FrontPageUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.FrontPageUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FrontPagePayload>[]
+        }
+        upsert: {
+          args: Prisma.FrontPageUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FrontPagePayload>
+        }
+        aggregate: {
+          args: Prisma.FrontPageAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateFrontPage>
+        }
+        groupBy: {
+          args: Prisma.FrontPageGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FrontPageGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.FrontPageCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FrontPageCountAggregateOutputType> | number
+        }
+      }
+    }
+    PwaApp: {
+      payload: Prisma.$PwaAppPayload<ExtArgs>
+      fields: Prisma.PwaAppFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.PwaAppFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PwaAppPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.PwaAppFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PwaAppPayload>
+        }
+        findFirst: {
+          args: Prisma.PwaAppFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PwaAppPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.PwaAppFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PwaAppPayload>
+        }
+        findMany: {
+          args: Prisma.PwaAppFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PwaAppPayload>[]
+        }
+        create: {
+          args: Prisma.PwaAppCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PwaAppPayload>
+        }
+        createMany: {
+          args: Prisma.PwaAppCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.PwaAppCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PwaAppPayload>[]
+        }
+        delete: {
+          args: Prisma.PwaAppDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PwaAppPayload>
+        }
+        update: {
+          args: Prisma.PwaAppUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PwaAppPayload>
+        }
+        deleteMany: {
+          args: Prisma.PwaAppDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.PwaAppUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.PwaAppUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PwaAppPayload>[]
+        }
+        upsert: {
+          args: Prisma.PwaAppUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PwaAppPayload>
+        }
+        aggregate: {
+          args: Prisma.PwaAppAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregatePwaApp>
+        }
+        groupBy: {
+          args: Prisma.PwaAppGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.PwaAppGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.PwaAppCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.PwaAppCountAggregateOutputType> | number
         }
       }
     }
@@ -863,6 +1013,40 @@ export const AccountScalarFieldEnum = {
 export type AccountScalarFieldEnum = (typeof AccountScalarFieldEnum)[keyof typeof AccountScalarFieldEnum]
 
 
+export const FrontPageScalarFieldEnum = {
+  id: 'id',
+  sections: 'sections',
+  updatedAt: 'updatedAt'
+} as const
+
+export type FrontPageScalarFieldEnum = (typeof FrontPageScalarFieldEnum)[keyof typeof FrontPageScalarFieldEnum]
+
+
+export const PwaAppScalarFieldEnum = {
+  id: 'id',
+  appid: 'appid',
+  name: 'name',
+  summary: 'summary',
+  description: 'description',
+  iconUrl: 'iconUrl',
+  screenshots: 'screenshots',
+  homepageUrl: 'homepageUrl',
+  contentRating: 'contentRating',
+  developerName: 'developerName',
+  url: 'url',
+  color: 'color',
+  css: 'css',
+  js: 'js',
+  useragent: 'useragent',
+  widevine: 'widevine',
+  tray: 'tray',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type PwaAppScalarFieldEnum = (typeof PwaAppScalarFieldEnum)[keyof typeof PwaAppScalarFieldEnum]
+
+
 export const WhitelistEntryScalarFieldEnum = {
   id: 'id',
   value: 'value',
@@ -892,6 +1076,13 @@ export const SortOrder = {
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
 
 
+export const JsonNullValueInput = {
+  JsonNull: JsonNull
+} as const
+
+export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
+
+
 export const QueryMode = {
   default: 'default',
   insensitive: 'insensitive'
@@ -906,6 +1097,15 @@ export const NullsOrder = {
 } as const
 
 export type NullsOrder = (typeof NullsOrder)[keyof typeof NullsOrder]
+
+
+export const JsonNullValueFilter = {
+  DbNull: DbNull,
+  JsonNull: JsonNull,
+  AnyNull: AnyNull
+} as const
+
+export type JsonNullValueFilter = (typeof JsonNullValueFilter)[keyof typeof JsonNullValueFilter]
 
 
 
@@ -946,6 +1146,20 @@ export type DateTimeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel
  * Reference to a field of type 'DateTime[]'
  */
 export type ListDateTimeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DateTime[]'>
+    
+
+
+/**
+ * Reference to a field of type 'Json'
+ */
+export type JsonFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Json'>
+    
+
+
+/**
+ * Reference to a field of type 'QueryMode'
+ */
+export type EnumQueryModeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'QueryMode'>
     
 
 
@@ -1075,6 +1289,8 @@ export type GlobalOmitConfig = {
   user?: Prisma.UserOmit
   session?: Prisma.SessionOmit
   account?: Prisma.AccountOmit
+  frontPage?: Prisma.FrontPageOmit
+  pwaApp?: Prisma.PwaAppOmit
   whitelistEntry?: Prisma.WhitelistEntryOmit
   verification?: Prisma.VerificationOmit
 }

@@ -57,6 +57,16 @@ export type Session = Prisma.SessionModel
  */
 export type Account = Prisma.AccountModel
 /**
+ * Model FrontPage
+ * 
+ */
+export type FrontPage = Prisma.FrontPageModel
+/**
+ * Model PwaApp
+ * 
+ */
+export type PwaApp = Prisma.PwaAppModel
+/**
  * Model WhitelistEntry
  * 
  */

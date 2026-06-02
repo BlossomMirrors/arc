@@ -15,7 +15,7 @@ fn null_as_empty<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     Option::<String>::deserialize(d).map(|o| o.unwrap_or_default())
 }
 
-const WHITELIST_URL: &str = "https://repo.blossomos.org/lutris.txt";
+const WHITELIST_URL: &str = "https://forge.blossomos.org/api/lutris-whitelist";
 const LUTRIS_GAMES_API: &str = "https://lutris.net/api/games";
 const CATALOG_CACHE_TTL: Duration = Duration::from_secs(3600);
 

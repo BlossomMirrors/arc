@@ -11,6 +11,8 @@
 export type * from './models/User.ts'
 export type * from './models/Session.ts'
 export type * from './models/Account.ts'
+export type * from './models/FrontPage.ts'
+export type * from './models/PwaApp.ts'
 export type * from './models/WhitelistEntry.ts'
 export type * from './models/Verification.ts'
 export type * from './commonInputTypes.ts'
