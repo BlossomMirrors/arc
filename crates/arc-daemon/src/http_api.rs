@@ -8,7 +8,7 @@ use axum::{
 use serde::Deserialize;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::appstream_db::{parse_locale_candidates, AppStreamDb};
+use crate::appstream_db::{parse_locale_candidates, score_entry, AppStreamDb, AppStreamEntry};
 
 pub fn router() -> Router {
     let cors = CorsLayer::new()
@@ -93,12 +93,27 @@ struct ImageParams {
 
 async fn search(Query(p): Query<SearchParams>) -> impl IntoResponse {
     let locales = p.lang.locales();
-    let results = tokio::task::spawn_blocking(move || {
-        AppStreamDb::get_static().search_apps_with_locales(&p.q, &locales)
+    let mut results: Vec<(AppStreamEntry, u32)> = tokio::task::spawn_blocking(move || {
+        AppStreamDb::get_static()
+            .search_apps_with_locales(&p.q, &locales)
+            .into_iter()
+            .filter_map(|e| score_entry(&e, &p.q.to_lowercase()).map(|s| (e, s)))
+            .collect()
     })
     .await
     .unwrap_or_default();
-    Json(results)
+    results.sort_by(|a, b| b.1.cmp(&a.1));
+    let response: Vec<serde_json::Value> = results
+        .into_iter()
+        .map(|(entry, score)| {
+            let mut v = serde_json::to_value(&entry).unwrap_or_default();
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("score".into(), score.into());
+            }
+            v
+        })
+        .collect();
+    Json(response)
 }
 
 async fn home(Query(p): Query<HomeParams>) -> impl IntoResponse {

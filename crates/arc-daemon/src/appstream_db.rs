@@ -34,6 +34,7 @@ pub struct AppStreamEntry {
     pub homepage_url: Option<String>,
     pub content_rating: String,
     pub developer_name: Option<String>,
+    pub verified: bool,
 }
 
 // Build a priority list of locale codes from the process environment.
@@ -346,6 +347,7 @@ fn parse_metainfo_bytes(id: &str, bytes: &[u8], locales: &[String]) -> Option<Ap
         homepage_url,
         content_rating,
         developer_name,
+        verified: false,
     })
 }
 
@@ -598,6 +600,12 @@ fn component_to_entry(
         _ => None,
     }).unwrap_or_else(|| c.id.to_string());
 
+    let verified = remote.as_deref() == Some("blossomos")
+        || c.metadata
+            .get("flathub::verification::verified")
+            .and_then(|v| v.as_deref())
+            == Some("true");
+
     AppStreamEntry {
         id: canonical_id,
         name: localize_ts(&c.name, locales)
@@ -622,7 +630,21 @@ fn component_to_entry(
             .as_ref()
             .and_then(|d| localize_ts(d, locales))
             .map(|s| s.to_string()),
+        verified,
     }
+}
+
+/// Score an entry against a query using the same field-weight scheme as libarc.
+/// Returns `None` if there is no match at all.
+pub fn score_entry(entry: &AppStreamEntry, q: &str) -> Option<u32> {
+    use libarc::score_field;
+    let name = entry.name.to_lowercase();
+    let id = entry.id.to_lowercase();
+    let summary = entry.summary.to_lowercase();
+    let best = score_field(&name, q)
+        .max(score_field(&id, q).saturating_sub(10))
+        .max(score_field(&summary, q).saturating_sub(20));
+    if best > 0 { Some(best) } else { None }
 }
 
 // Flatpak lays out appstream data as <root>/<remote>/<arch>/active/appstream.xml.gz

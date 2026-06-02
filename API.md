@@ -25,7 +25,7 @@ Every endpoint accepts an optional `lang` query parameter. Pass a BCP-47 or POSI
 
 ### `GET /api/v1/search`
 
-Full-text search across app ID, name, and summary.
+Full-text search across app ID, name, and summary. Results are sorted by relevance score (highest first).
 
 **Query parameters**
 
@@ -34,7 +34,17 @@ Full-text search across app ID, name, and summary.
 | `q` | yes | Search query string |
 | `lang` | no | Language tag (see above) |
 
-**Response** `200 OK` — JSON array of [App objects](#app-object).
+**Response** `200 OK` — JSON array of [App objects](#app-object) extended with a `score` field.
+
+The `score` field is an integer in the range `1–100` indicating match quality:
+
+| Score | Meaning |
+|---|---|
+| 100 | Exact match on name or ID |
+| 80 | Prefix match |
+| 60 | Substring match |
+| 30 | Subsequence match |
+| 10–50 | Same tiers but on ID or summary (slightly penalised) |
 
 ```
 GET /api/v1/search?q=browser&lang=de
@@ -187,7 +197,8 @@ All list and detail endpoints return objects with the following shape.
   "eula_url":       null,
   "homepage_url":   "https://github.com/flattool/warehouse",
   "content_rating": "All ages",
-  "developer_name": "Heliguy"
+  "developer_name": "Heliguy",
+  "verified":       true
 }
 ```
 
@@ -205,3 +216,5 @@ All list and detail endpoints return objects with the following shape.
 | `homepage_url` | string \| null | Project homepage |
 | `content_rating` | string | `"All ages"`, `"7+"`, `"12+"`, or `"18+"` |
 | `developer_name` | string \| null | Developer or publisher name (localized) |
+| `verified` | bool | `true` for Flathub-verified developers (read from the AppStream catalog) and all blossomos apps |
+| `score` | integer | **Search only.** Relevance score `1–100`; absent on all other endpoints |
