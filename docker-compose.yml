@@ -1,0 +1,9 @@
+services:
+  arc-api:
+    build: .
+    ports:
+      - "1312:1312"
+    environment:
+      ARC_HTTP_HOST: "0.0.0.0"
+      ARC_HTTP_ONLY: "1"
+    restart: unless-stopped
