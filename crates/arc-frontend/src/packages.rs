@@ -92,13 +92,81 @@ impl RawCard {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct DaemonHomeEntry {
+    id: String,
+    name: String,
+    summary: String,
+    icon_url: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct DaemonHomeData {
+    popular: Vec<DaemonHomeEntry>,
+    recent: Vec<DaemonHomeEntry>,
+}
+
 pub async fn load_home(
     app_weak: slint::Weak<crate::AppWindow>,
     proxy: Option<ArcDaemonProxy<'static>>,
 ) {
-    let appstream_db = AppStreamDb::get_static();
-    let popular_apps: Vec<_> = appstream_db.get_popular_apps(10);
-    let recent_apps: Vec<_> = appstream_db.get_recent_apps(20);
+    // Try the daemon first — it eagerly parses appstream on startup so this is
+    // typically instant. Fall back to local parsing only if the daemon is unavailable.
+    let (popular_apps, recent_apps): (Vec<DaemonHomeEntry>, Vec<DaemonHomeEntry>) =
+        if let Some(ref p) = proxy {
+            p.get_home_apps(10, 20)
+                .await
+                .ok()
+                .and_then(|json| serde_json::from_str::<DaemonHomeData>(&json).ok())
+                .map(|d| (d.popular, d.recent))
+                .unwrap_or_else(|| {
+                    let db = AppStreamDb::get_static();
+                    let pop = db
+                        .get_popular_apps(10)
+                        .into_iter()
+                        .map(|e| DaemonHomeEntry {
+                            id: e.id,
+                            name: e.name,
+                            summary: e.summary,
+                            icon_url: e.icon_url,
+                        })
+                        .collect();
+                    let rec = db
+                        .get_recent_apps(20)
+                        .into_iter()
+                        .map(|e| DaemonHomeEntry {
+                            id: e.id,
+                            name: e.name,
+                            summary: e.summary,
+                            icon_url: e.icon_url,
+                        })
+                        .collect();
+                    (pop, rec)
+                })
+        } else {
+            let db = AppStreamDb::get_static();
+            let pop = db
+                .get_popular_apps(10)
+                .into_iter()
+                .map(|e| DaemonHomeEntry {
+                    id: e.id,
+                    name: e.name,
+                    summary: e.summary,
+                    icon_url: e.icon_url,
+                })
+                .collect();
+            let rec = db
+                .get_recent_apps(20)
+                .into_iter()
+                .map(|e| DaemonHomeEntry {
+                    id: e.id,
+                    name: e.name,
+                    summary: e.summary,
+                    icon_url: e.icon_url,
+                })
+                .collect();
+            (pop, rec)
+        };
 
     let installed_ids: std::collections::HashSet<String> = if let Some(ref p) = proxy {
         p.list_installed()

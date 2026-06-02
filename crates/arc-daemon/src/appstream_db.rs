@@ -12,6 +12,7 @@ pub struct AppStreamDb {
     components: Vec<(Component, Option<String>)>,
 }
 
+#[derive(serde::Serialize)]
 pub struct AppStreamEntry {
     pub id: String,
     pub name: String,
@@ -35,6 +36,35 @@ impl AppStreamDb {
             load_flatpak_root(&path, &mut components);
         }
         Self { components }
+    }
+
+    pub fn get_popular_apps(&self, limit: usize) -> Vec<AppStreamEntry> {
+        self.components
+            .iter()
+            .filter(|(c, _)| {
+                matches!(
+                    c.kind,
+                    ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication
+                )
+            })
+            .take(limit)
+            .map(|(c, remote)| component_to_entry(c, remote.clone()))
+            .collect()
+    }
+
+    pub fn get_recent_apps(&self, limit: usize) -> Vec<AppStreamEntry> {
+        self.components
+            .iter()
+            .filter(|(c, _)| {
+                matches!(
+                    c.kind,
+                    ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication
+                )
+            })
+            .rev()
+            .take(limit)
+            .map(|(c, remote)| component_to_entry(c, remote.clone()))
+            .collect()
     }
 
     pub fn search_apps(&self, query: &str) -> Vec<AppStreamEntry> {

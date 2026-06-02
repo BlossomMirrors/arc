@@ -554,6 +554,17 @@ impl ArcDaemonInterface {
         }
     }
 
+    async fn get_home_apps(&self, popular_count: u32, recent_count: u32) -> String {
+        tokio::task::spawn_blocking(move || {
+            let db = crate::appstream_db::AppStreamDb::get_static();
+            let popular = db.get_popular_apps(popular_count as usize);
+            let recent = db.get_recent_apps(recent_count as usize);
+            serde_json::json!({ "popular": popular, "recent": recent }).to_string()
+        })
+        .await
+        .unwrap_or_else(|_| r#"{"popular":[],"recent":[]}"#.to_string())
+    }
+
     async fn list_extensions(&self, app_id: String) -> String {
         info!("ListExtensions: {}", app_id);
         match self.provider.list_extensions(&app_id).await {

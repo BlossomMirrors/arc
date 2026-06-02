@@ -163,9 +163,6 @@ fn main() -> Result<()> {
         let proxy = proxy_opt.lock().unwrap().clone();
         app.set_home_loading(true);
         rt.handle().spawn(async move {
-            tokio::task::spawn_blocking(appstream_db::AppStreamDb::get_static)
-                .await
-                .unwrap();
             load_home(app_weak, proxy).await;
         });
     }

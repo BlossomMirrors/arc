@@ -19,6 +19,14 @@ async fn main() -> Result<()> {
 
     info!("Arc Communication Daemon (ACD) starting");
 
+    // Parse appstream data before accepting connections so get_home_apps()
+    // returns instantly when the frontend first calls it.
+    info!("Loading appstream database...");
+    tokio::task::spawn_blocking(appstream_db::AppStreamDb::get_static)
+        .await
+        .ok();
+    info!("Appstream database ready");
+
     let daemon = daemon::Daemon::new().await?;
     daemon.run().await?;
 
