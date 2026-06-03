@@ -90,3 +90,18 @@ model Verification {
   createdAt  DateTime?
   updatedAt  DateTime?
 }
+
+model AppInstall {
+  id        String   @id @default(cuid())
+  appid     String
+  createdAt DateTime @default(now())
+
+  @@index([appid])
+  @@index([appid, createdAt])
+}
+
+model FlathubCache {
+  appid     String   @id
+  installs  Int
+  cachedAt  DateTime @default(now())
+}
