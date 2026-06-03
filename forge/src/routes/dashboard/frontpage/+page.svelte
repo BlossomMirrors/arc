@@ -64,13 +64,37 @@
 		{ type: 'p' as const, label: m.cmd_paragraph(), badge: 'P', icon: AlignLeft, shorthand: '' },
 		{ type: 'ul' as const, label: m.cmd_bullet(), badge: null, icon: List, shorthand: '-' },
 		{ type: 'br' as const, label: m.cmd_divider(), badge: null, icon: Minus, shorthand: '---' },
-		{ type: 'carousel' as const, label: m.cmd_carousel(), badge: null, icon: Layers, shorthand: '' },
+		{
+			type: 'carousel' as const,
+			label: m.cmd_carousel(),
+			badge: null,
+			icon: Layers,
+			shorthand: ''
+		},
 		{ type: 'top' as const, label: m.cmd_top(), badge: null, icon: Star, shorthand: '' },
 		{ type: 'new' as const, label: m.cmd_new(), badge: null, icon: Sparkles, shorthand: '' },
-		{ type: 'trending' as const, label: m.cmd_trending(), badge: null, icon: TrendingUp, shorthand: '' },
-		{ type: 'categories' as const, label: m.cmd_categories(), badge: null, icon: LayoutGrid, shorthand: '' },
+		{
+			type: 'trending' as const,
+			label: m.cmd_trending(),
+			badge: null,
+			icon: TrendingUp,
+			shorthand: ''
+		},
+		{
+			type: 'categories' as const,
+			label: m.cmd_categories(),
+			badge: null,
+			icon: LayoutGrid,
+			shorthand: ''
+		},
 		{ type: 'category' as const, label: m.cmd_category(), badge: null, icon: Tag, shorthand: '' },
-		{ type: 'custom' as const, label: m.cmd_custom(), badge: null, icon: LayoutList, shorthand: '' },
+		{
+			type: 'custom' as const,
+			label: m.cmd_custom(),
+			badge: null,
+			icon: LayoutList,
+			shorthand: ''
+		},
 		{ type: 'charts' as const, label: m.cmd_charts(), badge: null, icon: BarChart2, shorthand: '' }
 	]);
 
@@ -374,7 +398,16 @@
 		}
 	}
 
-	const APP_TYPES = new Set(['carousel', 'top', 'new', 'trending', 'categories', 'category', 'custom', 'charts']);
+	const APP_TYPES = new Set([
+		'carousel',
+		'top',
+		'new',
+		'trending',
+		'categories',
+		'category',
+		'custom',
+		'charts'
+	]);
 
 	const SECTION_LABELS: Record<string, () => string> = {
 		carousel: m.cmd_carousel,
@@ -425,8 +458,10 @@
 					if (e.key === 'Enter') insertParagraph(-1);
 				}}
 			>
-				{m.frontpage_click_or_press()} <span class="font-mono">Enter</span> {m.frontpage_to_write()}
-				<span class="font-mono">/</span> {m.frontpage_for_commands()}
+				{m.frontpage_click_or_press()} <span class="font-mono">Enter</span>
+				{m.frontpage_to_write()}
+				<span class="font-mono">/</span>
+				{m.frontpage_for_commands()}
 			</div>
 		{:else}
 			{#each sections as section, i (i)}
@@ -540,7 +575,6 @@
 								bind:this={blockRefs[i] as HTMLTextAreaElement}
 								rows={1}
 								class="block w-full resize-none bg-transparent text-base leading-7 text-foreground outline-none placeholder:text-muted-foreground/30"
-								placeholder="Start typing, or / for commands…"
 								bind:value={section.text}
 								oninput={(e) => handleTextInput(e, i, section)}
 								onkeydown={(e) => textKeydown(e, i, section)}
@@ -579,7 +613,9 @@
 									onclick={() => (expandedIndex = expanded ? null : i)}
 									onkeydown={(e) => e.key === 'Enter' && (expandedIndex = expanded ? null : i)}
 								>
-									<span class="font-medium text-muted-foreground">{SECTION_LABELS[section.type]?.()}</span>
+									<span class="font-medium text-muted-foreground"
+										>{SECTION_LABELS[section.type]?.()}</span
+									>
 									<span class="text-xs text-muted-foreground/50">
 										{#if section.type === 'carousel'}{section.items.length} items · bp={section.breakpoint}
 										{:else if section.type === 'category'}{section.value || '—'}
@@ -593,7 +629,9 @@
 										{#if section.type === 'carousel'}
 											<div class="mb-3 flex gap-4">
 												<label class="space-y-1">
-													<span class="text-xs text-muted-foreground">{m.frontpage_breakpoint()}</span>
+													<span class="text-xs text-muted-foreground"
+														>{m.frontpage_breakpoint()}</span
+													>
 													<Input
 														type="number"
 														class="h-8 w-24 text-sm"
@@ -694,7 +732,8 @@
 											/>
 										{:else if section.type === 'charts'}
 											<label class="flex items-center gap-2 text-sm">
-												<input type="checkbox" bind:checked={section.cards} onchange={mark} /> {m.frontpage_cards_view()}
+												<input type="checkbox" bind:checked={section.cards} onchange={mark} />
+												{m.frontpage_cards_view()}
 											</label>
 										{:else if section.type === 'custom'}
 											<div class="space-y-3">
@@ -778,8 +817,10 @@
 					}
 				}}
 			>
-				{m.frontpage_press()} <span class="font-mono">Enter</span> {m.frontpage_to_continue()}
-				<span class="font-mono">/</span> {m.frontpage_for_a_block()}
+				{m.frontpage_press()} <span class="font-mono">Enter</span>
+				{m.frontpage_to_continue()}
+				<span class="font-mono">/</span>
+				{m.frontpage_for_a_block()}
 			</div>
 		{/if}
 	</div>
@@ -834,7 +875,9 @@
 				</li>
 			{/each}
 			{#if filtered.length === 0}
-				<li class="px-3 py-4 text-center text-xs text-muted-foreground">{m.frontpage_no_results()}</li>
+				<li class="px-3 py-4 text-center text-xs text-muted-foreground">
+					{m.frontpage_no_results()}
+				</li>
 			{/if}
 		</ul>
 
