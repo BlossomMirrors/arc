@@ -13,6 +13,8 @@ RUN bun run build
 
 FROM oven/bun:latest AS runner
 
+RUN apk add --no-cache curl
+
 WORKDIR /app
 
 ENV NODE_ENV=production
