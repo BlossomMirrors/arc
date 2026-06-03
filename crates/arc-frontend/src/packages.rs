@@ -46,30 +46,55 @@ pub(crate) struct DescBlock {
 // Headings are already bold so we skip splitting them.
 fn split_bold(text: String, is_list_item: bool, is_heading: bool) -> Vec<DescBlock> {
     if is_heading || !text.contains("**") {
-        return vec![DescBlock { text, is_list_item, is_heading, is_bold: false }];
+        return vec![DescBlock {
+            text,
+            is_list_item,
+            is_heading,
+            is_bold: false,
+        }];
     }
     let mut result = Vec::new();
     let mut remaining = text.as_str();
     while !remaining.is_empty() {
         match remaining.find("**") {
             None => {
-                result.push(DescBlock { text: remaining.to_string(), is_list_item, is_heading, is_bold: false });
+                result.push(DescBlock {
+                    text: remaining.to_string(),
+                    is_list_item,
+                    is_heading,
+                    is_bold: false,
+                });
                 break;
             }
             Some(start) => {
                 if start > 0 {
-                    result.push(DescBlock { text: remaining[..start].to_string(), is_list_item, is_heading, is_bold: false });
+                    result.push(DescBlock {
+                        text: remaining[..start].to_string(),
+                        is_list_item,
+                        is_heading,
+                        is_bold: false,
+                    });
                 }
                 remaining = &remaining[start + 2..];
                 match remaining.find("**") {
                     None => {
-                        result.push(DescBlock { text: remaining.to_string(), is_list_item, is_heading, is_bold: false });
+                        result.push(DescBlock {
+                            text: remaining.to_string(),
+                            is_list_item,
+                            is_heading,
+                            is_bold: false,
+                        });
                         break;
                     }
                     Some(end) => {
                         let bold = &remaining[..end];
                         if !bold.is_empty() {
-                            result.push(DescBlock { text: bold.to_string(), is_list_item, is_heading, is_bold: true });
+                            result.push(DescBlock {
+                                text: bold.to_string(),
+                                is_list_item,
+                                is_heading,
+                                is_bold: true,
+                            });
                         }
                         remaining = &remaining[end + 2..];
                     }
@@ -95,35 +120,53 @@ fn html_to_blocks(html: &str) -> Vec<DescBlock> {
     let mut rest = html;
     while !rest.is_empty() {
         match rest.find('<') {
-            None => { push_decoded(rest, &mut current); break; }
+            None => {
+                push_decoded(rest, &mut current);
+                break;
+            }
             Some(tag_start) => {
                 push_decoded(&rest[..tag_start], &mut current);
                 rest = &rest[tag_start + 1..];
                 let tag_end = match rest.find('>') {
                     Some(e) => e,
-                    None => { current.push('<'); continue; }
+                    None => {
+                        current.push('<');
+                        continue;
+                    }
                 };
                 let raw_tag = rest[..tag_end].trim();
                 let closing = raw_tag.starts_with('/');
-                let name = raw_tag.trim_start_matches('/')
-                    .split_ascii_whitespace().next().unwrap_or("")
+                let name = raw_tag
+                    .trim_start_matches('/')
+                    .split_ascii_whitespace()
+                    .next()
+                    .unwrap_or("")
                     .to_ascii_lowercase();
                 match (closing, name.as_str()) {
                     (false, "li") => {
                         let t = current.trim().to_string();
-                        if !t.is_empty() { blocks.extend(split_bold(t, false, false)); }
+                        if !t.is_empty() {
+                            blocks.extend(split_bold(t, false, false));
+                        }
                         current.clear();
                     }
                     (true, "li") => {
                         let t = current.trim().to_string();
-                        if !t.is_empty() { blocks.extend(split_bold(t, true, false)); }
+                        if !t.is_empty() {
+                            blocks.extend(split_bold(t, true, false));
+                        }
                         current.clear();
                     }
                     (true, "p") => {
                         let t = current.trim().to_string();
                         if !t.is_empty() {
                             if let Some(heading) = parse_heading(&t) {
-                                blocks.push(DescBlock { text: heading, is_list_item: false, is_heading: true, is_bold: false });
+                                blocks.push(DescBlock {
+                                    text: heading,
+                                    is_list_item: false,
+                                    is_heading: true,
+                                    is_bold: false,
+                                });
                             } else {
                                 blocks.extend(split_bold(t, false, false));
                             }
@@ -132,7 +175,14 @@ fn html_to_blocks(html: &str) -> Vec<DescBlock> {
                     }
                     (true, "h1") | (true, "h2") | (true, "h3") => {
                         let t = current.trim().to_string();
-                        if !t.is_empty() { blocks.push(DescBlock { text: t, is_list_item: false, is_heading: true, is_bold: false }); }
+                        if !t.is_empty() {
+                            blocks.push(DescBlock {
+                                text: t,
+                                is_list_item: false,
+                                is_heading: true,
+                                is_bold: false,
+                            });
+                        }
                         current.clear();
                     }
                     _ => {}
@@ -142,7 +192,9 @@ fn html_to_blocks(html: &str) -> Vec<DescBlock> {
         }
     }
     let t = current.trim().to_string();
-    if !t.is_empty() { blocks.extend(split_bold(t, false, false)); }
+    if !t.is_empty() {
+        blocks.extend(split_bold(t, false, false));
+    }
     blocks
 }
 
@@ -168,6 +220,13 @@ pub struct CachedAppInfo {
     pub summary: String,
     pub description: String,
     pub icon_available: bool,
+}
+
+pub struct RawStory {
+    pub id: String,
+    pub title: String,
+    pub body: String,
+    pub screenshot: Option<RawIcon>,
 }
 
 pub struct RawCategoryData {
@@ -252,33 +311,28 @@ struct AppMetadata {
     developer_name: Option<String>,
 }
 
-#[derive(serde::Deserialize)]
-struct DaemonHomeEntry {
+struct AppEntry {
     id: String,
     name: String,
     summary: String,
     icon_url: Option<String>,
 }
 
-#[derive(serde::Deserialize)]
-struct DaemonHomeData {
-    popular: Vec<DaemonHomeEntry>,
-    recent: Vec<DaemonHomeEntry>,
-}
-
-/// Resolve a single frontpage section into home-card entries.
-async fn resolve_section(
-    section: &crate::forge::FpSection,
+/// Resolve a list of app IDs to entries using the daemon, falling back to the
+/// forge PWA map for apps that the daemon doesn't know about.
+async fn resolve_ids(
+    ids: &[String],
     proxy: Option<&ArcDaemonProxy<'static>>,
-) -> Vec<DaemonHomeEntry> {
-    use crate::forge::FpSection;
-    match section {
-        FpSection::Carousel(ids) | FpSection::Custom(ids) => {
-            let Some(p) = proxy else { return vec![] };
-            let futs: Vec<_> = ids.iter().map(|id| {
-                let id = id.clone();
-                let p = p.clone();
-                tokio::spawn(async move {
+    pwa_map: &std::collections::HashMap<String, crate::forge::PwaApp>,
+) -> Vec<AppEntry> {
+    let futs: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            let id = id.clone();
+            let p = proxy.cloned();
+            let pwa = pwa_map.get(&id).cloned();
+            tokio::spawn(async move {
+                let daemon = if let Some(ref p) = p {
                     let pkgs: Vec<libarc::Package> = p
                         .search(&id)
                         .await
@@ -287,39 +341,103 @@ async fn resolve_section(
                         .unwrap_or_default();
                     pkgs.into_iter()
                         .find(|pkg| pkg.id == id)
-                        .map(|pkg| DaemonHomeEntry {
+                        .map(|pkg| AppEntry {
                             id: pkg.id,
                             name: pkg.name,
                             summary: pkg.description,
                             icon_url: pkg.icon_url,
                         })
+                } else {
+                    None
+                };
+                daemon.or_else(|| {
+                    pwa.map(|p| AppEntry {
+                        id: p.appid,
+                        name: p.name,
+                        summary: p.summary,
+                        icon_url: p.icon_url,
+                    })
                 })
-            }).collect();
-            join_all(futs).await
-                .into_iter()
-                .filter_map(|r| r.ok().flatten())
-                .collect()
-        }
-        FpSection::Top | FpSection::Charts => {
-            crate::forge::fetch_apps("api/top", 12).await
-                .into_iter()
-                .map(|a| DaemonHomeEntry { id: a.appid, name: a.name, summary: a.summary, icon_url: a.icon_url })
-                .collect()
-        }
-        FpSection::Trending => {
-            crate::forge::fetch_apps("api/trending", 12).await
-                .into_iter()
-                .map(|a| DaemonHomeEntry { id: a.appid, name: a.name, summary: a.summary, icon_url: a.icon_url })
-                .collect()
-        }
-        FpSection::New => {
-            crate::forge::fetch_apps("api/new", 20).await
-                .into_iter()
-                .map(|a| DaemonHomeEntry { id: a.appid, name: a.name, summary: a.summary, icon_url: a.icon_url })
-                .collect()
-        }
-        FpSection::Categories => vec![],
-    }
+            })
+        })
+        .collect();
+
+    join_all(futs)
+        .await
+        .into_iter()
+        .filter_map(|r| r.ok().flatten())
+        .collect()
+}
+
+/// Load icons for a list of app entries and return `RawCard` values.
+async fn entries_to_cards(
+    entries: Vec<AppEntry>,
+    installed: &std::collections::HashSet<String>,
+) -> Vec<RawCard> {
+    let tasks: Vec<_> = entries
+        .into_iter()
+        .map(|e| {
+            let installed_flag = installed.contains(&e.id);
+            tokio::task::spawn_blocking(move || {
+                let icon = e.icon_url.as_ref().and_then(|url| {
+                    if url.starts_with("local:") {
+                        icons::load_local_flatpak_icon(&e.id)
+                    } else {
+                        let rt = tokio::runtime::Handle::current();
+                        rt.block_on(icons::load_icon(url))
+                    }
+                });
+                RawCard {
+                    id: e.id,
+                    name: e.name,
+                    summary: e.summary,
+                    icon,
+                    installed: installed_flag,
+                }
+            })
+        })
+        .collect();
+
+    join_all(tasks)
+        .await
+        .into_iter()
+        .filter_map(|r| r.ok())
+        .collect()
+}
+
+fn cards_to_model(cards: Vec<RawCard>) -> slint::ModelRc<crate::AppCardData> {
+    let data: Vec<crate::AppCardData> = cards.iter().map(|c| c.to_slint()).collect();
+    slint::ModelRc::new(slint::VecModel::from(data))
+}
+
+/// Load screenshots for a list of raw stories.
+async fn load_story_screenshots(stories: Vec<(usize, crate::forge::ForgeStory)>) -> Vec<RawStory> {
+    let futs: Vec<_> = stories
+        .into_iter()
+        .map(|(idx, s)| async move {
+            let screenshot = if let Some(ref url) = s.banner_url {
+                let url = url.clone();
+                icons::load_banner(&url).await
+            } else {
+                None
+            };
+            RawStory {
+                id: format!("story-{}", idx),
+                title: s.title,
+                body: s.body,
+                screenshot,
+            }
+        })
+        .collect();
+    join_all(futs).await
+}
+
+/// One entry in the home-items model: either a text block or an app section.
+struct RawHomeItem {
+    item_type: &'static str,
+    text: String,
+    title: String,
+    cards: Vec<RawCard>,
 }
 
 pub async fn load_home(
@@ -328,8 +446,16 @@ pub async fn load_home(
 ) {
     use crate::forge::FpSection;
 
-    // Fetch frontpage sections and installed list concurrently.
-    let (fp_sections, installed_ids) = tokio::join!(
+    // Fetch frontpage, installed IDs and PWA metadata in parallel.
+    let lang = sys_locale::get_locale()
+        .unwrap_or_default()
+        .split(['_', '-'])
+        .next()
+        .unwrap_or("en")
+        .to_string();
+    let lang_ref = lang.as_str();
+
+    let (fp_sections, installed_ids, pwa_list) = tokio::join!(
         crate::forge::fetch_frontpage(),
         async {
             if let Some(ref p) = proxy {
@@ -344,152 +470,183 @@ pub async fn load_home(
             } else {
                 std::collections::HashSet::new()
             }
-        }
+        },
+        crate::forge::fetch_pwas(lang_ref),
     );
 
-    // Collect app-producing sections in order; skip Categories (no app list).
-    let app_sections: Vec<&FpSection> = fp_sections.iter()
-        .filter(|s| !matches!(s, FpSection::Categories))
-        .collect();
+    let pwa_map: std::collections::HashMap<String, crate::forge::PwaApp> =
+        pwa_list.into_iter().map(|a| (a.appid.clone(), a)).collect();
 
-    // Resolve the first two app sections in parallel to fill popular/recent slots.
-    let (popular_apps, recent_apps): (Vec<DaemonHomeEntry>, Vec<DaemonHomeEntry>) =
-        if app_sections.is_empty() {
-            // No frontpage data — fall back to daemon.
-            if let Some(ref p) = proxy {
-                p.get_home_apps(10, 20)
-                    .await
-                    .ok()
-                    .and_then(|json| serde_json::from_str::<DaemonHomeData>(&json).ok())
-                    .map(|d| (d.popular, d.recent))
-                    .unwrap_or_default()
-            } else {
-                (vec![], vec![])
-            }
-        } else {
-            let (pop, rec) = tokio::join!(
-                resolve_section(app_sections[0], proxy.as_ref()),
-                async {
-                    if app_sections.len() > 1 {
-                        resolve_section(app_sections[1], proxy.as_ref()).await
-                    } else {
-                        vec![]
-                    }
-                }
-            );
-            // If the forge/daemon returned nothing useful, fall back.
-            if pop.is_empty() && rec.is_empty() {
-                if let Some(ref p) = proxy {
-                    p.get_home_apps(10, 20)
-                        .await
-                        .ok()
-                        .and_then(|json| serde_json::from_str::<DaemonHomeData>(&json).ok())
-                        .map(|d| (d.popular, d.recent))
-                        .unwrap_or_default()
-                } else {
-                    (vec![], vec![])
-                }
-            } else {
-                (pop, rec)
-            }
-        };
+    // Whether any section asked for the categories grid.
+    let show_categories = fp_sections
+        .iter()
+        .any(|s| matches!(s, FpSection::Categories));
+    let mut raw_items: Vec<RawHomeItem> = Vec::new();
+    let mut raw_story_candidates: Vec<crate::forge::ForgeStory> = Vec::new();
 
-    let popular_tasks: Vec<_> = popular_apps
-        .into_iter()
-        .map(|app| {
-            tokio::task::spawn_blocking(move || {
-                let icon = app.icon_url.as_ref().and_then(|url| {
-                    if url.starts_with("local:") {
-                        icons::load_local_flatpak_icon(&app.id)
-                    } else {
-                        let rt = tokio::runtime::Handle::current();
-                        rt.block_on(icons::load_icon(url))
-                    }
+    for section in fp_sections {
+        match section {
+            FpSection::H1(t) => raw_items.push(RawHomeItem {
+                item_type: "h1",
+                text: t,
+                title: String::new(),
+                cards: vec![],
+            }),
+            FpSection::H2(t) => raw_items.push(RawHomeItem {
+                item_type: "h2",
+                text: t,
+                title: String::new(),
+                cards: vec![],
+            }),
+            FpSection::H3(t) => raw_items.push(RawHomeItem {
+                item_type: "h3",
+                text: t,
+                title: String::new(),
+                cards: vec![],
+            }),
+            FpSection::P(t) => raw_items.push(RawHomeItem {
+                item_type: "p",
+                text: t,
+                title: String::new(),
+                cards: vec![],
+            }),
+            FpSection::Br => raw_items.push(RawHomeItem {
+                item_type: "br",
+                text: String::new(),
+                title: String::new(),
+                cards: vec![],
+            }),
+            FpSection::Categories => raw_items.push(RawHomeItem {
+                item_type: "categories",
+                text: String::new(),
+                title: String::new(),
+                cards: vec![],
+            }),
+            FpSection::Story(s) => raw_story_candidates.push(s),
+            FpSection::Carousel(ids) => {
+                let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
+                let cards = entries_to_cards(entries, &installed_ids).await;
+                raw_items.push(RawHomeItem {
+                    item_type: "app-row",
+                    text: String::new(),
+                    title: String::new(),
+                    cards,
                 });
-                (app, icon)
-            })
-        })
-        .collect();
-
-    let popular_results: Vec<_> = join_all(popular_tasks).await;
-    let mut popular_cards: Vec<RawCard> = Vec::new();
-    for result in popular_results {
-        if let Ok((app, icon)) = result {
-            let installed = installed_ids.contains(&app.id);
-            popular_cards.push(RawCard {
-                id: app.id.clone(),
-                name: app.name.clone(),
-                summary: app.summary.clone(),
-                icon,
-                installed,
-            });
+            }
+            FpSection::Custom { title, app_ids } => {
+                let entries = resolve_ids(&app_ids, proxy.as_ref(), &pwa_map).await;
+                let cards = entries_to_cards(entries, &installed_ids).await;
+                raw_items.push(RawHomeItem {
+                    item_type: "app-row",
+                    text: String::new(),
+                    title,
+                    cards,
+                });
+            }
+            FpSection::Top => {
+                let ids = crate::forge::fetch_app_ids("api/top", 12).await;
+                let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
+                let cards = entries_to_cards(entries, &installed_ids).await;
+                raw_items.push(RawHomeItem {
+                    item_type: "app-grid",
+                    text: String::new(),
+                    title: "Popular".into(),
+                    cards,
+                });
+            }
+            FpSection::New => {
+                let ids = crate::forge::fetch_app_ids("api/new", 20).await;
+                let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
+                let cards = entries_to_cards(entries, &installed_ids).await;
+                raw_items.push(RawHomeItem {
+                    item_type: "app-row",
+                    text: String::new(),
+                    title: "Recently Added".into(),
+                    cards,
+                });
+            }
+            FpSection::Trending => {
+                let ids = crate::forge::fetch_app_ids("api/trending", 12).await;
+                let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
+                let cards = entries_to_cards(entries, &installed_ids).await;
+                raw_items.push(RawHomeItem {
+                    item_type: "app-row",
+                    text: String::new(),
+                    title: "Trending".into(),
+                    cards,
+                });
+            }
+            FpSection::Charts => {
+                let ids = crate::forge::fetch_chart_ids(12).await;
+                let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
+                let cards = entries_to_cards(entries, &installed_ids).await;
+                raw_items.push(RawHomeItem {
+                    item_type: "app-grid",
+                    text: String::new(),
+                    title: "Charts".into(),
+                    cards,
+                });
+            }
         }
     }
-
-    let recent_tasks: Vec<_> = recent_apps
-        .into_iter()
-        .map(|app| {
-            tokio::task::spawn_blocking(move || {
-                let icon = app.icon_url.as_ref().and_then(|url| {
-                    if url.starts_with("local:") {
-                        icons::load_local_flatpak_icon(&app.id)
-                    } else {
-                        let rt = tokio::runtime::Handle::current();
-                        rt.block_on(icons::load_icon(url))
-                    }
-                });
-                (app, icon)
-            })
-        })
+    let lang_prefix = lang.split(['-', '_']).next().unwrap_or("en").to_string();
+    let mut filtered_stories: Vec<crate::forge::ForgeStory> = raw_story_candidates
+        .iter()
+        .filter(|s| s.lang == lang_prefix)
+        .cloned()
         .collect();
-
-    let recent_results: Vec<_> = join_all(recent_tasks).await;
-    let mut recent_cards: Vec<RawCard> = Vec::new();
-    for result in recent_results {
-        if let Ok((app, icon)) = result {
-            let installed = installed_ids.contains(&app.id);
-            recent_cards.push(RawCard {
-                id: app.id.clone(),
-                name: app.name.clone(),
-                summary: app.summary.clone(),
-                icon,
-                installed,
+    if filtered_stories.is_empty() {
+        filtered_stories = raw_story_candidates
+            .into_iter()
+            .filter(|s| s.lang == "en")
+            .collect();
+    }
+    let indexed_stories: Vec<(usize, crate::forge::ForgeStory)> =
+        filtered_stories.into_iter().enumerate().collect();
+    let raw_stories = load_story_screenshots(indexed_stories).await;
+    let raw_cats: Vec<RawCategoryData> = if show_categories {
+        let cat_defs = [
+            ("AudioVideo", "Multimedia", "applications-multimedia"),
+            ("Development", "Developer Tools", "applications-development"),
+            ("Education", "Education", "applications-education"),
+            ("Graphics", "Graphics", "applications-graphics"),
+            ("Network", "Internet", "applications-internet"),
+            ("Office", "Office", "applications-office"),
+            ("Science", "Science", "applications-science"),
+            ("System", "System", "applications-system"),
+            ("Utility", "Utilities", "applications-utilities"),
+        ];
+        let mut out = Vec::new();
+        for (id, label, icon_name) in &cat_defs {
+            let name = icon_name.to_string();
+            let data = tokio::task::spawn_blocking(move || icons::load_category_icon(&name))
+                .await
+                .unwrap_or(icons::CategoryIconData {
+                    icon: None,
+                    color: (80, 80, 90),
+                });
+            out.push(RawCategoryData {
+                id: id.to_string(),
+                label: label.to_string(),
+                icon: data.icon,
+                color: data.color,
             });
         }
-    }
-
-    let categories = [
-        ("AudioVideo", "Multimedia", "applications-multimedia"),
-        ("Development", "Developer Tools", "applications-development"),
-        ("Education", "Education", "applications-education"),
-        ("Graphics", "Graphics", "applications-graphics"),
-        ("Network", "Internet", "applications-internet"),
-        ("Office", "Office", "applications-office"),
-        ("Science", "Science", "applications-science"),
-        ("System", "System", "applications-system"),
-        ("Utility", "Utilities", "applications-utilities"),
-    ];
-
-    let mut raw_cats: Vec<RawCategoryData> = Vec::new();
-    for (id, label, icon_name) in &categories {
-        let name = icon_name.to_string();
-        let data = tokio::task::spawn_blocking(move || icons::load_category_icon(&name))
-            .await
-            .unwrap_or(icons::CategoryIconData {
-                icon: None,
-                color: (80, 80, 90),
-            });
-        raw_cats.push(RawCategoryData {
-            id: id.to_string(),
-            label: label.to_string(),
-            icon: data.icon,
-            color: data.color,
-        });
-    }
-
+        out
+    } else {
+        vec![]
+    };
     let _ = app_weak.upgrade_in_event_loop(move |app| {
-        let pop: Vec<crate::AppCardData> = popular_cards.iter().map(|c| c.to_slint()).collect();
-        let rec: Vec<crate::AppCardData> = recent_cards.iter().map(|c| c.to_slint()).collect();
+        let home_items: Vec<crate::HomeItem> = raw_items
+            .into_iter()
+            .map(|item| crate::HomeItem {
+                item_type: item.item_type.into(),
+                text: item.text.into(),
+                title: item.title.into(),
+                apps: cards_to_model(item.cards),
+            })
+            .collect();
+
         let cats: Vec<crate::CategoryItem> = raw_cats
             .iter()
             .map(|c| crate::CategoryItem {
@@ -503,9 +660,28 @@ pub async fn load_home(
                 bg_color: slint::Color::from_rgb_u8(c.color.0, c.color.1, c.color.2),
             })
             .collect();
-        app.set_popular_apps(pop.as_slice().into());
-        app.set_recent_apps(rec.as_slice().into());
-        app.set_categories(cats.as_slice().into());
+
+        let stories: Vec<crate::StoryItem> = raw_stories
+            .iter()
+            .map(|s| crate::StoryItem {
+                id: SharedString::from(s.id.as_str()),
+                title: SharedString::from(s.title.as_str()),
+                body: SharedString::from(s.body.as_str()),
+                screenshot: s
+                    .screenshot
+                    .as_ref()
+                    .map(|r| r.to_slint_image())
+                    .unwrap_or_default(),
+            })
+            .collect();
+
+        app.set_home_items(home_items.as_slice().into());
+        if !cats.is_empty() {
+            app.set_categories(cats.as_slice().into());
+        }
+        if !stories.is_empty() {
+            app.set_home_stories(stories.as_slice().into());
+        }
         app.set_home_loading(false);
     });
 }
@@ -528,25 +704,27 @@ pub async fn refresh_home_installed(
     };
 
     let _ = app_weak.upgrade_in_event_loop(move |app| {
-        let popular_model = app.get_popular_apps();
-        let popular_count = popular_model.row_count();
-        let mut popular_items: Vec<crate::AppCardData> = (0..popular_count)
-            .filter_map(|i| popular_model.row_data(i))
-            .collect();
-        for item in &mut popular_items {
-            item.installed = installed_ids.contains(item.id.as_str());
+        let model = app.get_home_items();
+        let count = model.row_count();
+        let mut new_items: Vec<crate::HomeItem> =
+            (0..count).filter_map(|i| model.row_data(i)).collect();
+        for item in &mut new_items {
+            let n = item.apps.row_count();
+            let mut new_apps: Vec<crate::AppCardData> =
+                (0..n).filter_map(|j| item.apps.row_data(j)).collect();
+            let mut changed = false;
+            for app_data in &mut new_apps {
+                let installed = installed_ids.contains(app_data.id.as_str());
+                if app_data.installed != installed {
+                    app_data.installed = installed;
+                    changed = true;
+                }
+            }
+            if changed {
+                item.apps = slint::ModelRc::new(slint::VecModel::from(new_apps));
+            }
         }
-        app.set_popular_apps(popular_items.as_slice().into());
-
-        let recent_model = app.get_recent_apps();
-        let recent_count = recent_model.row_count();
-        let mut recent_items: Vec<crate::AppCardData> = (0..recent_count)
-            .filter_map(|i| recent_model.row_data(i))
-            .collect();
-        for item in &mut recent_items {
-            item.installed = installed_ids.contains(item.id.as_str());
-        }
-        app.set_recent_apps(recent_items.as_slice().into());
+        app.set_home_items(new_items.as_slice().into());
     });
 }
 
@@ -571,9 +749,10 @@ pub async fn load_package_icons(pkgs: Vec<libarc::Package>) -> Vec<RawPackage> {
                 Provider::Flatpak => {
                     let id = pkg.id.clone();
                     let icon_url = pkg.icon_url.clone();
-                    let local = tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
-                        .await
-                        .unwrap_or(None);
+                    let local =
+                        tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
+                            .await
+                            .unwrap_or(None);
                     if local.is_some() {
                         local
                     } else {
@@ -615,6 +794,36 @@ pub async fn load_package_icons(pkgs: Vec<libarc::Package>) -> Vec<RawPackage> {
                     })
                     .await
                     .unwrap_or(None)
+                }
+                Provider::Pwa => {
+                    // Try local icon installed by the PWA provider first, then remote URL.
+                    let appid = pkg.id.strip_prefix("pwa:").unwrap_or(&pkg.id).to_string();
+                    let icon_url = pkg.icon_url.clone();
+                    let local = tokio::task::spawn_blocking(move || {
+                        let home = std::path::PathBuf::from(
+                            std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()),
+                        );
+                        let icons_dir = home.join(".local/share/icons/hicolor/256x256/apps");
+                        for ext in ["png", "svg", "webp"] {
+                            let p = icons_dir.join(format!("arc-pwa-{}.{}", appid, ext));
+                            if p.exists() {
+                                if let Some(icon) = icons::load_local_pwa_icon(&p) {
+                                    return Some(icon);
+                                }
+                            }
+                        }
+                        None
+                    })
+                    .await
+                    .unwrap_or(None);
+                    if local.is_some() {
+                        local
+                    } else {
+                        match icon_url.as_deref() {
+                            Some(url) => icons::load_icon(url).await,
+                            None => None,
+                        }
+                    }
                 }
             }
         })
@@ -692,7 +901,15 @@ pub async fn load_detail(
             && (p.id == app_id.as_str() || p.name.to_lowercase() == name_lower)
     });
 
-    let (developer, verified) = if appimage_pkg.is_some() {
+    let pwa_pkg = all_pkgs.iter().copied().find(|p| {
+        p.provider == Provider::Pwa
+            && (p.id == app_id.as_str() || p.name.to_lowercase() == name_lower)
+    });
+
+    let (developer, verified) = if let Some(pwa) = pwa_pkg {
+        let dev = pwa.developer_name.clone().unwrap_or_default();
+        (dev, true)
+    } else if appimage_pkg.is_some() {
         (String::new(), false)
     } else if let Some(fp_pkg) = &flatpak_pkg {
         let remote = fp_pkg.remote.as_deref().unwrap_or("");
@@ -719,24 +936,33 @@ pub async fn load_detail(
         (dev_name, false)
     };
 
-    let flatpak_id = flatpak_pkg.map(|p| p.id.clone()).unwrap_or_else(|| {
-        // Only infer a Flatpak ID from the raw app_id if it looks like a reverse-DNS
-        // Flatpak identifier. Exclude AppImage/Lutris IDs which also contain dots.
-        if app_id.contains('.')
-            && !app_id.contains(';')
-            && !app_id.starts_with("appimage:")
-            && !app_id.starts_with("lutris:")
-            && !app_id.starts_with("distrobox:")
-        {
-            app_id.to_string()
-        } else {
-            String::new()
-        }
-    });
+    // PWAs are surfaced through the flatpak_id slot so the existing detail UI
+    // (install / remove / run buttons) works without any Slint changes.
+    let flatpak_id = pwa_pkg
+        .map(|p| p.id.clone())
+        .or_else(|| flatpak_pkg.map(|p| p.id.clone()))
+        .unwrap_or_else(|| {
+            // Only infer a Flatpak ID from the raw app_id if it looks like a reverse-DNS
+            // Flatpak identifier. Exclude AppImage/Lutris/PWA IDs which also contain dots.
+            if app_id.contains('.')
+                && !app_id.contains(';')
+                && !app_id.starts_with("appimage:")
+                && !app_id.starts_with("lutris:")
+                && !app_id.starts_with("distrobox:")
+                && !app_id.starts_with("pwa:")
+            {
+                app_id.to_string()
+            } else {
+                String::new()
+            }
+        });
     let native_id = native_pkg.map(|p| p.id.clone()).unwrap_or_default();
     let lutris_id = lutris_pkg.map(|p| p.id.clone()).unwrap_or_default();
 
-    let flatpak_installed = flatpak_pkg.map(|p| p.installed).unwrap_or(false)
+    let flatpak_installed = pwa_pkg
+        .map(|p| p.installed)
+        .or_else(|| flatpak_pkg.map(|p| p.installed))
+        .unwrap_or(false)
         || installed_pkgs
             .iter()
             .any(|p| p.provider == Provider::Flatpak && p.id == flatpak_id);
@@ -745,9 +971,38 @@ pub async fn load_detail(
     let appimage_id = appimage_pkg.map(|p| p.id.clone()).unwrap_or_default();
     let appimage_installed = appimage_pkg.map(|p| p.installed).unwrap_or(false);
 
-    let icon = if !flatpak_id.is_empty() {
+    let icon = if let Some(pwa) = pwa_pkg {
+        // Try local icon written by the PWA provider, fall back to remote URL.
+        let appid = pwa.id.strip_prefix("pwa:").unwrap_or(&pwa.id).to_string();
+        let home = std::path::PathBuf::from(
+            std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()),
+        );
+        let icons_dir = home.join(".local/share/icons/hicolor/256x256/apps");
+        let local = tokio::task::spawn_blocking(move || {
+            for ext in ["png", "svg", "webp"] {
+                let p = icons_dir.join(format!("arc-pwa-{}.{}", appid, ext));
+                if p.exists() {
+                    if let Some(icon) = icons::load_local_pwa_icon(&p) {
+                        return Some(icon);
+                    }
+                }
+            }
+            None
+        })
+        .await
+        .unwrap_or(None);
+        if local.is_some() {
+            local
+        } else {
+            match pwa.icon_url.as_deref() {
+                Some(url) => icons::load_icon(url).await,
+                None => None,
+            }
+        }
+    } else if !flatpak_id.is_empty() {
         let fid = flatpak_id.clone();
-        let remote_icon_url = flatpak_pkg.and_then(|p| p.icon_url.clone())
+        let remote_icon_url = flatpak_pkg
+            .and_then(|p| p.icon_url.clone())
             .filter(|u| !u.starts_with("local:"));
         let local = tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&fid))
             .await
@@ -793,7 +1048,8 @@ pub async fn load_detail(
         None
     };
 
-    let name = flatpak_pkg
+    let name = pwa_pkg
+        .or(flatpak_pkg)
         .or(native_pkg)
         .or(lutris_pkg)
         .or(appimage_pkg)
@@ -801,7 +1057,8 @@ pub async fn load_detail(
         .unwrap_or_else(|| app_name.clone());
 
     let plain_description: Option<String> = if flatpak_pkg.is_none() {
-        native_pkg
+        pwa_pkg
+            .or(native_pkg)
             .or(lutris_pkg)
             .or(appimage_pkg)
             .map(|p| p.description.clone())
@@ -817,7 +1074,8 @@ pub async fn load_detail(
         .map(|p| p.version.clone())
         .unwrap_or_default();
 
-    let screenshot_urls: Vec<String> = flatpak_pkg
+    let screenshot_urls: Vec<String> = pwa_pkg
+        .or(flatpak_pkg)
         .or(lutris_pkg)
         .or(native_pkg)
         .map(|p| p.screenshots.clone())
@@ -857,10 +1115,12 @@ pub async fn load_detail(
         homepage_url: metadata
             .as_ref()
             .and_then(|m| m.homepage_url.clone())
+            .or_else(|| pwa_pkg.and_then(|p| p.homepage_url.clone()))
             .unwrap_or_default(),
         content_rating: metadata
             .as_ref()
             .map(|m| m.content_rating.clone())
+            .or_else(|| pwa_pkg.and_then(|p| p.content_rating.clone()))
             .unwrap_or_default(),
     };
 

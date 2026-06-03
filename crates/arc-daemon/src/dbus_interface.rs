@@ -10,6 +10,9 @@ use tokio::sync::Semaphore;
 // distrobox ids look like "distrobox:container:name:type" or are file paths for installs.
 // lutris ids look like "lutris:<slug>".
 fn provider_from_id(package_id: &str) -> Provider {
+    if package_id.starts_with("pwa:") {
+        return Provider::Pwa;
+    }
     if package_id.starts_with("lutris:") {
         return Provider::Lutris;
     }
@@ -546,6 +549,9 @@ impl ArcDaemonInterface {
 
     async fn get_app_metadata(&self, package_id: String) -> String {
         info!("GetAppMetadata: {}", package_id);
+        if package_id.starts_with("pwa:") {
+            return self.provider.pwa.get_metadata_json(&package_id).await;
+        }
         tokio::task::spawn_blocking(move || {
             let db = crate::appstream_db::AppStreamDb::get_static();
             db.find_by_id(&package_id)

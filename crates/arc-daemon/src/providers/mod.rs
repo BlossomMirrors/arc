@@ -28,12 +28,14 @@ pub mod appimage;
 pub mod distrobox;
 pub mod flatpak;
 pub mod lutris;
+pub mod pwa;
 
 pub struct MultiProvider {
     pub native: Arc<distrobox::DistroboxProvider>,
     pub flatpak: Arc<flatpak::FlatpakProvider>,
     pub lutris: Arc<lutris::LutrisProvider>,
     pub appimage: Arc<appimage::AppImageProvider>,
+    pub pwa: Arc<pwa::PwaProvider>,
     package_cache: RwLock<Option<(Instant, Vec<Package>)>>,
 }
 
@@ -43,12 +45,14 @@ impl MultiProvider {
         flatpak: flatpak::FlatpakProvider,
         lutris: lutris::LutrisProvider,
         appimage: appimage::AppImageProvider,
+        pwa: pwa::PwaProvider,
     ) -> Self {
         Self {
             native: Arc::new(native),
             flatpak: Arc::new(flatpak),
             lutris: Arc::new(lutris),
             appimage: Arc::new(appimage),
+            pwa: Arc::new(pwa),
             package_cache: RwLock::new(None),
         }
     }
@@ -61,6 +65,10 @@ impl MultiProvider {
         id.starts_with("appimage:") || id.to_lowercase().ends_with(".appimage")
     }
 
+    fn is_pwa_id(id: &str) -> bool {
+        id.starts_with("pwa:")
+    }
+
     // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no semicolons).
     // distrobox ids look like "distrobox:container:name:type" or are file paths.
     fn is_flatpak_id(id: &str) -> bool {
@@ -69,20 +77,23 @@ impl MultiProvider {
             && !id.starts_with("distrobox:")
             && !id.starts_with("lutris:")
             && !id.starts_with("appimage:")
+            && !id.starts_with("pwa:")
             && id.matches('.').count() >= 2
     }
 
     async fn fetch_and_store(&self) -> Result<Vec<Package>, ArcError> {
-        let (flatpak, native, lutris, appimage) = tokio::join!(
+        let (flatpak, native, lutris, appimage, pwa) = tokio::join!(
             self.flatpak.fetch_all(),
             self.native.fetch_all(),
             self.lutris.fetch_all(),
             self.appimage.fetch_all(),
+            self.pwa.search(""),
         );
         let mut packages = flatpak.unwrap_or_default();
         packages.extend(native.unwrap_or_default());
         packages.extend(lutris.unwrap_or_default());
         packages.extend(appimage.unwrap_or_default());
+        packages.extend(pwa.unwrap_or_default());
         {
             let mut cache = self.package_cache.write().await;
             *cache = Some((Instant::now(), packages.clone()));
@@ -109,7 +120,12 @@ impl MultiProvider {
         progress_tx: UnboundedSender<u8>,
         cancel_token: CancellationToken,
     ) -> Result<(), ArcError> {
-        if Self::is_appimage_id(package_id) {
+        if Self::is_pwa_id(package_id) {
+            let _ = progress_tx.send(10);
+            let result = self.pwa.install(package_id).await;
+            let _ = progress_tx.send(100);
+            result
+        } else if Self::is_appimage_id(package_id) {
             let _ = progress_tx.send(10);
             let result = self.appimage.install(package_id).await;
             let _ = progress_tx.send(100);
@@ -226,16 +242,18 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn list_installed(&self) -> Result<Vec<Package>, ArcError> {
-        let (native, flatpak, lutris, appimage) = tokio::join!(
+        let (native, flatpak, lutris, appimage, pwa) = tokio::join!(
             self.native.list_installed(),
             self.flatpak.list_installed(),
             self.lutris.list_installed(),
             self.appimage.list_installed(),
+            self.pwa.list_installed(),
         );
         let mut results = native.unwrap_or_default();
         results.extend(flatpak.unwrap_or_default());
         results.extend(lutris.unwrap_or_default());
         results.extend(appimage.unwrap_or_default());
+        results.extend(pwa.unwrap_or_default());
         Ok(results)
     }
 
@@ -252,7 +270,9 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn install(&self, package_id: &str) -> Result<(), ArcError> {
-        if Self::is_appimage_id(package_id) {
+        if Self::is_pwa_id(package_id) {
+            self.pwa.install(package_id).await
+        } else if Self::is_appimage_id(package_id) {
             self.appimage.install(package_id).await
         } else if Self::is_lutris_id(package_id) {
             self.lutris.install(package_id).await
@@ -264,7 +284,9 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn remove(&self, package_id: &str) -> Result<(), ArcError> {
-        if Self::is_appimage_id(package_id) {
+        if Self::is_pwa_id(package_id) {
+            self.pwa.remove(package_id).await
+        } else if Self::is_appimage_id(package_id) {
             self.appimage.remove(package_id).await
         } else if Self::is_lutris_id(package_id) {
             self.lutris.remove(package_id).await
@@ -276,10 +298,10 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn update(&self, package_id: &str) -> Result<(), ArcError> {
-        if Self::is_appimage_id(package_id) {
+        if Self::is_pwa_id(package_id) {
+            self.pwa.update(package_id).await
+        } else if Self::is_appimage_id(package_id) {
             self.appimage.update(package_id).await
-        } else if Self::is_lutris_id(package_id) {
-            self.lutris.update(package_id).await
         } else if Self::is_flatpak_id(package_id) {
             self.flatpak.update(package_id).await
         } else {
@@ -288,7 +310,9 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn run(&self, package_id: &str) -> Result<(), ArcError> {
-        if Self::is_appimage_id(package_id) {
+        if Self::is_pwa_id(package_id) {
+            self.pwa.run(package_id).await
+        } else if Self::is_appimage_id(package_id) {
             self.appimage.run(package_id).await
         } else if Self::is_lutris_id(package_id) {
             self.lutris.run(package_id).await
@@ -304,7 +328,9 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn get_app_info(&self, package_id: &str) -> Result<Option<Package>, ArcError> {
-        if Self::is_appimage_id(package_id) {
+        if Self::is_pwa_id(package_id) {
+            self.pwa.get_app_info(package_id).await
+        } else if Self::is_appimage_id(package_id) {
             self.appimage.get_app_info(package_id).await
         } else if Self::is_lutris_id(package_id) {
             self.lutris.get_app_info(package_id).await

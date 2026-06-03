@@ -3,6 +3,7 @@ use crate::providers::appimage::AppImageProvider;
 use crate::providers::distrobox::DistroboxProvider;
 use crate::providers::flatpak::FlatpakProvider;
 use crate::providers::lutris::LutrisProvider;
+use crate::providers::pwa::PwaProvider;
 use crate::providers::MultiProvider;
 use crate::transaction_manager::TransactionManager;
 use anyhow::Result;
@@ -30,8 +31,9 @@ impl Daemon {
         let flatpak = FlatpakProvider::new();
         let lutris = LutrisProvider::new();
         let appimage = AppImageProvider::new();
+        let pwa = PwaProvider::new();
 
-        let provider = Arc::new(MultiProvider::new(native, flatpak, lutris, appimage));
+        let provider = Arc::new(MultiProvider::new(native, flatpak, lutris, appimage, pwa));
 
         // load both flatpak and system packages into memory right away so the
         // first search request is fast instead of blocking on a cold provider

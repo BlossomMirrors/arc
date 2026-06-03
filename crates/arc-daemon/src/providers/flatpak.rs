@@ -108,6 +108,9 @@ fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
         icon_url: None,
         remote: r.origin().map(|s| s.to_string()),
         screenshots: vec![],
+            developer_name: None,
+            homepage_url: None,
+            content_rating: None,
     }
 }
 
@@ -174,6 +177,9 @@ impl FlatpakProvider {
                                 icon_url: None,
                                 remote: None,
                                 screenshots: vec![],
+            developer_name: None,
+            homepage_url: None,
+            content_rating: None,
                             });
                         Some(pkg)
                     } else {
@@ -303,6 +309,9 @@ impl FlatpakProvider {
                             icon_url: None,
                             remote: Some(remote_name.to_string()),
                             screenshots: vec![],
+            developer_name: None,
+            homepage_url: None,
+            content_rating: None,
                         });
                     }
                 }
@@ -321,6 +330,9 @@ impl FlatpakProvider {
                         icon_url: None,
                         remote: None,
                         screenshots: vec![],
+            developer_name: None,
+            homepage_url: None,
+            content_rating: None,
                     });
                 }
             }

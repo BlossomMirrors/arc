@@ -477,6 +477,9 @@ fn parse_info(content: &str, home: &str) -> Option<Package> {
         icon_url: desktop_icon,
         remote: None,
         screenshots: vec![],
+            developer_name: None,
+            homepage_url: None,
+            content_rating: None,
     })
 }
 

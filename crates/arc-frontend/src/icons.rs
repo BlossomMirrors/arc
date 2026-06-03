@@ -20,11 +20,36 @@ impl RawIcon {
     }
 }
 
+fn looks_like_svg(url: &str, bytes: &[u8]) -> bool {
+    url.contains(".svg")
+        || bytes.starts_with(b"<svg")
+        || bytes.starts_with(b"<?xml")
+        || bytes.starts_with(b"\xef\xbb\xbf<") // UTF-8 BOM
+}
+
 #[allow(dead_code)]
 pub async fn load_icon(url: &str) -> Option<RawIcon> {
     let bytes = reqwest::get(url).await.ok()?.bytes().await.ok()?;
+    if looks_like_svg(url, &bytes) {
+        return render_svg(&bytes, 64);
+    }
     let img = image::load_from_memory(&bytes).ok()?;
     let img = img.resize(64, 64, image::imageops::FilterType::Lanczos3);
+    let (w, h) = img.dimensions();
+    Some(RawIcon {
+        width: w,
+        height: h,
+        pixels: img.to_rgba8().into_raw(),
+    })
+}
+
+pub async fn load_banner(url: &str) -> Option<RawIcon> {
+    let bytes = reqwest::get(url).await.ok()?.bytes().await.ok()?;
+    if looks_like_svg(url, &bytes) {
+        return render_svg(&bytes, 900);
+    }
+    let img = image::load_from_memory(&bytes).ok()?;
+    let img = img.resize(900, 506, image::imageops::FilterType::Lanczos3);
     let (w, h) = img.dimensions();
     Some(RawIcon {
         width: w,
@@ -353,6 +378,10 @@ pub fn load_category_icon(icon_name: &str) -> CategoryIconData {
     let icon = render_svg(&svg_bytes, 48);
 
     CategoryIconData { icon, color }
+}
+
+pub fn load_local_pwa_icon(path: &std::path::Path) -> Option<RawIcon> {
+    load_icon_from_path(path, 64)
 }
 
 pub fn load_local_flatpak_icon(app_id: &str) -> Option<RawIcon> {

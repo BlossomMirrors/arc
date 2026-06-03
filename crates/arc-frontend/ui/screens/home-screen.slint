@@ -1,25 +1,27 @@
-import { VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
-import { AppCard } from "../components/app-card.slint";
+import {
+    VerticalBox,
+    HorizontalBox,
+    ScrollView,
+    Palette,
+} from "std-widgets.slint";
 import { CategoryCard } from "../components/category-card.slint";
 import { PopularCard } from "../components/popular-card.slint";
 import { Carousel } from "../components/carousel.slint";
-import { AppCardData, CategoryItem } from "../types.slint";
+import { StoryCard } from "../components/story-card.slint";
+import { HomeItem, AppCardData, CategoryItem, StoryItem } from "../types.slint";
 
 export component HomeScreen inherits Rectangle {
-    in property <[AppCardData]> popular-apps;
-    in property <[AppCardData]> recent-apps;
+    in property <[HomeItem]> home-items;
     in property <[CategoryItem]> categories;
+    in property <[StoryItem]> home-stories;
     in property <bool> home-loading;
     in property <string> tr-loading: "Loading...";
     in property <string> tr-installed: "Installed";
-    in property <string> tr-discover: "Discover Great Software";
-    in property <string> tr-discover-sub: "Install apps from Flathub and your system repositories";
-    in property <string> tr-popular: "Popular";
-    in property <string> tr-recently-added: "Recently Added";
     in property <string> tr-categories: "Categories";
 
     callback detail-requested(string);
     callback category-selected(string);
+    callback story-selected(StoryItem);
 
     clip: true;
 
@@ -36,107 +38,142 @@ export component HomeScreen inherits Rectangle {
         height: parent.height;
         viewport-width: self.visible-width;
 
-        VerticalBox {
+        VerticalLayout {
             padding: 16px;
             spacing: 0px;
             width: scroller.visible-width;
 
-            Rectangle {
-                height: 140px;
-                border-radius: 12px;
-                background: @linear-gradient(135deg, #5b7fa6, #8a5bab);
+            if root.home-stories.length > 0: VerticalLayout {
+                padding-bottom: 8px;
+                spacing: 0px;
 
-                VerticalBox {
-                    alignment: center;
-                    Text {
-                        text: root.tr-discover;
-                        font-size: 22px;
-                        font-weight: 700;
-                        color: white;
-                        horizontal-alignment: center;
-                    }
+                stories-flick := Flickable {
+                    width: parent.width;
+                    height: 210px;
+                    viewport-width: root.home-stories.length * 316px;
+                    viewport-height: 210px;
 
-                    Text {
-                        text: root.tr-discover-sub;
-                        font-size: 13px;
-                        color: #ffffffcc;
-                        horizontal-alignment: center;
-                    }
-                }
-            }
-
-            if root.popular-apps.length > 0: VerticalBox {
-                padding-top: 20px;
-                spacing: 4px;
-
-                Text {
-                    text: root.tr-popular;
-                    font-size: 16px;
-                    font-weight: 700;
-                }
-
-                Rectangle {
-                    height: ceil(root.popular-apps.length / 5) * 164px;
-                    preferred-width: 0px;
-
-                    for app[i] in root.popular-apps: PopularCard {
-                        x: mod(i, 5) * (parent.width + 12px) / 5;
-                        y: ((i - mod(i, 5)) / 5) * 164px;
-                        width: (parent.width + 12px) / 5 - 12px;
-                        height: 152px;
-                        card: app;
-                        tr-installed: root.tr-installed;
-                        clicked(id) => {
-                            root.detail-requested(id);
+                    for s[i] in root.home-stories: StoryCard {
+                        x: i * 316px;
+                        y: 0px;
+                        story: s;
+                        clicked(_id) => {
+                            root.story-selected(s);
                         }
                     }
                 }
             }
 
-            if root.recent-apps.length > 0: VerticalBox {
-                padding-top: 20px;
-                spacing: 8px;
+            for item in root.home-items: VerticalLayout {
+                padding-top: item.item-type == "app-row" || item.item-type == "app-grid" || item.item-type == "categories" ? 20px : 6px;
 
-                Text {
-                    text: root.tr-recently-added;
-                    font-size: 16px;
+                if item.item-type == "h1": Text {
+                    text: item.text;
+                    font-size: 22px;
                     font-weight: 700;
+                    wrap: word-wrap;
                 }
 
-                Carousel {
-                    width: parent.width;
-                    items: root.recent-apps;
-                    tr-installed: root.tr-installed;
-                    item-clicked(id) => {
-                        root.detail-requested(id);
+                if item.item-type == "h2": Text {
+                    text: item.text;
+                    font-size: 16px;
+                    font-weight: 700;
+                    wrap: word-wrap;
+                }
+
+                if item.item-type == "h3": Text {
+                    text: item.text;
+                    font-size: 14px;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                }
+
+                if item.item-type == "p": Text {
+                    text: item.text;
+                    font-size: 13px;
+                    color: Palette.foreground.transparentize(0.35);
+                    wrap: word-wrap;
+                }
+
+                if item.item-type == "br": Rectangle {
+                    height: 1px;
+                    background: Palette.foreground.transparentize(0.85);
+                }
+
+                if item.item-type == "app-row" && item.apps.length > 0: VerticalLayout {
+                    spacing: 8px;
+
+                    if item.title != "": Text {
+                        text: item.title;
+                        font-size: 16px;
+                        font-weight: 700;
+                        height: 22px;
+                    }
+
+                    Carousel {
+                        items: item.apps;
+                        tr-installed: root.tr-installed;
+                        item-clicked(id) => {
+                            root.detail-requested(id);
+                        }
                     }
                 }
-            }
 
-            if root.categories.length > 0: VerticalBox {
-                padding-top: 20px;
-                spacing: 24px;
+                if item.item-type == "app-grid" && item.apps.length > 0: VerticalLayout {
+                    spacing: 4px;
 
-                Text {
-                    text: root.tr-categories;
-                    font-size: 16px;
-                    font-weight: 700;
+                    if item.title != "": Text {
+                        text: item.title;
+                        font-size: 16px;
+                        font-weight: 700;
+                        height: 22px;
+                    }
+
+                    Rectangle {
+                        // Ceiling division: (n + 4) / 5
+                        height: ((item.apps.length + 4) / 5) * 164px;
+                        preferred-width: 0px;
+
+                        for app[j] in item.apps: PopularCard {
+                            x: mod(j, 5) * (parent.width + 12px) / 5;
+                            y: ((j - mod(j, 5)) / 5) * 164px;
+                            width: (parent.width + 12px) / 5 - 12px;
+                            height: 152px;
+                            card: app;
+                            tr-installed: root.tr-installed;
+                            clicked(id) => {
+                                root.detail-requested(id);
+                            }
+                        }
+                    }
                 }
 
-                HorizontalLayout {
-                    alignment: center;
-                    Rectangle {
-                        width: min(parent.width, 750px);
-                        height: ceil(root.categories.length / 3) * 114px;
+                if item.item-type == "categories" && root.categories.length > 0: VerticalLayout {
+                    spacing: 24px;
 
-                        for cat[i] in root.categories: CategoryCard {
-                            x: mod(i, 3) * (parent.width + 12px) / 3;
-                            y: ((i - mod(i, 3)) / 3) * 114px;
-                            width: (parent.width + 12px) / 3 - 12px;
-                            height: 104px;
-                            category: cat;
-                            clicked(id) => {
-                                root.category-selected(id);
+                    Text {
+                        text: root.tr-categories;
+                        font-size: 16px;
+                        font-weight: 700;
+                        height: 22px;
+                    }
+
+                    HorizontalLayout {
+                        alignment: center;
+
+                        Rectangle {
+                            width: min(parent.width, 750px);
+                            height: ((root.categories.length + 2) / 3) * 114px;
+
+                            for cat[j] in root.categories: CategoryCard {
+                                x: mod(j, 3) * (parent.width + 12px) / 3;
+                                y: ((j - mod(j, 3)) / 3) * 114px;
+                                width: (parent.width + 12px) / 3 - 12px;
+                                height: 104px;
+                                category: cat;
+                                clicked(id) => {
+                                    root.category-selected(id);
+                                }
                             }
                         }
                     }

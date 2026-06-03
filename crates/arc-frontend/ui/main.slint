@@ -13,26 +13,31 @@ import { EulaScreen } from "screens/eula-screen.slint";
 import { AddFlatpakRepoScreen } from "screens/add-flatpakrepo-screen.slint";
 import { SettingsScreen } from "screens/settings-screen.slint";
 import { DownloadManagerScreen } from "screens/download-manager-screen.slint";
+import { StoryScreen } from "screens/story-screen.slint";
 
 import {
     PackageItem,
     AppDetailData,
     AppCardData,
     CategoryItem,
+    HomeItem,
     TransactionItem,
     RemoteItem,
     ExtensionItem,
     DescriptionBlock,
+    StoryItem,
 } from "types.slint";
 export {
     PackageItem,
     AppDetailData,
     AppCardData,
     CategoryItem,
+    HomeItem,
     TransactionItem,
     RemoteItem,
     ExtensionItem,
     DescriptionBlock,
+    StoryItem,
 } from "types.slint";
 
 export component AppWindow inherits Window {
@@ -46,9 +51,10 @@ export component AppWindow inherits Window {
     in-out property <bool> is-loading: false;
     in-out property <string> current-view: "home";
 
-    in-out property <[AppCardData]> popular-apps: [];
-    in-out property <[AppCardData]> recent-apps: [];
+    in-out property <[HomeItem]> home-items: [];
     in-out property <[CategoryItem]> categories: [];
+    in-out property <[StoryItem]> home-stories: [];
+    in-out property <StoryItem> current-story;
     in-out property <bool> home-loading: false;
 
     in-out property <string> prev-view: "home";
@@ -92,10 +98,6 @@ export component AppWindow inherits Window {
     in-out property <string> tr-restart: "Restart";
     in-out property <string> tr-name: "Name";
     in-out property <string> tr-url: "URL";
-    in-out property <string> tr-discover: "Discover Great Software";
-    in-out property <string> tr-discover-sub: "Install apps from Flathub and your system repositories";
-    in-out property <string> tr-popular: "Popular";
-    in-out property <string> tr-recently-added: "Recently Added";
     in-out property <string> tr-categories: "Categories";
     in-out property <string> tr-no-packages: "No packages found.\nSearch for an application to get started.";
     in-out property <string> tr-up-to-date: "Everything is up to date.";
@@ -291,16 +293,12 @@ export component AppWindow inherits Window {
             if root.current-view == "home": HomeScreen {
                 width: parent.width;
                 height: parent.height;
-                popular-apps: root.popular-apps;
-                recent-apps: root.recent-apps;
+                home-items: root.home-items;
                 categories: root.categories;
+                home-stories: root.home-stories;
                 home-loading: root.home-loading;
                 tr-loading: root.tr-loading;
                 tr-installed: root.tr-installed;
-                tr-discover: root.tr-discover;
-                tr-discover-sub: root.tr-discover-sub;
-                tr-popular: root.tr-popular;
-                tr-recently-added: root.tr-recently-added;
                 tr-categories: root.tr-categories;
                 detail-requested(id) => {
                     root.prev-view = "home";
@@ -308,6 +306,21 @@ export component AppWindow inherits Window {
                 }
                 category-selected(id) => {
                     root.category-selected(id);
+                }
+                story-selected(story) => {
+                    root.current-story = story;
+                    root.prev-view = "home";
+                    root.current-view = "story";
+                }
+            }
+
+            if root.current-view == "story": StoryScreen {
+                width: parent.width;
+                height: parent.height;
+                story: root.current-story;
+                tr-back: root.tr-back;
+                back-clicked => {
+                    root.current-view = root.prev-view;
                 }
             }
 

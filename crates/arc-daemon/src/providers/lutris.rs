@@ -320,6 +320,9 @@ impl LutrisProvider {
             icon_url,
             remote: None,
             screenshots: screenshots.to_vec(),
+            developer_name: None,
+            homepage_url: None,
+            content_rating: None,
         }
     }
 

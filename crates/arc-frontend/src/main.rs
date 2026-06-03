@@ -40,10 +40,6 @@ fn apply_translations(app: &AppWindow) {
     app.set_tr_restart(tr!("Restart").into());
     app.set_tr_name(tr!("Name").into());
     app.set_tr_url(tr!("URL").into());
-    app.set_tr_discover(tr!("Discover Great Software").into());
-    app.set_tr_discover_sub(tr!("Install apps from Flathub and your system repositories").into());
-    app.set_tr_popular(tr!("Popular").into());
-    app.set_tr_recently_added(tr!("Recently Added").into());
     app.set_tr_categories(tr!("Categories").into());
     app.set_tr_no_packages(tr!("No packages found.\nSearch for an application to get started.").into());
     app.set_tr_up_to_date(tr!("Everything is up to date.").into());
@@ -166,6 +162,7 @@ fn main() -> Result<()> {
                 Provider::Flatpak => "Flatpak",
                 Provider::Lutris => "Lutris",
                 Provider::AppImage => "AppImage",
+                Provider::Pwa => "Flatpak",
             }
             .into(),
         );

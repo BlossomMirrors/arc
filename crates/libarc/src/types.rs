@@ -14,6 +14,7 @@ pub enum Provider {
     Distrobox,
     Lutris,
     AppImage,
+    Pwa,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +29,12 @@ pub struct Package {
     pub remote: Option<String>,
     #[serde(default)]
     pub screenshots: Vec<String>,
+    #[serde(default)]
+    pub developer_name: Option<String>,
+    #[serde(default)]
+    pub homepage_url: Option<String>,
+    #[serde(default)]
+    pub content_rating: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

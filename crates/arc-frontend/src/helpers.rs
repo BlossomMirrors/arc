@@ -117,6 +117,7 @@ pub fn dedup_by_preference(pkgs: Vec<Package>, settings: &Settings) -> Vec<Packa
                         || settings.preferred_for(&p.id) == Provider::Lutris
                 }
                 Provider::AppImage => true,
+                Provider::Pwa => true,
             }
         })
         .collect()

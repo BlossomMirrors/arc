@@ -61,10 +61,24 @@ export struct ExtensionItem {
     installed: bool,
 }
 
+export struct HomeItem {
+    item-type: string,   // "h1"|"h2"|"h3"|"p"|"br"|"app-row"|"app-grid"|"categories"
+    text: string,        // text sections
+    title: string,       // optional heading for app sections
+    apps: [AppCardData],
+}
+
 export struct RemoteItem {
     name: string,
     url: string,
     protected: bool,
+}
+
+export struct StoryItem {
+    id: string,
+    title: string,
+    body: string,
+    screenshot: image,
 }
 
 export struct TransactionItem {
