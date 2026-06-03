@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Button, buttonVariants } from '$lib/components/ui/button/index.js';
+	import * as m from '$lib/paraglide/messages';
 
 	type PwaFormData = {
 		appid?: string;
@@ -33,22 +34,22 @@
 <div class="space-y-4">
 	<div class="grid grid-cols-2 gap-4">
 		<label class="space-y-1.5">
-			<span class="text-sm font-medium">App ID</span>
+			<span class="text-sm font-medium">{m.form_app_id()}</span>
 			<Input name="appid" value={values.appid ?? ''} placeholder="com.example.App" required />
 		</label>
 		<label class="space-y-1.5">
-			<span class="text-sm font-medium">Name</span>
+			<span class="text-sm font-medium">{m.form_name()}</span>
 			<Input name="name" value={values.name ?? ''} placeholder="My App" required />
 		</label>
 	</div>
 
 	<label class="space-y-1.5">
-		<span class="text-sm font-medium">Summary</span>
+		<span class="text-sm font-medium">{m.form_summary()}</span>
 		<Input name="summary" value={values.summary ?? ''} placeholder="Short description" required />
 	</label>
 
 	<label class="space-y-1.5">
-		<span class="text-sm font-medium">Description (HTML)</span>
+		<span class="text-sm font-medium">{m.form_description()}</span>
 		<textarea
 			name="description"
 			rows={4}
@@ -60,17 +61,17 @@
 
 	<div class="grid grid-cols-2 gap-4">
 		<label class="space-y-1.5">
-			<span class="text-sm font-medium">Icon URL</span>
+			<span class="text-sm font-medium">{m.form_icon_url()}</span>
 			<Input name="iconUrl" value={values.iconUrl ?? ''} placeholder="https://..." required />
 		</label>
 		<label class="space-y-1.5">
-			<span class="text-sm font-medium">Homepage URL</span>
+			<span class="text-sm font-medium">{m.form_homepage_url()}</span>
 			<Input name="homepageUrl" value={values.homepageUrl ?? ''} placeholder="https://..." />
 		</label>
 	</div>
 
 	<label class="space-y-1.5">
-		<span class="text-sm font-medium">Screenshots (one URL per line)</span>
+		<span class="text-sm font-medium">{m.form_screenshots()}</span>
 		<textarea
 			name="screenshots"
 			rows={3}
@@ -82,33 +83,33 @@
 
 	<div class="grid grid-cols-2 gap-4">
 		<label class="space-y-1.5">
-			<span class="text-sm font-medium">Developer Name</span>
+			<span class="text-sm font-medium">{m.form_developer_name()}</span>
 			<Input name="developerName" value={values.developerName ?? ''} placeholder="ACME Corp" required />
 		</label>
 		<label class="space-y-1.5">
-			<span class="text-sm font-medium">Content Rating</span>
+			<span class="text-sm font-medium">{m.form_content_rating()}</span>
 			<Input name="contentRating" value={values.contentRating ?? 'All ages'} placeholder="All ages" />
 		</label>
 	</div>
 
 	<div class="grid grid-cols-2 gap-4">
 		<label class="space-y-1.5">
-			<span class="text-sm font-medium">URL</span>
+			<span class="text-sm font-medium">{m.form_url()}</span>
 			<Input name="url" value={values.url ?? ''} placeholder="https://..." required />
 		</label>
 		<label class="space-y-1.5">
-			<span class="text-sm font-medium">Theme Color</span>
+			<span class="text-sm font-medium">{m.form_theme_color()}</span>
 			<Input name="color" type="color" value={values.color ?? '#000000'} />
 		</label>
 	</div>
 
 	<label class="space-y-1.5">
-		<span class="text-sm font-medium">User Agent</span>
+		<span class="text-sm font-medium">{m.form_user_agent()}</span>
 		<Input name="useragent" value={values.useragent ?? ''} placeholder="Mozilla/5.0..." />
 	</label>
 
 	<label class="space-y-1.5">
-		<span class="text-sm font-medium">Custom CSS</span>
+		<span class="text-sm font-medium">{m.form_custom_css()}</span>
 		<textarea
 			name="css"
 			rows={4}
@@ -119,7 +120,7 @@
 	</label>
 
 	<label class="space-y-1.5">
-		<span class="text-sm font-medium">Custom JS</span>
+		<span class="text-sm font-medium">{m.form_custom_js()}</span>
 		<textarea
 			name="js"
 			rows={4}
@@ -132,16 +133,16 @@
 	<div class="flex gap-6">
 		<label class="flex items-center gap-2 text-sm">
 			<input type="checkbox" name="widevine" value="true" bind:checked={widevine} class="rounded border-input" />
-			Widevine DRM
+			{m.form_widevine()}
 		</label>
 		<label class="flex items-center gap-2 text-sm">
 			<input type="checkbox" name="tray" value="true" bind:checked={tray} class="rounded border-input" />
-			System Tray
+			{m.form_tray()}
 		</label>
 	</div>
 
 	<div class="flex gap-2 pt-2">
 		<Button type="submit">{submitLabel}</Button>
-		<a href="/dashboard/pwas" class={buttonVariants({ variant: 'ghost' })}>Cancel</a>
+		<a href="/dashboard/pwas" class={buttonVariants({ variant: 'ghost' })}>{m.form_cancel()}</a>
 	</div>
 </div>

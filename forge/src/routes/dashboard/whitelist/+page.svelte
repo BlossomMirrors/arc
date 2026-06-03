@@ -3,6 +3,7 @@
 	import { Trash2 } from '@lucide/svelte';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
 
@@ -15,9 +16,9 @@
 
 <div class="space-y-6">
 	<div>
-		<h2 class="text-lg font-semibold">Lutris Whitelist</h2>
+		<h2 class="text-lg font-semibold">{m.nav_whitelist()}</h2>
 		<p class="text-sm text-muted-foreground">
-			Entries are served publicly at <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
+			{m.whitelist_served_public()} <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
 				>/api/lutris-whitelist</code
 			>.
 		</p>
@@ -40,11 +41,11 @@
 			class="flex-1"
 			required
 		/>
-		<Button type="submit">Add</Button>
+		<Button type="submit">{m.whitelist_add()}</Button>
 	</form>
 
 	{#if data.entries.length === 0}
-		<p class="text-sm text-muted-foreground">No entries yet.</p>
+		<p class="text-sm text-muted-foreground">{m.whitelist_empty()}</p>
 	{:else}
 		<ul class="divide-y divide-border rounded-lg border border-border">
 			{#each data.entries as entry (entry.id)}

@@ -2,6 +2,7 @@
 	import { DropdownMenu } from 'bits-ui';
 	import { LogOut, LayoutDashboard, List, AppWindow, Layers } from '@lucide/svelte';
 	import { page } from '$app/state';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data, children } = $props();
 
@@ -11,12 +12,12 @@
 		window.location.href = '/auth/logout';
 	}
 
-	const navItems = [
-		{ href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
-		{ href: '/dashboard/whitelist', label: 'Lutris Whitelist', icon: List },
-		{ href: '/dashboard/pwas', label: 'PWAs', icon: AppWindow },
-		{ href: '/dashboard/frontpage', label: 'Front Page Designer', icon: Layers }
-	];
+	const navItems = $derived([
+		{ href: '/dashboard', label: m.nav_overview(), icon: LayoutDashboard },
+		{ href: '/dashboard/whitelist', label: m.nav_whitelist(), icon: List },
+		{ href: '/dashboard/pwas', label: m.nav_pwas(), icon: AppWindow },
+		{ href: '/dashboard/frontpage', label: m.nav_frontpage(), icon: Layers }
+	]);
 </script>
 
 <div class="flex min-h-screen flex-col">
@@ -47,7 +48,7 @@
 						onSelect={signOut}
 					>
 						<LogOut class="size-4" />
-						Sign out
+						{m.sign_out()}
 					</DropdownMenu.Item>
 				</DropdownMenu.Content>
 			</DropdownMenu.Root>

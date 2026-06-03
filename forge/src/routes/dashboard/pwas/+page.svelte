@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { Trash2, Pencil, Plus } from '@lucide/svelte';
 	import { Button, buttonVariants } from '$lib/components/ui/button/index.js';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
 </script>
@@ -13,9 +14,9 @@
 <div class="space-y-6">
 	<div class="flex items-center justify-between">
 		<div>
-			<h2 class="text-lg font-semibold">PWA Apps</h2>
+			<h2 class="text-lg font-semibold">{m.pwas_heading()}</h2>
 			<p class="text-sm text-muted-foreground">
-				Served publicly at <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
+				{m.pwas_served_public()} <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
 					>/api/pwas</code
 				>.
 			</p>
@@ -23,12 +24,12 @@
 		<!-- eslint-disable svelte/no-navigation-without-resolve -->
 		<a href="/dashboard/pwas/new" class={buttonVariants()}>
 			<Plus class="size-4" />
-			New PWA
+			{m.pwas_new()}
 		</a>
 	</div>
 
 	{#if data.apps.length === 0}
-		<p class="text-sm text-muted-foreground">No PWAs yet.</p>
+		<p class="text-sm text-muted-foreground">{m.pwas_empty()}</p>
 	{:else}
 		<ul class="divide-y divide-border rounded-lg border border-border">
 			{#each data.apps as app (app.id)}

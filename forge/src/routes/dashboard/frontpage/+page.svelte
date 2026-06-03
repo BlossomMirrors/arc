@@ -25,6 +25,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { newSection, type Section, type LangString, HTML_TYPES } from '$lib/frontpage.js';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
 
@@ -56,28 +57,22 @@
 		el.style.height = el.scrollHeight + 'px';
 	}
 
-	const COMMANDS = [
-		{ type: 'h1' as const, label: 'Heading 1', badge: 'H₁', icon: Heading1, shorthand: '#' },
-		{ type: 'h2' as const, label: 'Heading 2', badge: 'H₂', icon: Heading2, shorthand: '##' },
-		{ type: 'h3' as const, label: 'Heading 3', badge: 'H₃', icon: Heading3, shorthand: '###' },
-		{ type: 'p' as const, label: 'Paragraph', badge: 'P', icon: AlignLeft, shorthand: '' },
-		{ type: 'ul' as const, label: 'Bullet list', badge: null, icon: List, shorthand: '-' },
-		{ type: 'br' as const, label: 'Divider', badge: null, icon: Minus, shorthand: '---' },
-		{ type: 'carousel' as const, label: 'Carousel', badge: null, icon: Layers, shorthand: '' },
-		{ type: 'top' as const, label: 'Top Apps', badge: null, icon: Star, shorthand: '' },
-		{ type: 'new' as const, label: 'New', badge: null, icon: Sparkles, shorthand: '' },
-		{ type: 'trending' as const, label: 'Trending', badge: null, icon: TrendingUp, shorthand: '' },
-		{
-			type: 'categories' as const,
-			label: 'Categories',
-			badge: null,
-			icon: LayoutGrid,
-			shorthand: ''
-		},
-		{ type: 'category' as const, label: 'Category', badge: null, icon: Tag, shorthand: '' },
-		{ type: 'custom' as const, label: 'Custom', badge: null, icon: LayoutList, shorthand: '' },
-		{ type: 'charts' as const, label: 'Charts', badge: null, icon: BarChart2, shorthand: '' }
-	];
+	const COMMANDS = $derived([
+		{ type: 'h1' as const, label: m.cmd_heading1(), badge: 'H₁', icon: Heading1, shorthand: '#' },
+		{ type: 'h2' as const, label: m.cmd_heading2(), badge: 'H₂', icon: Heading2, shorthand: '##' },
+		{ type: 'h3' as const, label: m.cmd_heading3(), badge: 'H₃', icon: Heading3, shorthand: '###' },
+		{ type: 'p' as const, label: m.cmd_paragraph(), badge: 'P', icon: AlignLeft, shorthand: '' },
+		{ type: 'ul' as const, label: m.cmd_bullet(), badge: null, icon: List, shorthand: '-' },
+		{ type: 'br' as const, label: m.cmd_divider(), badge: null, icon: Minus, shorthand: '---' },
+		{ type: 'carousel' as const, label: m.cmd_carousel(), badge: null, icon: Layers, shorthand: '' },
+		{ type: 'top' as const, label: m.cmd_top(), badge: null, icon: Star, shorthand: '' },
+		{ type: 'new' as const, label: m.cmd_new(), badge: null, icon: Sparkles, shorthand: '' },
+		{ type: 'trending' as const, label: m.cmd_trending(), badge: null, icon: TrendingUp, shorthand: '' },
+		{ type: 'categories' as const, label: m.cmd_categories(), badge: null, icon: LayoutGrid, shorthand: '' },
+		{ type: 'category' as const, label: m.cmd_category(), badge: null, icon: Tag, shorthand: '' },
+		{ type: 'custom' as const, label: m.cmd_custom(), badge: null, icon: LayoutList, shorthand: '' },
+		{ type: 'charts' as const, label: m.cmd_charts(), badge: null, icon: BarChart2, shorthand: '' }
+	]);
 
 	const filtered = $derived(
 		paletteFilter
@@ -379,15 +374,17 @@
 		}
 	}
 
-	const LABEL: Record<string, string> = {
-		carousel: 'Carousel',
-		top: 'Top Apps',
-		new: 'New',
-		trending: 'Trending',
-		categories: 'Categories',
-		category: 'Category',
-		custom: 'Custom',
-		charts: 'Charts'
+	const APP_TYPES = new Set(['carousel', 'top', 'new', 'trending', 'categories', 'category', 'custom', 'charts']);
+
+	const SECTION_LABELS: Record<string, () => string> = {
+		carousel: m.cmd_carousel,
+		top: m.cmd_top,
+		new: m.cmd_new,
+		trending: m.cmd_trending,
+		categories: m.cmd_categories,
+		category: m.cmd_category,
+		custom: m.cmd_custom,
+		charts: m.cmd_charts
 	};
 </script>
 
@@ -407,15 +404,13 @@
 
 	<div class="mb-6 flex items-center justify-between">
 		<div>
-			<h2 class="text-lg font-semibold">Front Page</h2>
+			<h2 class="text-lg font-semibold">{m.frontpage_heading()}</h2>
 			<p class="text-xs text-muted-foreground">
-				<code class="font-mono">/api/frontpage</code> · type
-				<kbd class="rounded border border-border bg-muted px-1 font-mono text-[10px]">/</kbd> anywhere
-				to insert a block
+				<code class="font-mono">/api/frontpage</code> · {m.frontpage_hint()}
 			</p>
 		</div>
 		<Button type="submit" disabled={!dirty} variant={dirty ? 'default' : 'ghost'}>
-			{dirty ? 'Save' : 'Saved'}
+			{dirty ? m.frontpage_save() : m.frontpage_saved()}
 		</Button>
 	</div>
 
@@ -430,12 +425,12 @@
 					if (e.key === 'Enter') insertParagraph(-1);
 				}}
 			>
-				Click or press <span class="font-mono">Enter</span> to write,
-				<span class="font-mono">/</span> for commands…
+				{m.frontpage_click_or_press()} <span class="font-mono">Enter</span> {m.frontpage_to_write()}
+				<span class="font-mono">/</span> {m.frontpage_for_commands()}
 			</div>
 		{:else}
 			{#each sections as section, i (i)}
-				{@const isApp = section.type in LABEL}
+				{@const isApp = APP_TYPES.has(section.type)}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
 					class="group relative pl-14 {draggingIdx === i ? 'opacity-40' : ''} {dragOverIdx === i &&
@@ -584,7 +579,7 @@
 									onclick={() => (expandedIndex = expanded ? null : i)}
 									onkeydown={(e) => e.key === 'Enter' && (expandedIndex = expanded ? null : i)}
 								>
-									<span class="font-medium text-muted-foreground">{LABEL[section.type]}</span>
+									<span class="font-medium text-muted-foreground">{SECTION_LABELS[section.type]?.()}</span>
 									<span class="text-xs text-muted-foreground/50">
 										{#if section.type === 'carousel'}{section.items.length} items · bp={section.breakpoint}
 										{:else if section.type === 'category'}{section.value || '—'}
@@ -598,7 +593,7 @@
 										{#if section.type === 'carousel'}
 											<div class="mb-3 flex gap-4">
 												<label class="space-y-1">
-													<span class="text-xs text-muted-foreground">Breakpoint</span>
+													<span class="text-xs text-muted-foreground">{m.frontpage_breakpoint()}</span>
 													<Input
 														type="number"
 														class="h-8 w-24 text-sm"
@@ -699,12 +694,12 @@
 											/>
 										{:else if section.type === 'charts'}
 											<label class="flex items-center gap-2 text-sm">
-												<input type="checkbox" bind:checked={section.cards} onchange={mark} /> Cards view
+												<input type="checkbox" bind:checked={section.cards} onchange={mark} /> {m.frontpage_cards_view()}
 											</label>
 										{:else if section.type === 'custom'}
 											<div class="space-y-3">
 												<div class="space-y-2">
-													<p class="text-xs text-muted-foreground">Titles</p>
+													<p class="text-xs text-muted-foreground">{m.frontpage_titles()}</p>
 													{#each section.titles as t, k (k)}
 														<div class="flex gap-2">
 															<Input
@@ -735,7 +730,7 @@
 													>
 												</div>
 												<div class="space-y-2">
-													<p class="text-xs text-muted-foreground">Apps</p>
+													<p class="text-xs text-muted-foreground">{m.frontpage_apps_label()}</p>
 													{#each section.apps, k (k)}
 														<div class="flex gap-2">
 															<Input
@@ -761,7 +756,7 @@
 												</div>
 											</div>
 										{:else}
-											<p class="text-xs text-muted-foreground italic">No configuration.</p>
+											<p class="text-xs text-muted-foreground italic">{m.frontpage_no_config()}</p>
 										{/if}
 									</div>
 								{/if}
@@ -783,8 +778,8 @@
 					}
 				}}
 			>
-				Press <span class="font-mono">Enter</span> to continue,
-				<span class="font-mono">/</span> for a block…
+				{m.frontpage_press()} <span class="font-mono">Enter</span> {m.frontpage_to_continue()}
+				<span class="font-mono">/</span> {m.frontpage_for_a_block()}
 			</div>
 		{/if}
 	</div>
@@ -804,7 +799,7 @@
 		<!-- Header -->
 		<div class="px-3 pt-2.5 pb-1">
 			<p class="text-[10px] font-medium tracking-wider text-muted-foreground/50 uppercase">
-				{paletteFilter ? 'Filtered results' : 'Blocks'}
+				{paletteFilter ? m.frontpage_filtered() : m.frontpage_blocks()}
 			</p>
 		</div>
 
@@ -839,7 +834,7 @@
 				</li>
 			{/each}
 			{#if filtered.length === 0}
-				<li class="px-3 py-4 text-center text-xs text-muted-foreground">No results</li>
+				<li class="px-3 py-4 text-center text-xs text-muted-foreground">{m.frontpage_no_results()}</li>
 			{/if}
 		</ul>
 
@@ -850,7 +845,7 @@
 				onclick={closePalette}
 				class="text-xs text-muted-foreground/60 hover:text-foreground"
 			>
-				Close menu
+				{m.frontpage_close_menu()}
 			</button>
 			<kbd
 				class="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60"
