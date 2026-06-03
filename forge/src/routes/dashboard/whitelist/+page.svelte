@@ -17,20 +17,29 @@
 	<div>
 		<h2 class="text-lg font-semibold">Lutris Whitelist</h2>
 		<p class="text-sm text-muted-foreground">
-			Entries are served publicly at <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs">/api/lutris-whitelist</code>.
+			Entries are served publicly at <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
+				>/api/lutris-whitelist</code
+			>.
 		</p>
 	</div>
 
 	<form
 		method="POST"
 		action="?/add"
-		use:enhance={() => async ({ update }) => {
-			await update();
-			newValue = '';
-		}}
+		use:enhance={() =>
+			async ({ update }) => {
+				await update();
+				newValue = '';
+			}}
 		class="flex gap-2"
 	>
-		<Input name="value" bind:value={newValue} placeholder="runner:game-id" class="flex-1" required />
+		<Input
+			name="value"
+			bind:value={newValue}
+			placeholder="runner:game-id"
+			class="flex-1"
+			required
+		/>
 		<Button type="submit">Add</Button>
 	</form>
 
@@ -43,7 +52,12 @@
 					<code class="font-mono text-sm">{entry.value}</code>
 					<form method="POST" action="?/remove" use:enhance>
 						<input type="hidden" name="id" value={entry.id} />
-						<Button type="submit" variant="ghost" size="icon" class="text-muted-foreground hover:text-destructive">
+						<Button
+							type="submit"
+							variant="ghost"
+							size="icon"
+							class="text-muted-foreground hover:text-destructive"
+						>
 							<Trash2 class="size-4" />
 						</Button>
 					</form>

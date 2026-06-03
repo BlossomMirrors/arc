@@ -15,9 +15,12 @@
 		<div>
 			<h2 class="text-lg font-semibold">PWA Apps</h2>
 			<p class="text-sm text-muted-foreground">
-				Served publicly at <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs">/api/pwas</code>.
+				Served publicly at <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
+					>/api/pwas</code
+				>.
 			</p>
 		</div>
+		<!-- eslint-disable svelte/no-navigation-without-resolve -->
 		<a href="/dashboard/pwas/new" class={buttonVariants()}>
 			<Plus class="size-4" />
 			New PWA
@@ -38,12 +41,20 @@
 						</div>
 					</div>
 					<div class="flex items-center gap-1">
-						<a href="/dashboard/pwas/{app.id}" class={buttonVariants({ variant: 'ghost', size: 'icon' })}>
+						<a
+							href="/dashboard/pwas/{app.id}"
+							class={buttonVariants({ variant: 'ghost', size: 'icon' })}
+						>
 							<Pencil class="size-4" />
 						</a>
 						<form method="POST" action="?/delete" use:enhance>
 							<input type="hidden" name="id" value={app.id} />
-							<Button type="submit" variant="ghost" size="icon" class="text-muted-foreground hover:text-destructive">
+							<Button
+								type="submit"
+								variant="ghost"
+								size="icon"
+								class="text-muted-foreground hover:text-destructive"
+							>
 								<Trash2 class="size-4" />
 							</Button>
 						</form>

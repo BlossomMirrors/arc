@@ -47,7 +47,9 @@
 	let draggingIdx = $state<number | null>(null);
 	let dragOverIdx = $state<number | null>(null);
 
-	function mark() { dirty = true; }
+	function mark() {
+		dirty = true;
+	}
 
 	function autoResize(el: HTMLTextAreaElement) {
 		el.style.height = 'auto';
@@ -65,7 +67,13 @@
 		{ type: 'top' as const, label: 'Top Apps', badge: null, icon: Star, shorthand: '' },
 		{ type: 'new' as const, label: 'New', badge: null, icon: Sparkles, shorthand: '' },
 		{ type: 'trending' as const, label: 'Trending', badge: null, icon: TrendingUp, shorthand: '' },
-		{ type: 'categories' as const, label: 'Categories', badge: null, icon: LayoutGrid, shorthand: '' },
+		{
+			type: 'categories' as const,
+			label: 'Categories',
+			badge: null,
+			icon: LayoutGrid,
+			shorthand: ''
+		},
 		{ type: 'category' as const, label: 'Category', badge: null, icon: Tag, shorthand: '' },
 		{ type: 'custom' as const, label: 'Custom', badge: null, icon: LayoutList, shorthand: '' },
 		{ type: 'charts' as const, label: 'Charts', badge: null, icon: BarChart2, shorthand: '' }
@@ -125,7 +133,7 @@
 		paletteOpen = true;
 	}
 
-	// Insert a '/' paragraph and open the palette — used by + button and global /
+	// Insert a '/' paragraph and open the palette used by + button and global /
 	async function addViaSlash(afterIdx: number) {
 		const arr = [...sections];
 		arr.splice(afterIdx + 1, 0, { type: 'p', text: '/' });
@@ -189,7 +197,8 @@
 		}
 	}
 
-	// Called on every oninput for text blocks — handles both slash detection and filter updates
+	// Called on every oninput for text blocks
+	// Handles both slash detection and filter updates
 	function handleTextInput(e: Event, i: number, section: Extract<Section, { text: string }>) {
 		const ta = e.currentTarget as HTMLTextAreaElement;
 		autoResize(ta);
@@ -231,7 +240,7 @@
 	}
 
 	function remove(i: number) {
-		sections = sections.filter((_, j) => j !== i);
+		sections = sections.filter((_s, j) => j !== i);
 		if (expandedIndex === i) expandedIndex = null;
 		mark();
 	}
@@ -261,7 +270,11 @@
 		dragOverIdx = i;
 	}
 	function onDrop(i: number) {
-		if (draggingIdx === null || draggingIdx === i) { draggingIdx = null; dragOverIdx = null; return; }
+		if (draggingIdx === null || draggingIdx === i) {
+			draggingIdx = null;
+			dragOverIdx = null;
+			return;
+		}
 		const arr = [...sections];
 		const [moved] = arr.splice(draggingIdx, 1);
 		arr.splice(draggingIdx < i ? i - 1 : i, 0, moved);
@@ -270,7 +283,10 @@
 		draggingIdx = null;
 		dragOverIdx = null;
 	}
-	function onDragEnd() { draggingIdx = null; dragOverIdx = null; }
+	function onDragEnd() {
+		draggingIdx = null;
+		dragOverIdx = null;
+	}
 
 	async function listItemKeydown(
 		e: KeyboardEvent,
@@ -298,16 +314,37 @@
 	type Carousel = Extract<Section, { type: 'carousel' }>;
 	type Custom = Extract<Section, { type: 'custom' }>;
 
-	function addCarouselApp(s: Carousel) { s.items = [...s.items, { type: 'app', id: '' }]; mark(); }
-	function addCarouselStory(s: Carousel) {
-		s.items = [...s.items, { type: 'story', banner: '', titles: [{ lang: 'en', text: '' }], body: '' }];
+	function addCarouselApp(s: Carousel) {
+		s.items = [...s.items, { type: 'app', id: '' }];
 		mark();
 	}
-	function removeCarouselItem(s: Carousel, j: number) { s.items = s.items.filter((_, k) => k !== j); mark(); }
-	function addCustomApp(s: Custom) { s.apps = [...s.apps, '']; mark(); }
-	function removeCustomApp(s: Custom, j: number) { s.apps = s.apps.filter((_, k) => k !== j); mark(); }
-	function addTitle(arr: LangString[]) { arr.push({ lang: 'de', text: '' }); mark(); }
-	function removeTitle(arr: LangString[], j: number) { arr.splice(j, 1); mark(); }
+	function addCarouselStory(s: Carousel) {
+		s.items = [
+			...s.items,
+			{ type: 'story', banner: '', titles: [{ lang: 'en', text: '' }], body: '' }
+		];
+		mark();
+	}
+	function removeCarouselItem(s: Carousel, j: number) {
+		s.items = s.items.filter((_s, k) => k !== j);
+		mark();
+	}
+	function addCustomApp(s: Custom) {
+		s.apps = [...s.apps, ''];
+		mark();
+	}
+	function removeCustomApp(s: Custom, j: number) {
+		s.apps = s.apps.filter((_s, k) => k !== j);
+		mark();
+	}
+	function addTitle(arr: LangString[]) {
+		arr.push({ lang: 'de', text: '' });
+		mark();
+	}
+	function removeTitle(arr: LangString[], j: number) {
+		arr.splice(j, 1);
+		mark();
+	}
 
 	async function insertParagraph(afterIndex: number) {
 		const arr = [...sections];
@@ -343,12 +380,18 @@
 	}
 
 	const LABEL: Record<string, string> = {
-		carousel: 'Carousel', top: 'Top Apps', new: 'New', trending: 'Trending',
-		categories: 'Categories', category: 'Category', custom: 'Custom', charts: 'Charts'
+		carousel: 'Carousel',
+		top: 'Top Apps',
+		new: 'New',
+		trending: 'Trending',
+		categories: 'Categories',
+		category: 'Category',
+		custom: 'Custom',
+		charts: 'Charts'
 	};
 </script>
 
-<svelte:head><title>Front Page Designer — Arc Forge</title></svelte:head>
+<svelte:head><title>Front Page Designer - Arc Forge</title></svelte:head>
 <svelte:window onkeydown={handleGlobalKeydown} />
 
 <form
@@ -367,7 +410,8 @@
 			<h2 class="text-lg font-semibold">Front Page</h2>
 			<p class="text-xs text-muted-foreground">
 				<code class="font-mono">/api/frontpage</code> · type
-				<kbd class="rounded border border-border bg-muted px-1 font-mono text-[10px]">/</kbd> anywhere to insert a block
+				<kbd class="rounded border border-border bg-muted px-1 font-mono text-[10px]">/</kbd> anywhere
+				to insert a block
 			</p>
 		</div>
 		<Button type="submit" disabled={!dirty} variant={dirty ? 'default' : 'ghost'}>
@@ -394,16 +438,25 @@
 				{@const isApp = section.type in LABEL}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
-					class="group relative pl-14 {draggingIdx === i ? 'opacity-40' : ''} {dragOverIdx === i && draggingIdx !== null && draggingIdx !== i ? 'border-t-2 border-primary' : ''}"
+					class="group relative pl-14 {draggingIdx === i ? 'opacity-40' : ''} {dragOverIdx === i &&
+					draggingIdx !== null &&
+					draggingIdx !== i
+						? 'border-t-2 border-primary'
+						: ''}"
 					ondragover={(e) => onDragOver(e, i)}
 					ondrop={() => onDrop(i)}
-					ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) dragOverIdx = null; }}
+					ondragleave={(e) => {
+						if (!e.currentTarget.contains(e.relatedTarget as Node)) dragOverIdx = null;
+					}}
 				>
 					<!-- Left: + and drag handle -->
-					<div class="absolute left-0 top-0.5 hidden items-center gap-0.5 group-hover:flex">
+					<div class="absolute top-0.5 left-0 hidden items-center gap-0.5 group-hover:flex">
 						<button
 							type="button"
-							onclick={(e) => { e.stopPropagation(); addViaSlash(i); }}
+							onclick={(e) => {
+								e.stopPropagation();
+								addViaSlash(i);
+							}}
 							class="rounded p-1 text-muted-foreground/30 hover:bg-muted hover:text-muted-foreground"
 							title="Add block"
 						>
@@ -422,27 +475,38 @@
 					</div>
 
 					<!-- Right: move + delete -->
-					<div class="absolute top-0 right-0 z-10 hidden items-center gap-0.5 rounded-md border border-border bg-background px-0.5 py-0.5 shadow-sm group-hover:flex">
+					<div
+						class="absolute top-0 right-0 z-10 hidden items-center gap-0.5 rounded-md border border-border bg-background px-0.5 py-0.5 shadow-sm group-hover:flex"
+					>
 						<button
 							type="button"
-							onclick={(e) => { e.stopPropagation(); moveUp(i); }}
+							onclick={(e) => {
+								e.stopPropagation();
+								moveUp(i);
+							}}
 							disabled={i === 0}
 							class="rounded p-1 text-muted-foreground/50 hover:text-muted-foreground disabled:pointer-events-none disabled:opacity-30"
-							title="Move up"
-						><ChevronUp class="size-3.5" /></button>
+							title="Move up"><ChevronUp class="size-3.5" /></button
+						>
 						<button
 							type="button"
-							onclick={(e) => { e.stopPropagation(); moveDown(i); }}
+							onclick={(e) => {
+								e.stopPropagation();
+								moveDown(i);
+							}}
 							disabled={i === sections.length - 1}
 							class="rounded p-1 text-muted-foreground/50 hover:text-muted-foreground disabled:pointer-events-none disabled:opacity-30"
-							title="Move down"
-						><ChevronDown class="size-3.5" /></button>
+							title="Move down"><ChevronDown class="size-3.5" /></button
+						>
 						<button
 							type="button"
-							onclick={(e) => { e.stopPropagation(); remove(i); }}
+							onclick={(e) => {
+								e.stopPropagation();
+								remove(i);
+							}}
 							class="rounded p-1 text-muted-foreground/50 hover:text-destructive"
-							title="Delete"
-						><Trash2 class="size-3.5" /></button>
+							title="Delete"><Trash2 class="size-3.5" /></button
+						>
 					</div>
 
 					<div data-block>
@@ -488,7 +552,7 @@
 							></textarea>
 						{:else if section.type === 'ul'}
 							<ul class="my-1 space-y-0.5 pl-5">
-								{#each section.items as _, j (j)}
+								{#each section.items, j (j)}
 									<li class="flex items-start gap-2">
 										<span class="mt-2 size-1.5 shrink-0 rounded-full bg-foreground/40"></span>
 										<input
@@ -508,7 +572,11 @@
 							</div>
 						{:else if isApp}
 							{@const expanded = expandedIndex === i}
-							<div class="my-1 rounded-lg border border-border/40 hover:border-border/70 {expanded ? 'border-border' : ''}">
+							<div
+								class="my-1 rounded-lg border border-border/40 hover:border-border/70 {expanded
+									? 'border-border'
+									: ''}"
+							>
 								<div
 									class="flex cursor-pointer items-center gap-3 px-4 py-2.5 text-sm"
 									role="button"
@@ -531,7 +599,13 @@
 											<div class="mb-3 flex gap-4">
 												<label class="space-y-1">
 													<span class="text-xs text-muted-foreground">Breakpoint</span>
-													<Input type="number" class="h-8 w-24 text-sm" bind:value={section.breakpoint} oninput={mark} min={1} />
+													<Input
+														type="number"
+														class="h-8 w-24 text-sm"
+														bind:value={section.breakpoint}
+														oninput={mark}
+														min={1}
+													/>
 												</label>
 												<label class="flex items-center gap-2 self-end pb-0.5 text-sm">
 													<input type="checkbox" bind:checked={section.flathub} onchange={mark} /> Flathub
@@ -540,31 +614,89 @@
 											{#each section.items as item, j (j)}
 												<div class="mb-2 space-y-2 rounded border border-border p-3">
 													<div class="flex items-center justify-between">
-														<span class="text-xs tracking-wide text-muted-foreground uppercase">{item.type}</span>
-														<button type="button" onclick={() => removeCarouselItem(section, j)} class="text-muted-foreground hover:text-destructive"><Trash2 class="size-3.5" /></button>
+														<span class="text-xs tracking-wide text-muted-foreground uppercase"
+															>{item.type}</span
+														>
+														<button
+															type="button"
+															onclick={() => removeCarouselItem(section, j)}
+															class="text-muted-foreground hover:text-destructive"
+															><Trash2 class="size-3.5" /></button
+														>
 													</div>
 													{#if item.type === 'app'}
-														<Input placeholder="com.example.App" bind:value={item.id} oninput={mark} class="h-8 font-mono text-sm" />
+														<Input
+															placeholder="com.example.App"
+															bind:value={item.id}
+															oninput={mark}
+															class="h-8 font-mono text-sm"
+														/>
 													{:else}
-														<Input placeholder="banner.jpg" bind:value={item.banner} oninput={mark} class="h-8 text-sm" />
+														<Input
+															placeholder="banner.jpg"
+															bind:value={item.banner}
+															oninput={mark}
+															class="h-8 text-sm"
+														/>
 														{#each item.titles as t, k (k)}
 															<div class="flex gap-2">
-																<Input class="h-8 w-14 text-sm" placeholder="en" bind:value={t.lang} oninput={mark} />
-																<Input class="h-8 flex-1 text-sm" placeholder="Title" bind:value={t.text} oninput={mark} />
-																<button type="button" onclick={() => removeTitle(item.titles, k)} class="text-muted-foreground hover:text-destructive"><Trash2 class="size-3.5" /></button>
+																<Input
+																	class="h-8 w-14 text-sm"
+																	placeholder="en"
+																	bind:value={t.lang}
+																	oninput={mark}
+																/>
+																<Input
+																	class="h-8 flex-1 text-sm"
+																	placeholder="Title"
+																	bind:value={t.text}
+																	oninput={mark}
+																/>
+																<button
+																	type="button"
+																	onclick={() => removeTitle(item.titles, k)}
+																	class="text-muted-foreground hover:text-destructive"
+																	><Trash2 class="size-3.5" /></button
+																>
 															</div>
 														{/each}
-														<button type="button" class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" onclick={() => addTitle(item.titles)}><Plus class="size-3" /> title</button>
-														<textarea class="mt-1 w-full rounded border border-input bg-muted/30 px-3 py-2 font-mono text-xs outline-none" rows={3} placeholder="Body XML…" bind:value={item.body} oninput={mark}></textarea>
+														<button
+															type="button"
+															class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+															onclick={() => addTitle(item.titles)}
+															><Plus class="size-3" /> title</button
+														>
+														<textarea
+															class="mt-1 w-full rounded border border-input bg-muted/30 px-3 py-2 font-mono text-xs outline-none"
+															rows={3}
+															placeholder="Body XML…"
+															bind:value={item.body}
+															oninput={mark}
+														></textarea>
 													{/if}
 												</div>
 											{/each}
 											<div class="flex gap-3">
-												<button type="button" class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" onclick={() => addCarouselApp(section)}><Plus class="size-3" /> app</button>
-												<button type="button" class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" onclick={() => addCarouselStory(section)}><Plus class="size-3" /> story</button>
+												<button
+													type="button"
+													class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+													onclick={() => addCarouselApp(section)}
+													><Plus class="size-3" /> app</button
+												>
+												<button
+													type="button"
+													class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+													onclick={() => addCarouselStory(section)}
+													><Plus class="size-3" /> story</button
+												>
 											</div>
 										{:else if section.type === 'category'}
-											<Input placeholder="games" bind:value={section.value} oninput={mark} class="h-8 max-w-xs text-sm" />
+											<Input
+												placeholder="games"
+												bind:value={section.value}
+												oninput={mark}
+												class="h-8 max-w-xs text-sm"
+											/>
 										{:else if section.type === 'charts'}
 											<label class="flex items-center gap-2 text-sm">
 												<input type="checkbox" bind:checked={section.cards} onchange={mark} /> Cards view
@@ -575,22 +707,57 @@
 													<p class="text-xs text-muted-foreground">Titles</p>
 													{#each section.titles as t, k (k)}
 														<div class="flex gap-2">
-															<Input class="h-8 w-14 text-sm" placeholder="en" bind:value={t.lang} oninput={mark} />
-															<Input class="h-8 flex-1 text-sm" placeholder="Title" bind:value={t.text} oninput={mark} />
-															<button type="button" onclick={() => removeTitle(section.titles, k)} class="text-muted-foreground hover:text-destructive"><Trash2 class="size-3.5" /></button>
+															<Input
+																class="h-8 w-14 text-sm"
+																placeholder="en"
+																bind:value={t.lang}
+																oninput={mark}
+															/>
+															<Input
+																class="h-8 flex-1 text-sm"
+																placeholder="Title"
+																bind:value={t.text}
+																oninput={mark}
+															/>
+															<button
+																type="button"
+																onclick={() => removeTitle(section.titles, k)}
+																class="text-muted-foreground hover:text-destructive"
+																><Trash2 class="size-3.5" /></button
+															>
 														</div>
 													{/each}
-													<button type="button" class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" onclick={() => addTitle(section.titles)}><Plus class="size-3" /> title</button>
+													<button
+														type="button"
+														class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+														onclick={() => addTitle(section.titles)}
+														><Plus class="size-3" /> title</button
+													>
 												</div>
 												<div class="space-y-2">
 													<p class="text-xs text-muted-foreground">Apps</p>
-													{#each section.apps as _, k (k)}
+													{#each section.apps, k (k)}
 														<div class="flex gap-2">
-															<Input class="h-8 flex-1 font-mono text-sm" placeholder="io.github.example.App" bind:value={section.apps[k]} oninput={mark} />
-															<button type="button" onclick={() => removeCustomApp(section, k)} class="text-muted-foreground hover:text-destructive"><Trash2 class="size-3.5" /></button>
+															<Input
+																class="h-8 flex-1 font-mono text-sm"
+																placeholder="io.github.example.App"
+																bind:value={section.apps[k]}
+																oninput={mark}
+															/>
+															<button
+																type="button"
+																onclick={() => removeCustomApp(section, k)}
+																class="text-muted-foreground hover:text-destructive"
+																><Trash2 class="size-3.5" /></button
+															>
 														</div>
 													{/each}
-													<button type="button" class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" onclick={() => addCustomApp(section)}><Plus class="size-3" /> app</button>
+													<button
+														type="button"
+														class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+														onclick={() => addCustomApp(section)}
+														><Plus class="size-3" /> app</button
+													>
 												</div>
 											</div>
 										{:else}
@@ -609,7 +776,12 @@
 				role="button"
 				tabindex="0"
 				onclick={() => insertParagraph(sections.length - 1)}
-				onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); insertParagraph(sections.length - 1); } }}
+				onkeydown={(e) => {
+					if (e.key === 'Enter') {
+						e.preventDefault();
+						insertParagraph(sections.length - 1);
+					}
+				}}
 			>
 				Press <span class="font-mono">Enter</span> to continue,
 				<span class="font-mono">/</span> for a block…
@@ -642,13 +814,19 @@
 				<li>
 					<button
 						type="button"
-						class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm {selectedCmd === i ? 'bg-muted' : 'hover:bg-muted'}"
+						class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm {selectedCmd === i
+							? 'bg-muted'
+							: 'hover:bg-muted'}"
 						onclick={() => pick(cmd.type)}
 						onmouseenter={() => (selectedCmd = i)}
 					>
-						<div class="flex size-6 shrink-0 items-center justify-center rounded border border-border bg-muted/60">
+						<div
+							class="flex size-6 shrink-0 items-center justify-center rounded border border-border bg-muted/60"
+						>
 							{#if cmd.badge}
-								<span class="text-[10px] font-bold leading-none text-foreground/70">{cmd.badge}</span>
+								<span class="text-[10px] leading-none font-bold text-foreground/70"
+									>{cmd.badge}</span
+								>
 							{:else}
 								<cmd.icon class="size-3 text-muted-foreground" />
 							{/if}
@@ -674,7 +852,10 @@
 			>
 				Close menu
 			</button>
-			<kbd class="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60">esc</kbd>
+			<kbd
+				class="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60"
+				>esc</kbd
+			>
 		</div>
 	</div>
 {/if}

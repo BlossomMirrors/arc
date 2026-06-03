@@ -5,18 +5,21 @@ import { sveltekitCookies } from 'better-auth/svelte-kit';
 import { getRequestEvent } from '$app/server';
 import { PrismaClient } from '$lib/generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
-import {
+import { env } from '$env/dynamic/private';
+
+const {
 	DATABASE_URL,
 	BETTER_AUTH_URL,
 	AUTHENTIK_CLIENT_ID,
 	AUTHENTIK_CLIENT_SECRET,
 	AUTHENTIK_URL
-} from '$env/static/private';
+} = env;
 
 const pgAdapter = new PrismaPg({ connectionString: DATABASE_URL });
 const prisma = new PrismaClient({ adapter: pgAdapter });
 
 export const auth = betterAuth({
+	secret: process.env.BETTER_AUTH_SECRET ?? crypto.randomUUID(),
 	database: prismaAdapter(prisma, {
 		provider: 'postgresql'
 	}),

@@ -1,14 +1,34 @@
 services:
   db:
     image: postgres:17-alpine
-    ports:
-      - "5432:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
       POSTGRES_DB: forge
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - '3000:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:password@db:5432/forge
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL}
+      ORIGIN: ${BETTER_AUTH_URL}
+      AUTHENTIK_URL: ${AUTHENTIK_URL}
+      AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID}
+      AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET}
     restart: unless-stopped
 
 volumes:
