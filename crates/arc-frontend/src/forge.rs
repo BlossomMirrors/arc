@@ -29,7 +29,7 @@ pub enum FpSection {
     Top,
     New,
     Trending,
-    Charts,
+    Charts { cards: bool },
     Categories,
     Story(ForgeStory),
 }
@@ -169,7 +169,8 @@ fn parse_frontpage(xml: &str) -> Vec<FpSection> {
                 pos = gt + 1;
             }
             "charts" => {
-                sections.push(FpSection::Charts);
+                let cards = !tag.contains("cards=\"false\"");
+                sections.push(FpSection::Charts { cards });
                 pos = gt + 1;
             }
             "categories" => {

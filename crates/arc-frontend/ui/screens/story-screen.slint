@@ -1,18 +1,21 @@
 import { Palette, ScrollView } from "std-widgets.slint";
 import { StoryItem } from "../types.slint";
+import { AppCard } from "../components/app-card.slint";
 
 export component StoryScreen inherits Rectangle {
     in property <StoryItem> story;
     in property <string> tr-back: "Back";
+    in property <string> tr-installed: "Installed";
 
     callback back-clicked();
+    callback app-clicked(string);
 
     clip: true;
 
     VerticalLayout {
         spacing: 0px;
 
-        // Hero image -- outside the ScrollView so it gets root.width, not visible-width
+        // Hero image -- full width, outside the ScrollView
         Rectangle {
             width: parent.width;
             height: 280px;
@@ -71,14 +74,14 @@ export component StoryScreen inherits Rectangle {
             }
         }
 
-        // Scrollable content area
+        // Scrollable content
         scroller := ScrollView {
             vertical-stretch: 1;
             viewport-width: self.visible-width;
 
             VerticalLayout {
                 padding: 24px;
-                spacing: 16px;
+                spacing: 0px;
                 width: scroller.visible-width;
 
                 // Story title
@@ -90,12 +93,88 @@ export component StoryScreen inherits Rectangle {
                     color: Palette.foreground;
                 }
 
-                // Story body
-                if root.story.body != "": Text {
-                    text: root.story.body;
-                    font-size: 14px;
-                    color: Palette.foreground.transparentize(0.2);
-                    wrap: word-wrap;
+                // Description blocks (HTML body parsed into paragraphs/headings)
+                for block in root.story.description-blocks: Rectangle {
+                    width: parent.width;
+                    height: block-text.preferred-height + (block.is-heading ? 24px : 12px);
+
+                    block-text := Text {
+                        x: 0;
+                        y: block.is-heading ? 16px : 8px;
+                        width: parent.width;
+                        text: block.text;
+                        font-size: block.is-heading ? 16px : 14px;
+                        font-weight: block.is-heading ? 700 : (block.is-bold ? 600 : 400);
+                        color: block.is-heading
+                            ? Palette.foreground
+                            : Palette.foreground.transparentize(0.2);
+                        wrap: word-wrap;
+                    }
+                }
+
+                // Featured apps
+                if root.story.featured-apps.length > 0: VerticalLayout {
+                    spacing: 10px;
+                    padding-top: 20px;
+
+                    for app[i] in root.story.featured-apps: Rectangle {
+                        height: 96px;
+                        border-radius: 12px;
+                        background: app-ta.has-hover
+                            ? Palette.alternate-background.darker(0.03)
+                            : Palette.alternate-background;
+                        border-width: 1px;
+                        border-color: Palette.foreground.transparentize(0.9);
+
+                        app-ta := TouchArea {
+                            clicked => { root.app-clicked(app.id); }
+                        }
+
+                        HorizontalLayout {
+                            padding: 16px;
+                            spacing: 16px;
+                            alignment: start;
+
+                            // App icon
+                            Rectangle {
+                                width: 56px;
+                                height: 56px;
+                                border-radius: 12px;
+                                background: #80808012;
+                                border-width: 1px;
+                                border-color: #80808025;
+
+                                Image {
+                                    source: app.icon;
+                                    width: 44px;
+                                    height: 44px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    image-fit: contain;
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 4px;
+
+                                Text {
+                                    text: app.name;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    overflow: elide;
+                                    color: Palette.foreground;
+                                }
+
+                                Text {
+                                    text: app.summary;
+                                    font-size: 12px;
+                                    color: Palette.foreground.transparentize(0.45);
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Bottom padding

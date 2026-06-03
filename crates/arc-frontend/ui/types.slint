@@ -77,8 +77,9 @@ export struct RemoteItem {
 export struct StoryItem {
     id: string,
     title: string,
-    body: string,
     screenshot: image,
+    description-blocks: [DescriptionBlock],
+    featured-apps: [AppCardData],
 }
 
 export struct TransactionItem {

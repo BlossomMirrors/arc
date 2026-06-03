@@ -67,6 +67,15 @@ msgstr "Beliebt"
 msgid "Recently Added"
 msgstr "Kürzlich hinzugefügt"
 
+msgid "Trending"
+msgstr "Beliebt"
+
+msgid "Charts"
+msgstr "Charts"
+
+msgid "Recommended Apps"
+msgstr "Vorgestellte Apps"
+
 msgid "Categories"
 msgstr "Kategorien"
 

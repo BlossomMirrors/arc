@@ -41,6 +41,7 @@ fn apply_translations(app: &AppWindow) {
     app.set_tr_name(tr!("Name").into());
     app.set_tr_url(tr!("URL").into());
     app.set_tr_categories(tr!("Categories").into());
+    app.set_tr_recommended_apps(tr!("Recommended Apps").into());
     app.set_tr_no_packages(tr!("No packages found.\nSearch for an application to get started.").into());
     app.set_tr_up_to_date(tr!("Everything is up to date.").into());
     app.set_tr_no_installed(tr!("No applications installed.").into());

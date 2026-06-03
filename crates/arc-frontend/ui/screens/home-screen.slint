@@ -18,6 +18,7 @@ export component HomeScreen inherits Rectangle {
     in property <string> tr-loading: "Loading...";
     in property <string> tr-installed: "Installed";
     in property <string> tr-categories: "Categories";
+    in property <string> tr-recommended-apps: "Recommended Apps";
 
     callback detail-requested(string);
     callback category-selected(string);
@@ -64,7 +65,17 @@ export component HomeScreen inherits Rectangle {
                 }
             }
 
-            for item in root.home-items: VerticalLayout {
+            // "Recommended Apps" heading shown between stories and the app sections
+            if root.home-stories.length > 0 && root.home-items.length > 0: VerticalLayout {
+                padding-top: 20px;
+                Text {
+                    text: root.tr-recommended-apps;
+                    font-size: 16px;
+                    font-weight: 700;
+                }
+            }
+
+            for item[i] in root.home-items: VerticalLayout {
                 padding-top: item.item-type == "app-row" || item.item-type == "app-grid" || item.item-type == "categories" ? 20px : 6px;
 
                 if item.item-type == "h1": Text {
@@ -95,9 +106,8 @@ export component HomeScreen inherits Rectangle {
                     wrap: word-wrap;
                 }
 
-                if item.item-type == "br": Rectangle {
-                    height: 1px;
-                    background: Palette.foreground.transparentize(0.85);
+                if item.item-type == "br" && i > 0: Rectangle {
+                    height: 12px;
                 }
 
                 if item.item-type == "app-row" && item.apps.length > 0: VerticalLayout {

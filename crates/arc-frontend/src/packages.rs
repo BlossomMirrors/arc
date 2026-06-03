@@ -1,4 +1,5 @@
 use crate::helpers::check_flathub_verification;
+use tr::tr;
 
 fn push_decoded(text: &str, out: &mut String) {
     let mut rest = text;
@@ -225,8 +226,9 @@ pub struct CachedAppInfo {
 pub struct RawStory {
     pub id: String,
     pub title: String,
-    pub body: String,
     pub screenshot: Option<RawIcon>,
+    pub description_blocks: Vec<DescBlock>,
+    pub featured_apps: Vec<RawCard>,
 }
 
 pub struct RawCategoryData {
@@ -410,26 +412,71 @@ fn cards_to_model(cards: Vec<RawCard>) -> slint::ModelRc<crate::AppCardData> {
     slint::ModelRc::new(slint::VecModel::from(data))
 }
 
-/// Load screenshots for a list of raw stories.
-async fn load_story_screenshots(stories: Vec<(usize, crate::forge::ForgeStory)>) -> Vec<RawStory> {
-    let futs: Vec<_> = stories
-        .into_iter()
-        .map(|(idx, s)| async move {
-            let screenshot = if let Some(ref url) = s.banner_url {
-                let url = url.clone();
-                icons::load_banner(&url).await
-            } else {
-                None
-            };
-            RawStory {
-                id: format!("story-{}", idx),
-                title: s.title,
-                body: s.body,
-                screenshot,
+/// Strip `<App id="...">` elements from story body HTML, returning the
+/// cleaned HTML and the collected app IDs.
+fn extract_story_apps(body: &str) -> (String, Vec<String>) {
+    let mut ids = Vec::new();
+    let mut cleaned = String::new();
+    let mut rest = body;
+    loop {
+        let lower = rest.to_ascii_lowercase();
+        let Some(pos) = lower.find("<app ").or_else(|| lower.find("<app\t")) else {
+            cleaned.push_str(rest);
+            break;
+        };
+        cleaned.push_str(&rest[..pos]);
+        rest = &rest[pos..];
+        let end = rest.find('>').unwrap_or(rest.len().saturating_sub(1));
+        let tag = &rest[..end + 1];
+        let lower_tag = tag.to_ascii_lowercase();
+        if let Some(id_pos) = lower_tag.find("id=\"") {
+            let after = &tag[id_pos + 4..];
+            if let Some(q) = after.find('"') {
+                let raw_id = after[..q].trim().to_string();
+                if !raw_id.is_empty() {
+                    ids.push(raw_id);
+                }
             }
-        })
-        .collect();
-    join_all(futs).await
+        }
+        rest = &rest[end + 1..];
+    }
+    (cleaned, ids)
+}
+
+/// Load stories: download banners, parse HTML body, resolve featured apps.
+async fn load_raw_stories(
+    stories: Vec<(usize, crate::forge::ForgeStory)>,
+    proxy: Option<&libarc::ArcDaemonProxy<'static>>,
+    pwa_map: &std::collections::HashMap<String, crate::forge::PwaApp>,
+    installed: &std::collections::HashSet<String>,
+) -> Vec<RawStory> {
+    let mut out = Vec::new();
+    for (idx, s) in stories {
+        let (body_html, app_ids) = extract_story_apps(&s.body);
+
+        let (screenshot, app_cards) = tokio::join!(
+            async {
+                if let Some(ref url) = s.banner_url {
+                    icons::load_banner(url).await
+                } else {
+                    None
+                }
+            },
+            async {
+                let entries = resolve_ids(&app_ids, proxy, pwa_map).await;
+                entries_to_cards(entries, installed).await
+            }
+        );
+
+        out.push(RawStory {
+            id: format!("story-{}", idx),
+            title: s.title,
+            screenshot,
+            description_blocks: html_to_blocks(&body_html),
+            featured_apps: app_cards,
+        });
+    }
+    out
 }
 
 /// One entry in the home-items model: either a text block or an app section.
@@ -561,7 +608,7 @@ pub async fn load_home(
                 raw_items.push(RawHomeItem {
                     item_type: "app-row",
                     text: String::new(),
-                    title: "Recently Added".into(),
+                    title: tr!("Recently Added").to_string(),
                     cards,
                 });
             }
@@ -572,18 +619,18 @@ pub async fn load_home(
                 raw_items.push(RawHomeItem {
                     item_type: "app-row",
                     text: String::new(),
-                    title: "Trending".into(),
+                    title: tr!("Trending").to_string(),
                     cards,
                 });
             }
-            FpSection::Charts => {
+            FpSection::Charts { cards: as_cards } => {
                 let ids = crate::forge::fetch_chart_ids(12).await;
                 let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
                 let cards = entries_to_cards(entries, &installed_ids).await;
                 raw_items.push(RawHomeItem {
-                    item_type: "app-grid",
+                    item_type: if as_cards { "app-grid" } else { "app-row" },
                     text: String::new(),
-                    title: "Charts".into(),
+                    title: tr!("Charts").to_string(),
                     cards,
                 });
             }
@@ -603,7 +650,7 @@ pub async fn load_home(
     }
     let indexed_stories: Vec<(usize, crate::forge::ForgeStory)> =
         filtered_stories.into_iter().enumerate().collect();
-    let raw_stories = load_story_screenshots(indexed_stories).await;
+    let raw_stories = load_raw_stories(indexed_stories, proxy.as_ref(), &pwa_map, &installed_ids).await;
     let raw_cats: Vec<RawCategoryData> = if show_categories {
         let cat_defs = [
             ("AudioVideo", "Multimedia", "applications-multimedia"),
@@ -662,16 +709,27 @@ pub async fn load_home(
             .collect();
 
         let stories: Vec<crate::StoryItem> = raw_stories
-            .iter()
-            .map(|s| crate::StoryItem {
-                id: SharedString::from(s.id.as_str()),
-                title: SharedString::from(s.title.as_str()),
-                body: SharedString::from(s.body.as_str()),
-                screenshot: s
-                    .screenshot
-                    .as_ref()
-                    .map(|r| r.to_slint_image())
-                    .unwrap_or_default(),
+            .into_iter()
+            .map(|s| {
+                let blocks: Vec<crate::DescriptionBlock> = s
+                    .description_blocks
+                    .into_iter()
+                    .map(|b| crate::DescriptionBlock {
+                        text: b.text.into(),
+                        is_list_item: b.is_list_item,
+                        is_heading: b.is_heading,
+                        is_bold: b.is_bold,
+                    })
+                    .collect();
+                let apps: Vec<crate::AppCardData> =
+                    s.featured_apps.iter().map(|c| c.to_slint()).collect();
+                crate::StoryItem {
+                    id: SharedString::from(s.id.as_str()),
+                    title: SharedString::from(s.title.as_str()),
+                    screenshot: s.screenshot.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+                    description_blocks: slint::ModelRc::new(slint::VecModel::from(blocks)),
+                    featured_apps: slint::ModelRc::new(slint::VecModel::from(apps)),
+                }
             })
             .collect();
 

@@ -57,15 +57,12 @@ export component AppCard inherits Rectangle {
             text: root.card.summary;
             font-size: 10px;
             overflow: elide;
-            wrap: word-wrap;
             horizontal-alignment: center;
-            preferred-height: 24px;
         }
 
         if root.card.installed: HorizontalLayout {
             alignment: center;
-            padding-top: 4px;
-            padding-bottom: 4px;
+            padding-bottom: root.is-small ? 12px : 16px;
             Badge {
                 has-icon: true;
                 icon: @image-url("../../assets/check.svg");
