@@ -7,6 +7,11 @@ import type { Handle } from '@sveltejs/kit';
 import { getTextDirection } from '$lib/paraglide/runtime';
 
 const handleAuth: Handle = async ({ event, resolve }) => {
+	const session = await auth.api.getSession({ headers: event.request.headers });
+	if (session) {
+		event.locals.user = session.user;
+		event.locals.session = session.session;
+	}
 	return svelteKitHandler({ event, resolve, auth, building });
 };
 
