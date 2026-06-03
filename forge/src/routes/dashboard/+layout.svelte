@@ -24,7 +24,10 @@
 	<!-- Top header -->
 	<header class="border-b border-border bg-background px-6 py-3">
 		<div class="mx-auto flex w-full max-w-7xl items-center justify-between">
-			<span class="font-semibold">Arc Forge</span>
+			<span class="flex items-center gap-2 align-middle">
+				<img src="/arc.png" alt="Arc Forge" class="size-8" />
+				<span class="mt-3 font-semibold">Arc Forge</span>
+			</span>
 
 			<DropdownMenu.Root>
 				<DropdownMenu.Trigger
