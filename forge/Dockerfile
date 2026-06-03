@@ -9,6 +9,8 @@ RUN bun install --frozen-lockfile
 COPY . .
 
 ENV NODE_ENV=production
+ENV DATABASE_URL="postgresql://postgres:password@localhost:5432/forge"
+RUN bunx prisma generate
 RUN bun run build
 
 FROM oven/bun:latest AS runner
