@@ -16,9 +16,8 @@
 		<div>
 			<h2 class="text-lg font-semibold">{m.pwas_heading()}</h2>
 			<p class="text-sm text-muted-foreground">
-				{m.pwas_served_public()} <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
-					>/api/pwas</code
-				>.
+				{m.pwas_served_public()}
+				<code class="rounded bg-muted px-1 py-0.5 font-mono text-xs">/api/pwas</code>.
 			</p>
 		</div>
 		<!-- eslint-disable svelte/no-navigation-without-resolve -->
@@ -48,13 +47,23 @@
 						>
 							<Pencil class="size-4" />
 						</a>
-						<form method="POST" action="?/delete" use:enhance>
+						<form method="POST" action="?/delete" id="delete-form-{app.id}" use:enhance>
 							<input type="hidden" name="id" value={app.id} />
 							<Button
 								type="submit"
 								variant="ghost"
 								size="icon"
 								class="text-muted-foreground hover:text-destructive"
+								onclick={(e) => {
+									e.preventDefault?.();
+									e.stopPropagation?.();
+									if (confirm(m.pwas_delete_confirm())) {
+										const form = document.getElementById(
+											`delete-form-${app.id}`
+										) as HTMLFormElement | null;
+										form?.submit();
+									}
+								}}
 							>
 								<Trash2 class="size-4" />
 							</Button>
