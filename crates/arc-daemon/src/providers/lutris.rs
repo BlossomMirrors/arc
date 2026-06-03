@@ -255,6 +255,7 @@ impl LutrisProvider {
             .args([
                 "install",
                 "-y",
+                "--system",
                 "--noninteractive",
                 "flathub",
                 "net.lutris.Lutris",
