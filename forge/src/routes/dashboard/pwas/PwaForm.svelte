@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Button, buttonVariants } from '$lib/components/ui/button/index.js';
 
@@ -24,9 +25,9 @@
 	let { values = {}, submitLabel = 'Save' }: { values?: PwaFormData; submitLabel?: string } =
 		$props();
 
-	let screenshots = $state((values.screenshots ?? []).join('\n'));
-	let widevine = $state(values.widevine ?? false);
-	let tray = $state(values.tray ?? false);
+	let screenshots = $state(untrack(() => (values.screenshots ?? []).join('\n')));
+	let widevine    = $state(untrack(() => values.widevine ?? false));
+	let tray        = $state(untrack(() => values.tray ?? false));
 </script>
 
 <div class="space-y-4">

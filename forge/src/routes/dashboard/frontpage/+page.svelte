@@ -1,10 +1,26 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import {
-		Heading1, Heading2, Heading3, AlignLeft, List, Minus,
-		Layers, Star, Sparkles, TrendingUp, LayoutGrid, Tag, LayoutList, BarChart2,
-		Trash2, ChevronUp, ChevronDown, Plus
+		Heading1,
+		Heading2,
+		Heading3,
+		AlignLeft,
+		List,
+		Minus,
+		Layers,
+		Star,
+		Sparkles,
+		TrendingUp,
+		LayoutGrid,
+		Tag,
+		LayoutList,
+		BarChart2,
+		Trash2,
+		ChevronUp,
+		ChevronDown,
+		Plus,
+		GripVertical
 	} from '@lucide/svelte';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -12,23 +28,24 @@
 
 	let { data } = $props();
 
-	let sections = $state<Section[]>(structuredClone(data.sections) as Section[]);
-	let dirty     = $state(false);
+	let sections = $state<Section[]>(untrack(() => structuredClone(data.sections) as Section[]));
+	let dirty = $state(false);
 	let expandedIndex = $state<number | null>(null);
-
-	// refs for focusing newly created text blocks
 	let blockRefs: (HTMLTextAreaElement | HTMLInputElement | null)[] = [];
 
-	// ── Palette state ────────────────────────────────────────────────────────
-	let paletteOpen       = $state(false);
-	let paletteFilter     = $state('');
-	let paletteInsertAfter= $state(-1);
-	let paletteX          = $state(0);
-	let paletteY          = $state(0);
-	let paletteInputEl    = $state<HTMLInputElement | null>(null);
-	let selectedCmd       = $state(0);
-	// when set, the palette replaces the block at this index instead of inserting
-	let paletteReplaceAt  = $state<number | null>(null);
+	// Palette state
+	let paletteOpen = $state(false);
+	let paletteFilter = $state('');
+	let selectedCmd = $state(0);
+	let paletteX = $state(0);
+	let paletteY = $state(0);
+	// Which block's text triggered the slash, and where the '/' is in that text
+	let slashBlockIdx = $state<number | null>(null);
+	let slashStart = $state(0);
+
+	// Drag state
+	let draggingIdx = $state<number | null>(null);
+	let dragOverIdx = $state<number | null>(null);
 
 	function mark() { dirty = true; }
 
@@ -37,102 +54,124 @@
 		el.style.height = el.scrollHeight + 'px';
 	}
 
-	// ── Commands ─────────────────────────────────────────────────────────────
 	const COMMANDS = [
-		// HTML / document
-		{ type: 'h1'         as const, label: 'Heading 1',   icon: Heading1,    desc: 'Large heading'           },
-		{ type: 'h2'         as const, label: 'Heading 2',   icon: Heading2,    desc: 'Medium heading'          },
-		{ type: 'h3'         as const, label: 'Heading 3',   icon: Heading3,    desc: 'Small heading'           },
-		{ type: 'p'          as const, label: 'Paragraph',   icon: AlignLeft,   desc: 'Body text'               },
-		{ type: 'ul'         as const, label: 'Bullet list', icon: List,        desc: 'Unordered list'          },
-		{ type: 'br'         as const, label: 'Divider',     icon: Minus,       desc: 'Horizontal break'        },
-		// App-store sections
-		{ type: 'carousel'   as const, label: 'Carousel',    icon: Layers,      desc: 'Featured app slideshow'  },
-		{ type: 'top'        as const, label: 'Top Apps',    icon: Star,        desc: 'Highest-rated apps'       },
-		{ type: 'new'        as const, label: 'New',         icon: Sparkles,    desc: 'Recently added apps'      },
-		{ type: 'trending'   as const, label: 'Trending',    icon: TrendingUp,  desc: 'Trending apps'           },
-		{ type: 'categories' as const, label: 'Categories',  icon: LayoutGrid,  desc: 'Category grid'           },
-		{ type: 'category'   as const, label: 'Category',    icon: Tag,         desc: 'Single category row'     },
-		{ type: 'custom'     as const, label: 'Custom',      icon: LayoutList,  desc: 'Curated list with title' },
-		{ type: 'charts'     as const, label: 'Charts',      icon: BarChart2,   desc: 'App rankings'            },
+		{ type: 'h1' as const, label: 'Heading 1', badge: 'H₁', icon: Heading1, shorthand: '#' },
+		{ type: 'h2' as const, label: 'Heading 2', badge: 'H₂', icon: Heading2, shorthand: '##' },
+		{ type: 'h3' as const, label: 'Heading 3', badge: 'H₃', icon: Heading3, shorthand: '###' },
+		{ type: 'p' as const, label: 'Paragraph', badge: 'P', icon: AlignLeft, shorthand: '' },
+		{ type: 'ul' as const, label: 'Bullet list', badge: null, icon: List, shorthand: '-' },
+		{ type: 'br' as const, label: 'Divider', badge: null, icon: Minus, shorthand: '---' },
+		{ type: 'carousel' as const, label: 'Carousel', badge: null, icon: Layers, shorthand: '' },
+		{ type: 'top' as const, label: 'Top Apps', badge: null, icon: Star, shorthand: '' },
+		{ type: 'new' as const, label: 'New', badge: null, icon: Sparkles, shorthand: '' },
+		{ type: 'trending' as const, label: 'Trending', badge: null, icon: TrendingUp, shorthand: '' },
+		{ type: 'categories' as const, label: 'Categories', badge: null, icon: LayoutGrid, shorthand: '' },
+		{ type: 'category' as const, label: 'Category', badge: null, icon: Tag, shorthand: '' },
+		{ type: 'custom' as const, label: 'Custom', badge: null, icon: LayoutList, shorthand: '' },
+		{ type: 'charts' as const, label: 'Charts', badge: null, icon: BarChart2, shorthand: '' }
 	];
 
 	const filtered = $derived(
 		paletteFilter
-			? COMMANDS.filter(c =>
-				c.label.toLowerCase().includes(paletteFilter.toLowerCase()) ||
-				c.desc.toLowerCase().includes(paletteFilter.toLowerCase()))
+			? COMMANDS.filter((c) => c.label.toLowerCase().includes(paletteFilter.toLowerCase()))
 			: COMMANDS
 	);
 
-	async function openPalette(afterIndex: number, x: number, y: number, replaceAt: number | null = null) {
-		paletteInsertAfter = afterIndex;
-		paletteReplaceAt   = replaceAt;
-		paletteFilter      = '';
-		selectedCmd        = 0;
-		paletteX           = Math.min(x, window.innerWidth - 290);
-		paletteY           = y + 6;
-		paletteOpen        = true;
-		await tick();
-		paletteInputEl?.focus();
+	function closePalette() {
+		paletteOpen = false;
+		paletteFilter = '';
+		slashBlockIdx = null;
 	}
 
-	function closePalette() { paletteOpen = false; paletteFilter = ''; paletteReplaceAt = null; }
-
-	async function pick(type: Section['type']) {
+	async function pick(type: Section['type'] | undefined) {
+		if (!type || slashBlockIdx === null) return;
 		const arr = [...sections];
-		let focusIdx: number;
-		if (paletteReplaceAt !== null) {
-			arr[paletteReplaceAt] = newSection(type);
-			focusIdx = paletteReplaceAt;
-		} else {
-			arr.splice(paletteInsertAfter + 1, 0, newSection(type));
-			focusIdx = paletteInsertAfter + 1;
+		const sec = arr[slashBlockIdx];
+		let focusIdx = slashBlockIdx;
+
+		if ('text' in sec) {
+			const textBefore = sec.text.slice(0, slashStart);
+			const isHtml = HTML_TYPES.includes(type as (typeof HTML_TYPES)[number]);
+			if (isHtml) {
+				const ns = newSection(type);
+				if ('text' in ns) (ns as { text: string }).text = textBefore;
+				arr[slashBlockIdx] = ns;
+			} else if (textBefore.trim() === '') {
+				arr[slashBlockIdx] = newSection(type);
+			} else {
+				(sec as { text: string }).text = textBefore;
+				arr.splice(slashBlockIdx + 1, 0, newSection(type));
+				focusIdx = slashBlockIdx + 1;
+			}
 		}
+
 		sections = arr;
-		expandedIndex = HTML_TYPES.includes(type as typeof HTML_TYPES[number]) ? null : focusIdx;
+		expandedIndex = HTML_TYPES.includes(type as (typeof HTML_TYPES)[number]) ? null : focusIdx;
 		closePalette();
 		mark();
 		await tick();
 		blockRefs[focusIdx]?.focus();
 	}
 
-	function paletteKeydown(e: KeyboardEvent) {
-		if (e.key === 'ArrowDown') { e.preventDefault(); selectedCmd = Math.min(selectedCmd + 1, filtered.length - 1); }
-		if (e.key === 'ArrowUp')   { e.preventDefault(); selectedCmd = Math.max(selectedCmd - 1, 0); }
-		if (e.key === 'Enter')     { e.preventDefault(); if (filtered[selectedCmd]) pick(filtered[selectedCmd].type); }
-		if (e.key === 'Escape')    closePalette();
+	// Open palette anchored to a textarea, triggered by inserting a '/' via addViaSlash
+	async function openForBlock(blockIdx: number, el: HTMLTextAreaElement | HTMLInputElement) {
+		const rect = el.getBoundingClientRect();
+		slashBlockIdx = blockIdx;
+		slashStart = 0;
+		paletteFilter = '';
+		selectedCmd = 0;
+		paletteX = Math.min(rect.left, window.innerWidth - 290);
+		paletteY = rect.bottom + 6;
+		paletteOpen = true;
 	}
 
-	// ── Block operations ──────────────────────────────────────────────────────
-	function remove(i: number) {
-		sections = sections.filter((_, j) => j !== i);
-		if (expandedIndex === i) expandedIndex = null;
+	// Insert a '/' paragraph and open the palette — used by + button and global /
+	async function addViaSlash(afterIdx: number) {
+		const arr = [...sections];
+		arr.splice(afterIdx + 1, 0, { type: 'p', text: '/' });
+		sections = arr;
 		mark();
-	}
-	function moveUp(i: number) {
-		if (i === 0) return;
-		const s = [...sections]; [s[i-1], s[i]] = [s[i], s[i-1]]; sections = s;
-		if (expandedIndex === i) expandedIndex = i - 1;
-		mark();
-	}
-	function moveDown(i: number) {
-		if (i === sections.length - 1) return;
-		const s = [...sections]; [s[i], s[i+1]] = [s[i+1], s[i]]; sections = s;
-		if (expandedIndex === i) expandedIndex = i + 1;
-		mark();
+		await tick();
+		const newIdx = afterIdx + 1;
+		const el = blockRefs[newIdx];
+		if (el) {
+			el.focus();
+			openForBlock(newIdx, el);
+		}
 	}
 
-	// ── Text block keyboard handling ──────────────────────────────────────────
-	async function textKeydown(e: KeyboardEvent, i: number, section: Extract<Section, { text: string }>) {
-		// "/" on empty block → open palette to replace this block
-		if (e.key === '/' && section.text === '') {
-			e.preventDefault();
-			const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-			openPalette(i - 1, rect.left, rect.bottom, i);
+	async function textKeydown(
+		e: KeyboardEvent,
+		i: number,
+		section: Extract<Section, { text: string }>
+	) {
+		// Palette navigation while it's open for this block
+		if (paletteOpen && slashBlockIdx === i) {
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				selectedCmd = Math.min(selectedCmd + 1, filtered.length - 1);
+				return;
+			}
+			if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				selectedCmd = Math.max(selectedCmd - 1, 0);
+				return;
+			}
+			if (e.key === 'Enter') {
+				e.preventDefault();
+				pick(filtered[selectedCmd]?.type);
+				return;
+			}
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				closePalette();
+				return;
+			}
+			// All other keys: let browser handle; oninput updates filter
 			return;
 		}
-		// Enter → insert new paragraph after
+
+		// Normal block editing
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
 			const arr = [...sections];
@@ -142,7 +181,6 @@
 			await tick();
 			blockRefs[i + 1]?.focus();
 		}
-		// Backspace on empty block → remove
 		if (e.key === 'Backspace' && section.text === '') {
 			e.preventDefault();
 			remove(i);
@@ -151,7 +189,94 @@
 		}
 	}
 
-	async function listItemKeydown(e: KeyboardEvent, section: Extract<Section, { type: 'ul' }>, itemIdx: number) {
+	// Called on every oninput for text blocks — handles both slash detection and filter updates
+	function handleTextInput(e: Event, i: number, section: Extract<Section, { text: string }>) {
+		const ta = e.currentTarget as HTMLTextAreaElement;
+		autoResize(ta);
+		mark();
+
+		const ie = e as InputEvent;
+
+		// Detect '/' typed (not pasted)
+		if (!paletteOpen && ie.inputType === 'insertText' && ie.data === '/') {
+			const pos = ta.selectionStart ?? 0;
+			slashBlockIdx = i;
+			slashStart = pos - 1; // '/' just landed at pos-1
+			const rect = ta.getBoundingClientRect();
+			paletteFilter = '';
+			selectedCmd = 0;
+			paletteX = Math.min(rect.left, window.innerWidth - 290);
+			paletteY = rect.bottom + 6;
+			paletteOpen = true;
+			return;
+		}
+
+		// Update filter while palette is open
+		if (paletteOpen && slashBlockIdx === i) {
+			const cursorPos = ta.selectionStart ?? 0;
+			// Slash was deleted or cursor moved before it
+			if (cursorPos <= slashStart || section.text[slashStart] !== '/') {
+				closePalette();
+				return;
+			}
+			const filter = section.text.slice(slashStart + 1);
+			// Space after slash closes palette
+			if (filter.includes(' ')) {
+				closePalette();
+				return;
+			}
+			paletteFilter = filter;
+			selectedCmd = 0;
+		}
+	}
+
+	function remove(i: number) {
+		sections = sections.filter((_, j) => j !== i);
+		if (expandedIndex === i) expandedIndex = null;
+		mark();
+	}
+	function moveUp(i: number) {
+		if (i === 0) return;
+		const s = [...sections];
+		[s[i - 1], s[i]] = [s[i], s[i - 1]];
+		sections = s;
+		if (expandedIndex === i) expandedIndex = i - 1;
+		mark();
+	}
+	function moveDown(i: number) {
+		if (i === sections.length - 1) return;
+		const s = [...sections];
+		[s[i], s[i + 1]] = [s[i + 1], s[i]];
+		sections = s;
+		if (expandedIndex === i) expandedIndex = i + 1;
+		mark();
+	}
+
+	function startDrag(i: number, e: DragEvent) {
+		draggingIdx = i;
+		e.dataTransfer?.setData('text/plain', String(i));
+	}
+	function onDragOver(e: DragEvent, i: number) {
+		e.preventDefault();
+		dragOverIdx = i;
+	}
+	function onDrop(i: number) {
+		if (draggingIdx === null || draggingIdx === i) { draggingIdx = null; dragOverIdx = null; return; }
+		const arr = [...sections];
+		const [moved] = arr.splice(draggingIdx, 1);
+		arr.splice(draggingIdx < i ? i - 1 : i, 0, moved);
+		sections = arr;
+		mark();
+		draggingIdx = null;
+		dragOverIdx = null;
+	}
+	function onDragEnd() { draggingIdx = null; dragOverIdx = null; }
+
+	async function listItemKeydown(
+		e: KeyboardEvent,
+		section: Extract<Section, { type: 'ul' }>,
+		itemIdx: number
+	) {
 		if (e.key === 'Enter') {
 			e.preventDefault();
 			section.items.splice(itemIdx + 1, 0, '');
@@ -170,36 +295,79 @@
 		}
 	}
 
-	// ── Helpers ───────────────────────────────────────────────────────────────
 	type Carousel = Extract<Section, { type: 'carousel' }>;
-	type Custom   = Extract<Section, { type: 'custom' }>;
+	type Custom = Extract<Section, { type: 'custom' }>;
 
-	function addCarouselApp  (s: Carousel) { s.items = [...s.items, { type: 'app', id: '' }]; mark(); }
-	function addCarouselStory(s: Carousel) { s.items = [...s.items, { type: 'story', banner: '', titles: [{ lang: 'en', text: '' }], body: '' }]; mark(); }
+	function addCarouselApp(s: Carousel) { s.items = [...s.items, { type: 'app', id: '' }]; mark(); }
+	function addCarouselStory(s: Carousel) {
+		s.items = [...s.items, { type: 'story', banner: '', titles: [{ lang: 'en', text: '' }], body: '' }];
+		mark();
+	}
 	function removeCarouselItem(s: Carousel, j: number) { s.items = s.items.filter((_, k) => k !== j); mark(); }
-	function addCustomApp    (s: Custom)  { s.apps = [...s.apps, '']; mark(); }
-	function removeCustomApp (s: Custom, j: number) { s.apps = s.apps.filter((_, k) => k !== j); mark(); }
-	function addTitle  (arr: LangString[]) { arr.push({ lang: 'de', text: '' }); mark(); }
+	function addCustomApp(s: Custom) { s.apps = [...s.apps, '']; mark(); }
+	function removeCustomApp(s: Custom, j: number) { s.apps = s.apps.filter((_, k) => k !== j); mark(); }
+	function addTitle(arr: LangString[]) { arr.push({ lang: 'de', text: '' }); mark(); }
 	function removeTitle(arr: LangString[], j: number) { arr.splice(j, 1); mark(); }
 
-	// ── App-section label ─────────────────────────────────────────────────────
+	async function insertParagraph(afterIndex: number) {
+		const arr = [...sections];
+		arr.splice(afterIndex + 1, 0, { type: 'p', text: '' });
+		sections = arr;
+		mark();
+		await tick();
+		blockRefs[afterIndex + 1]?.focus();
+	}
+
+	let formEl = $state<HTMLFormElement | null>(null);
+
+	async function handleGlobalKeydown(e: KeyboardEvent) {
+		if (e.code === 'KeyS' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+			e.preventDefault();
+			if (dirty) formEl?.requestSubmit();
+			return;
+		}
+		if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+		if (paletteOpen) {
+			if (e.key === 'Escape') closePalette();
+			return;
+		}
+		if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+			e.preventDefault();
+			insertParagraph(sections.length - 1);
+			return;
+		}
+		if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+			e.preventDefault();
+			addViaSlash(sections.length - 1);
+		}
+	}
+
 	const LABEL: Record<string, string> = {
 		carousel: 'Carousel', top: 'Top Apps', new: 'New', trending: 'Trending',
-		categories: 'Categories', category: 'Category', custom: 'Custom', charts: 'Charts',
+		categories: 'Categories', category: 'Category', custom: 'Custom', charts: 'Charts'
 	};
 </script>
 
 <svelte:head><title>Front Page Designer — Arc Forge</title></svelte:head>
+<svelte:window onkeydown={handleGlobalKeydown} />
 
-<form method="POST" action="?/save" use:enhance={() => async ({ update }) => { await update(); dirty = false; }}>
-	<input type="hidden" name="sections" value={JSON.stringify(sections)} />
+<form
+	bind:this={formEl}
+	method="POST"
+	action="?/save"
+	use:enhance={() =>
+		async ({ result }) => {
+			if (result.type === 'success') dirty = false;
+		}}
+>
+	<input type="hidden" name="sections" value={JSON.stringify($state.snapshot(sections))} />
 
 	<div class="mb-6 flex items-center justify-between">
 		<div>
 			<h2 class="text-lg font-semibold">Front Page</h2>
 			<p class="text-xs text-muted-foreground">
-				<code class="font-mono">/api/frontpage</code> ·
-				press <kbd class="rounded border border-border bg-muted px-1 font-mono text-[10px]">/</kbd> to insert a block
+				<code class="font-mono">/api/frontpage</code> · type
+				<kbd class="rounded border border-border bg-muted px-1 font-mono text-[10px]">/</kbd> anywhere to insert a block
 			</p>
 		</div>
 		<Button type="submit" disabled={!dirty} variant={dirty ? 'default' : 'ghost'}>
@@ -207,41 +375,76 @@
 		</Button>
 	</div>
 
-	<!-- Document canvas -->
 	<div class="mx-auto max-w-2xl py-4">
 		{#if sections.length === 0}
-			<p
-				class="cursor-text select-none text-muted-foreground/30"
+			<div
+				class="cursor-text text-muted-foreground/30 select-none"
 				role="button"
 				tabindex="0"
-				onclick={(e) => openPalette(-1, e.clientX, e.clientY)}
-				onkeydown={(e) => e.key === '/' && openPalette(-1, 80, 140)}
+				onclick={() => insertParagraph(-1)}
+				onkeydown={(e) => {
+					if (e.key === 'Enter') insertParagraph(-1);
+				}}
 			>
-				Press <span class="font-mono">/</span> to start writing…
-			</p>
+				Click or press <span class="font-mono">Enter</span> to write,
+				<span class="font-mono">/</span> for commands…
+			</div>
 		{:else}
 			{#each sections as section, i (i)}
 				{@const isApp = section.type in LABEL}
-
-				<div class="group relative">
-					<!-- ── Hover side controls ───────────────────────────────── -->
-					<div class="absolute -left-14 top-1 hidden items-center gap-0.5 group-hover:flex">
-						<button type="button" onclick={() => { const r = document.querySelectorAll('[data-block]')[i]?.getBoundingClientRect(); openPalette(i - 1, (r?.left ?? 80) - 10, (r?.bottom ?? 80), null); }}
-							class="rounded p-1 text-muted-foreground/30 hover:bg-muted hover:text-muted-foreground">
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div
+					class="group relative pl-14 {draggingIdx === i ? 'opacity-40' : ''} {dragOverIdx === i && draggingIdx !== null && draggingIdx !== i ? 'border-t-2 border-primary' : ''}"
+					ondragover={(e) => onDragOver(e, i)}
+					ondrop={() => onDrop(i)}
+					ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) dragOverIdx = null; }}
+				>
+					<!-- Left: + and drag handle -->
+					<div class="absolute left-0 top-0.5 hidden items-center gap-0.5 group-hover:flex">
+						<button
+							type="button"
+							onclick={(e) => { e.stopPropagation(); addViaSlash(i); }}
+							class="rounded p-1 text-muted-foreground/30 hover:bg-muted hover:text-muted-foreground"
+							title="Add block"
+						>
 							<Plus class="size-3.5" />
 						</button>
-						<button type="button" onclick={() => moveUp(i)} disabled={i === 0} class="rounded p-1 text-muted-foreground/30 hover:text-muted-foreground disabled:pointer-events-none">
-							<ChevronUp class="size-3.5" />
-						</button>
-						<button type="button" onclick={() => moveDown(i)} disabled={i === sections.length - 1} class="rounded p-1 text-muted-foreground/30 hover:text-muted-foreground disabled:pointer-events-none">
-							<ChevronDown class="size-3.5" />
-						</button>
-						<button type="button" onclick={() => remove(i)} class="rounded p-1 text-muted-foreground/30 hover:text-destructive">
-							<Trash2 class="size-3.5" />
+						<button
+							type="button"
+							draggable="true"
+							ondragstart={(e) => startDrag(i, e)}
+							ondragend={onDragEnd}
+							class="cursor-grab rounded p-1 text-muted-foreground/30 hover:bg-muted hover:text-muted-foreground active:cursor-grabbing"
+							title="Drag to reorder"
+						>
+							<GripVertical class="size-3.5" />
 						</button>
 					</div>
 
-					<!-- ── Block content ─────────────────────────────────────── -->
+					<!-- Right: move + delete -->
+					<div class="absolute top-0 right-0 z-10 hidden items-center gap-0.5 rounded-md border border-border bg-background px-0.5 py-0.5 shadow-sm group-hover:flex">
+						<button
+							type="button"
+							onclick={(e) => { e.stopPropagation(); moveUp(i); }}
+							disabled={i === 0}
+							class="rounded p-1 text-muted-foreground/50 hover:text-muted-foreground disabled:pointer-events-none disabled:opacity-30"
+							title="Move up"
+						><ChevronUp class="size-3.5" /></button>
+						<button
+							type="button"
+							onclick={(e) => { e.stopPropagation(); moveDown(i); }}
+							disabled={i === sections.length - 1}
+							class="rounded p-1 text-muted-foreground/50 hover:text-muted-foreground disabled:pointer-events-none disabled:opacity-30"
+							title="Move down"
+						><ChevronDown class="size-3.5" /></button>
+						<button
+							type="button"
+							onclick={(e) => { e.stopPropagation(); remove(i); }}
+							class="rounded p-1 text-muted-foreground/50 hover:text-destructive"
+							title="Delete"
+						><Trash2 class="size-3.5" /></button>
+					</div>
+
 					<div data-block>
 						{#if section.type === 'h1'}
 							<textarea
@@ -250,10 +453,9 @@
 								class="block w-full resize-none bg-transparent text-3xl font-bold tracking-tight outline-none placeholder:text-muted-foreground/30"
 								placeholder="Heading 1"
 								bind:value={section.text}
-								oninput={(e) => { autoResize(e.currentTarget); mark(); }}
+								oninput={(e) => handleTextInput(e, i, section)}
 								onkeydown={(e) => textKeydown(e, i, section)}
 							></textarea>
-
 						{:else if section.type === 'h2'}
 							<textarea
 								bind:this={blockRefs[i] as HTMLTextAreaElement}
@@ -261,10 +463,9 @@
 								class="block w-full resize-none bg-transparent text-2xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/30"
 								placeholder="Heading 2"
 								bind:value={section.text}
-								oninput={(e) => { autoResize(e.currentTarget); mark(); }}
+								oninput={(e) => handleTextInput(e, i, section)}
 								onkeydown={(e) => textKeydown(e, i, section)}
 							></textarea>
-
 						{:else if section.type === 'h3'}
 							<textarea
 								bind:this={blockRefs[i] as HTMLTextAreaElement}
@@ -272,21 +473,19 @@
 								class="block w-full resize-none bg-transparent text-xl font-semibold outline-none placeholder:text-muted-foreground/30"
 								placeholder="Heading 3"
 								bind:value={section.text}
-								oninput={(e) => { autoResize(e.currentTarget); mark(); }}
+								oninput={(e) => handleTextInput(e, i, section)}
 								onkeydown={(e) => textKeydown(e, i, section)}
 							></textarea>
-
 						{:else if section.type === 'p'}
 							<textarea
 								bind:this={blockRefs[i] as HTMLTextAreaElement}
 								rows={1}
 								class="block w-full resize-none bg-transparent text-base leading-7 text-foreground outline-none placeholder:text-muted-foreground/30"
-								placeholder="Start typing, or press / for commands…"
+								placeholder="Start typing, or / for commands…"
 								bind:value={section.text}
-								oninput={(e) => { autoResize(e.currentTarget); mark(); }}
+								oninput={(e) => handleTextInput(e, i, section)}
 								onkeydown={(e) => textKeydown(e, i, section)}
 							></textarea>
-
 						{:else if section.type === 'ul'}
 							<ul class="my-1 space-y-0.5 pl-5">
 								{#each section.items as _, j (j)}
@@ -303,21 +502,18 @@
 									</li>
 								{/each}
 							</ul>
-
 						{:else if section.type === 'br'}
 							<div class="my-4 flex items-center gap-3 text-muted-foreground/30">
 								<hr class="flex-1 border-border/40" />
 							</div>
-
 						{:else if isApp}
-							<!-- App-store section block -->
 							{@const expanded = expandedIndex === i}
 							<div class="my-1 rounded-lg border border-border/40 hover:border-border/70 {expanded ? 'border-border' : ''}">
 								<div
 									class="flex cursor-pointer items-center gap-3 px-4 py-2.5 text-sm"
 									role="button"
 									tabindex="0"
-									onclick={() => expandedIndex = expanded ? null : i}
+									onclick={() => (expandedIndex = expanded ? null : i)}
 									onkeydown={(e) => e.key === 'Enter' && (expandedIndex = expanded ? null : i)}
 								>
 									<span class="font-medium text-muted-foreground">{LABEL[section.type]}</span>
@@ -329,11 +525,10 @@
 										{:else}–{/if}
 									</span>
 								</div>
-
 								{#if expanded}
 									<div class="border-t border-border/40 px-4 py-3 text-sm">
 										{#if section.type === 'carousel'}
-											<div class="flex gap-4 mb-3">
+											<div class="mb-3 flex gap-4">
 												<label class="space-y-1">
 													<span class="text-xs text-muted-foreground">Breakpoint</span>
 													<Input type="number" class="h-8 w-24 text-sm" bind:value={section.breakpoint} oninput={mark} min={1} />
@@ -345,7 +540,7 @@
 											{#each section.items as item, j (j)}
 												<div class="mb-2 space-y-2 rounded border border-border p-3">
 													<div class="flex items-center justify-between">
-														<span class="text-xs uppercase tracking-wide text-muted-foreground">{item.type}</span>
+														<span class="text-xs tracking-wide text-muted-foreground uppercase">{item.type}</span>
 														<button type="button" onclick={() => removeCarouselItem(section, j)} class="text-muted-foreground hover:text-destructive"><Trash2 class="size-3.5" /></button>
 													</div>
 													{#if item.type === 'app'}
@@ -368,15 +563,12 @@
 												<button type="button" class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" onclick={() => addCarouselApp(section)}><Plus class="size-3" /> app</button>
 												<button type="button" class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" onclick={() => addCarouselStory(section)}><Plus class="size-3" /> story</button>
 											</div>
-
 										{:else if section.type === 'category'}
 											<Input placeholder="games" bind:value={section.value} oninput={mark} class="h-8 max-w-xs text-sm" />
-
 										{:else if section.type === 'charts'}
 											<label class="flex items-center gap-2 text-sm">
 												<input type="checkbox" bind:checked={section.cards} onchange={mark} /> Cards view
 											</label>
-
 										{:else if section.type === 'custom'}
 											<div class="space-y-3">
 												<div class="space-y-2">
@@ -401,9 +593,8 @@
 													<button type="button" class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" onclick={() => addCustomApp(section)}><Plus class="size-3" /> app</button>
 												</div>
 											</div>
-
 										{:else}
-											<p class="text-xs italic text-muted-foreground">No configuration.</p>
+											<p class="text-xs text-muted-foreground italic">No configuration.</p>
 										{/if}
 									</div>
 								{/if}
@@ -413,52 +604,59 @@
 				</div>
 			{/each}
 
-			<!-- Trailing slash hint -->
 			<div
-				class="mt-1 cursor-text py-2 text-sm text-muted-foreground/20 transition-colors hover:text-muted-foreground/40"
+				class="mt-1 cursor-text py-2 pl-14 text-sm text-muted-foreground/20 transition-colors hover:text-muted-foreground/40"
 				role="button"
 				tabindex="0"
-				onclick={(e) => openPalette(sections.length - 1, e.clientX, e.clientY)}
-				onkeydown={(e) => { if (e.key === '/') { e.preventDefault(); openPalette(sections.length - 1, 80, e.currentTarget.getBoundingClientRect().top); } }}
+				onclick={() => insertParagraph(sections.length - 1)}
+				onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); insertParagraph(sections.length - 1); } }}
 			>
-				<span class="font-mono">/</span> Type to add a block…
+				Press <span class="font-mono">Enter</span> to continue,
+				<span class="font-mono">/</span> for a block…
 			</div>
 		{/if}
 	</div>
 </form>
 
-<!-- ── Slash command palette ──────────────────────────────────────────────── -->
 {#if paletteOpen}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="fixed inset-0 z-40" onclick={closePalette} onkeydown={(e) => e.key === 'Escape' && closePalette()}></div>
-	<div class="fixed z-50 w-72 overflow-hidden rounded-xl border border-border bg-background shadow-2xl" style="top:{paletteY}px;left:{paletteX}px">
-		<div class="flex items-center gap-2 border-b border-border px-3 py-2">
-			<span class="font-mono text-xs text-muted-foreground">/</span>
-			<input
-				bind:this={paletteInputEl}
-				bind:value={paletteFilter}
-				onkeydown={paletteKeydown}
-				oninput={() => selectedCmd = 0}
-				placeholder="Search blocks…"
-				class="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/40"
-			/>
+	<div
+		class="fixed inset-0 z-40"
+		onclick={closePalette}
+		onkeydown={(e) => e.key === 'Escape' && closePalette()}
+	></div>
+	<div
+		class="fixed z-50 w-64 overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
+		style="top:{paletteY}px;left:{paletteX}px"
+	>
+		<!-- Header -->
+		<div class="px-3 pt-2.5 pb-1">
+			<p class="text-[10px] font-medium tracking-wider text-muted-foreground/50 uppercase">
+				{paletteFilter ? 'Filtered results' : 'Blocks'}
+			</p>
 		</div>
-		<ul class="max-h-80 overflow-y-auto py-1">
+
+		<!-- Items -->
+		<ul class="max-h-72 overflow-y-auto pb-1">
 			{#each filtered as cmd, i (cmd.type)}
 				<li>
 					<button
 						type="button"
-						class="flex w-full items-center gap-3 px-3 py-2 text-left text-sm {selectedCmd === i ? 'bg-muted' : 'hover:bg-muted'}"
+						class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm {selectedCmd === i ? 'bg-muted' : 'hover:bg-muted'}"
 						onclick={() => pick(cmd.type)}
-						onmouseenter={() => selectedCmd = i}
+						onmouseenter={() => (selectedCmd = i)}
 					>
-						<div class="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted/50">
-							<cmd.icon class="size-3.5 text-muted-foreground" />
+						<div class="flex size-6 shrink-0 items-center justify-center rounded border border-border bg-muted/60">
+							{#if cmd.badge}
+								<span class="text-[10px] font-bold leading-none text-foreground/70">{cmd.badge}</span>
+							{:else}
+								<cmd.icon class="size-3 text-muted-foreground" />
+							{/if}
 						</div>
-						<div class="min-w-0">
-							<p class="font-medium">{cmd.label}</p>
-							<p class="truncate text-xs text-muted-foreground">{cmd.desc}</p>
-						</div>
+						<span class="flex-1 font-medium">{cmd.label}</span>
+						{#if cmd.shorthand}
+							<span class="font-mono text-[11px] text-muted-foreground/40">{cmd.shorthand}</span>
+						{/if}
 					</button>
 				</li>
 			{/each}
@@ -466,5 +664,17 @@
 				<li class="px-3 py-4 text-center text-xs text-muted-foreground">No results</li>
 			{/if}
 		</ul>
+
+		<!-- Footer -->
+		<div class="flex items-center justify-between border-t border-border/60 px-3 py-2">
+			<button
+				type="button"
+				onclick={closePalette}
+				class="text-xs text-muted-foreground/60 hover:text-foreground"
+			>
+				Close menu
+			</button>
+			<kbd class="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60">esc</kbd>
+		</div>
 	</div>
 {/if}
