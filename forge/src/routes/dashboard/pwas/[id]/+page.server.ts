@@ -1,5 +1,6 @@
 import { fail, redirect, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
+import { saveTranslations } from '$lib/server/pwa-form';
 import type { Actions, PageServerLoad } from './$types';
 
 function parseForm(data: FormData) {
@@ -27,9 +28,16 @@ function parseForm(data: FormData) {
 }
 
 export const load: PageServerLoad = async ({ params }) => {
-	const app = await db.pwaApp.findUnique({ where: { id: params.id } });
+	const app = await db.pwaApp.findUnique({
+		where: { id: params.id },
+		include: { translations: true }
+	});
 	if (!app) throw error(404, 'PWA not found');
-	return { app };
+
+	const translations = Object.fromEntries(
+		app.translations.map((t) => [t.lang, { name: t.name, summary: t.summary, description: t.description }])
+	);
+	return { app, translations };
 };
 
 export const actions: Actions = {
@@ -39,6 +47,7 @@ export const actions: Actions = {
 		if (!fields.appid || !fields.name) return fail(400, { error: 'Missing required fields' });
 
 		await db.pwaApp.update({ where: { id: params.id }, data: fields });
+		await saveTranslations(params.id, data);
 		throw redirect(303, '/dashboard/pwas');
 	}
 };

@@ -4,6 +4,18 @@ All endpoints are public and require no authentication. Most are read-only; `POS
 
 Base URL: the root of the Forge instance, e.g. `https://forge.example.com`
 
+## Localisation
+
+The `/api/pwas` endpoint accepts a `?lang=` query parameter (ISO 639-1 code). When a translation exists for the requested language, the `name`, `summary`, and `description` fields are replaced with the translated values. All other fields remain in their original form. If no translation is available for a field, it falls back to English.
+
+```
+GET /api/pwas?lang=de
+```
+
+Supported languages currently: `en` (default), `de`. More languages can be added in the admin dashboard.
+
+The discovery endpoints (`/api/new`, `/api/top`, `/api/trending`, `/api/charts`) return only app IDs — the client is responsible for localisation when resolving metadata.
+
 ## `GET /api/pwas`
 
 Returns the full list of registered PWA applications.
@@ -82,7 +94,12 @@ Returns `400` if `appid` is missing or not a string.
 
 ## `GET /api/new`
 
-Returns recently added apps, newest first.
+Returns recently added app IDs, newest first.
+
+**Sources (merged in order, deduplicated):**
+1. Flathub `/collection/recently-added` — ordered by publish date
+2. Our PWA apps — ordered by creation date
+3. Custom Blossom repo apps
 
 **Query params**
 
@@ -90,13 +107,21 @@ Returns recently added apps, newest first.
 |---|---|---|---|
 | `limit` | `20` | `100` | Number of results |
 
-**Response:** `application/json` — array of [app objects](#app-object) with install metrics.
+**Response:** `application/json` — ordered array of app ID strings.
+
+```json
+["nl.jknaapen.fladder", "org.example.MyApp", "com.figma.desktop"]
+```
 
 ---
 
 ## `GET /api/top`
 
-Returns apps sorted by total installs (own tracking + Flathub) descending.
+Returns app IDs ordered by popularity (all-time installs).
+
+**Sources (merged in order, deduplicated):**
+1. Flathub `/collection/popular` — ordered by installs in the last month
+2. Our apps (PWA + custom repo) — ordered by install events recorded via `POST /api/installs`
 
 **Query params**
 
@@ -104,13 +129,17 @@ Returns apps sorted by total installs (own tracking + Flathub) descending.
 |---|---|---|---|
 | `limit` | `20` | `100` | Number of results |
 
-**Response:** `application/json` — array of [app objects](#app-object) with install metrics.
+**Response:** `application/json` — ordered array of app ID strings.
 
 ---
 
 ## `GET /api/trending`
 
-Returns apps sorted by installs in the last 30 days descending. Uses only local install tracking since Flathub does not expose per-day counts.
+Returns app IDs ordered by install growth in the last 30 days.
+
+**Sources (merged in order, deduplicated):**
+1. Flathub `/collection/trending` — ordered by growth trajectory over the last 2 weeks
+2. Our apps (PWA + custom repo) — ordered by install events in the last 30 days
 
 **Query params**
 
@@ -118,13 +147,13 @@ Returns apps sorted by installs in the last 30 days descending. Uses only local 
 |---|---|---|---|
 | `limit` | `20` | `100` | Number of results |
 
-**Response:** `application/json` — array of [app objects](#app-object) with install metrics.
+**Response:** `application/json` — ordered array of app ID strings.
 
 ---
 
 ## `GET /api/charts`
 
-Returns apps ranked by total installs. Identical to `/api/top` but each entry includes a `rank` field (1-based).
+Returns app IDs with their chart rank. Uses the same ordering as `/api/top`.
 
 **Query params**
 
@@ -132,49 +161,28 @@ Returns apps ranked by total installs. Identical to `/api/top` but each entry in
 |---|---|---|---|
 | `limit` | `20` | `100` | Number of results |
 
-**Response:** `application/json` — array of [app objects](#app-object) with install metrics and `rank`.
+**Response:** `application/json` — array of rank objects. Rank is 1-based and equals `index + 1`.
+
+```json
+[
+  { "rank": 1, "id": "com.visualstudio.code" },
+  { "rank": 2, "id": "org.example.MyApp" }
+]
+```
 
 ---
 
-### App object
+### App sources
 
-The `/api/new`, `/api/top`, `/api/trending`, and `/api/charts` endpoints return app objects extending the base PWA fields with install metrics:
+The discovery endpoints (`/api/new`, `/api/top`, `/api/trending`, `/api/charts`) aggregate app IDs from three sources:
 
-```json
-{
-  "id": "org.example.MyApp",
-  "appid": "org.example.MyApp",
-  "name": "My App",
-  "summary": "A short description",
-  "description": "Longer description.",
-  "icon_url": "https://example.com/icon.png",
-  "screenshots": ["https://example.com/screenshot1.png"],
-  "homepage_url": "https://example.com",
-  "content_rating": "All ages",
-  "developer_name": "Example Dev",
-  "verified": true,
-  "url": "https://app.example.com",
-  "color": "#3b82f6",
-  "css": "",
-  "js": "",
-  "useragent": "",
-  "widevine": false,
-  "tray": false,
-  "installs": 1234,
-  "own_installs": 56,
-  "flathub_installs": 1178,
-  "rank": 1
-}
-```
+| Source | Description |
+|---|---|
+| Flathub | `https://flathub.org/api/v2/collection/*` — cached in memory for 1 hour |
+| Custom Blossom repo | `https://repo.blossomos.org/flatpak/refs/heads/app/` — cached for 1 hour |
+| PWA apps | Apps managed via the Forge dashboard |
 
-| Field | Type | Description |
-|---|---|---|
-| `installs` | number | Combined total (`own_installs + flathub_installs`) |
-| `own_installs` | number | Installs recorded via `POST /api/installs` |
-| `flathub_installs` | number | Downloads fetched from the Flathub stats API (cached for 6 hours) |
-| `rank` | number | 1-based position in the chart — only present on `/api/charts` responses |
-
-Flathub stats are fetched from `https://flathub.org/api/v2/stats` and cached in memory for 6 hours. If Flathub is unreachable, `flathub_installs` falls back to `0` or the last cached value.
+The client is responsible for resolving app metadata (name, icon, description) from the appropriate source using the returned IDs.
 
 ---
 

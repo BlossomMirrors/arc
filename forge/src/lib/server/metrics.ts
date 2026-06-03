@@ -1,71 +1,67 @@
 import { db } from './db';
 import { getFlathubStats } from './flathub';
+import { applyLang, type AppWithTranslations } from './pwa';
 
-export type AppWithMetrics = Awaited<ReturnType<typeof db.pwaApp.findMany>>[number] & {
+export type AppWithMetrics = AppWithTranslations & {
 	installs: number;
 	flathub_installs: number;
 };
 
-export async function appsWithMetrics(
-	apps: Awaited<ReturnType<typeof db.pwaApp.findMany>>
-): Promise<AppWithMetrics[]> {
-	const flathub = await getFlathubStats();
+const INCLUDE_TRANSLATIONS = { translations: true } as const;
 
+export async function fetchApps() {
+	return db.pwaApp.findMany({ include: INCLUDE_TRANSLATIONS });
+}
+
+async function enrichWithInstalls(
+	apps: AppWithTranslations[],
+	since?: Date
+): Promise<AppWithMetrics[]> {
 	const appids = apps.map((a) => a.appid);
 	const counts = await db.appInstall.groupBy({
 		by: ['appid'],
-		where: { appid: { in: appids } },
+		where: { appid: { in: appids }, ...(since ? { createdAt: { gte: since } } : {}) },
 		_count: { id: true }
 	});
 	const ourInstalls = new Map(counts.map((r) => [r.appid, r._count.id]));
+	return apps.map((app) => ({ ...app, installs: ourInstalls.get(app.appid) ?? 0, flathub_installs: 0 }));
+}
 
-	return apps.map((app) => ({
+export async function appsWithMetrics(apps: AppWithTranslations[]): Promise<AppWithMetrics[]> {
+	const flathub = await getFlathubStats();
+	const enriched = await enrichWithInstalls(apps);
+	return enriched.map((app) => ({
 		...app,
-		installs: ourInstalls.get(app.appid) ?? 0,
 		flathub_installs: flathub.get(app.appid) ?? 0
 	}));
 }
 
-export async function appsWithTrendingMetrics(
-	apps: Awaited<ReturnType<typeof db.pwaApp.findMany>>
-): Promise<AppWithMetrics[]> {
+export async function appsWithTrendingMetrics(apps: AppWithTranslations[]): Promise<AppWithMetrics[]> {
 	const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-	const appids = apps.map((a) => a.appid);
-
-	const counts = await db.appInstall.groupBy({
-		by: ['appid'],
-		where: { appid: { in: appids }, createdAt: { gte: since } },
-		_count: { id: true }
-	});
-	const recentInstalls = new Map(counts.map((r) => [r.appid, r._count.id]));
-
-	return apps.map((app) => ({
-		...app,
-		installs: recentInstalls.get(app.appid) ?? 0,
-		flathub_installs: 0
-	}));
+	return enrichWithInstalls(apps, since);
 }
 
-export function toPublicWithMetrics(app: AppWithMetrics, rank?: number) {
+export function toPublicWithMetrics(app: AppWithMetrics, lang = 'en', rank?: number) {
+	const a = applyLang(app, lang);
 	return {
-		id: app.appid,
-		appid: app.appid,
-		name: app.name,
-		summary: app.summary,
-		description: app.description,
-		icon_url: app.iconUrl,
-		screenshots: app.screenshots,
-		homepage_url: app.homepageUrl,
-		content_rating: app.contentRating,
-		developer_name: app.developerName,
+		id: a.appid,
+		appid: a.appid,
+		name: a.name,
+		summary: a.summary,
+		description: a.description,
+		icon_url: a.iconUrl,
+		screenshots: a.screenshots,
+		homepage_url: a.homepageUrl,
+		content_rating: a.contentRating,
+		developer_name: a.developerName,
 		verified: true,
-		url: app.url,
-		color: app.color,
-		css: app.css,
-		js: app.js,
-		useragent: app.useragent,
-		widevine: app.widevine,
-		tray: app.tray,
+		url: a.url,
+		color: a.color,
+		css: a.css,
+		js: a.js,
+		useragent: a.useragent,
+		widevine: a.widevine,
+		tray: a.tray,
 		installs: app.installs + app.flathub_installs,
 		own_installs: app.installs,
 		flathub_installs: app.flathub_installs,

@@ -67,5 +67,7 @@
 	"cmd_category": "Kategorie",
 	"cmd_custom": "Benutzerdefiniert",
 	"cmd_charts": "Charts",
-	"pwas_delete_confirm": "Bist du sicher, dass du diese App löschen möchtest?"
+	"pwas_delete_confirm": "Bist du sicher, dass du diese App löschen möchtest?",
+	"form_translations": "Übersetzungen",
+	"form_translation_fallback_note": "Optional — fällt auf Englisch zurück, wenn leer"
 }

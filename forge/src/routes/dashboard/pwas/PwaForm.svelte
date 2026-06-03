@@ -3,6 +3,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Button, buttonVariants } from '$lib/components/ui/button/index.js';
 	import * as m from '$lib/paraglide/messages';
+	import { CONTENT_LANGS } from '$lib/content-langs';
 
 	type PwaFormData = {
 		appid?: string;
@@ -23,8 +24,17 @@
 		tray?: boolean;
 	};
 
-	let { values = {}, submitLabel = 'Save' }: { values?: PwaFormData; submitLabel?: string } =
-		$props();
+	type Translation = { name?: string | null; summary?: string | null; description?: string | null };
+
+	let {
+		values = {},
+		translations = {},
+		submitLabel = 'Save'
+	}: {
+		values?: PwaFormData;
+		translations?: Record<string, Translation>;
+		submitLabel?: string;
+	} = $props();
 
 	let screenshots = $state(untrack(() => (values.screenshots ?? []).join('\n')));
 	let widevine    = $state(untrack(() => values.widevine ?? false));
@@ -139,6 +149,47 @@
 			<input type="checkbox" name="tray" value="true" bind:checked={tray} class="rounded border-input" />
 			{m.form_tray()}
 		</label>
+	</div>
+
+	<div class="space-y-4 border-t border-border pt-4">
+		<div>
+			<p class="text-sm font-medium">{m.form_translations()}</p>
+			<p class="text-xs text-muted-foreground">{m.form_translation_fallback_note()}</p>
+		</div>
+		{#each CONTENT_LANGS as lang (lang.code)}
+			<details class="rounded-lg border border-border">
+				<summary class="cursor-pointer px-4 py-2.5 text-sm font-medium select-none">
+					{lang.label}
+				</summary>
+				<div class="space-y-3 px-4 pb-4 pt-3">
+					<label class="space-y-1.5">
+						<span class="text-sm font-medium">{m.form_name()}</span>
+						<Input
+							name="trans_{lang.code}_name"
+							value={translations[lang.code]?.name ?? ''}
+							placeholder={values.name ?? ''}
+						/>
+					</label>
+					<label class="space-y-1.5">
+						<span class="text-sm font-medium">{m.form_summary()}</span>
+						<Input
+							name="trans_{lang.code}_summary"
+							value={translations[lang.code]?.summary ?? ''}
+							placeholder={values.summary ?? ''}
+						/>
+					</label>
+					<label class="space-y-1.5">
+						<span class="text-sm font-medium">{m.form_description()}</span>
+						<textarea
+							name="trans_{lang.code}_description"
+							rows={3}
+							class="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-ring"
+							placeholder={values.description ?? ''}
+						>{translations[lang.code]?.description ?? ''}</textarea>
+					</label>
+				</div>
+			</details>
+		{/each}
 	</div>
 
 	<div class="flex gap-2 pt-2">

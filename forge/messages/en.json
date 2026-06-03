@@ -67,5 +67,7 @@
 	"cmd_category": "Category",
 	"cmd_custom": "Custom",
 	"cmd_charts": "Charts",
-	"pwas_delete_confirm": "Are you sure you want to delete this app?"
+	"pwas_delete_confirm": "Are you sure you want to delete this app?",
+	"form_translations": "Translations",
+	"form_translation_fallback_note": "Optional — falls back to English if left empty"
 }

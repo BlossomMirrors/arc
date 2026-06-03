@@ -1,38 +1,32 @@
-// Flathub stats API: https://flathub.org/api/v2/stats
-// Response: { by_app: { "com.example.App": { installs_total: number } } }
+const BASE = 'https://flathub.org/api/v2';
+const COLLECTION_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-const FLATHUB_STATS = 'https://flathub.org/api/v2/stats';
-const TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+type CollectionEntry = { app_id: string };
+type CollectionResponse = { hits: CollectionEntry[] };
 
-let cache: Map<string, number> | null = null;
-let cachedAt = 0;
-
-async function refresh(): Promise<Map<string, number>> {
-	const res = await fetch(FLATHUB_STATS);
-	if (!res.ok) throw new Error(`Flathub stats: HTTP ${res.status}`);
-	const data = await res.json();
-
-	const map = new Map<string, number>();
-	const byApp = data?.by_app ?? {};
-	for (const [appid, stats] of Object.entries(byApp)) {
-		const count = (stats as { installs_total?: number })?.installs_total ?? 0;
-		map.set(appid, count);
-	}
-	return map;
+interface CollectionCache {
+	ids: string[];
+	at: number;
 }
 
-export async function getFlathubStats(): Promise<Map<string, number>> {
-	if (cache && Date.now() - cachedAt < TTL_MS) return cache;
+const cache: Record<string, CollectionCache> = {};
+
+async function fetchCollection(path: string, limit: number): Promise<string[]> {
+	const hit = cache[path];
+	if (hit && Date.now() - hit.at < COLLECTION_TTL_MS) return hit.ids.slice(0, limit);
+
 	try {
-		cache = await refresh();
-		cachedAt = Date.now();
+		const res = await fetch(`${BASE}${path}?locale=en`);
+		if (!res.ok) throw new Error(`Flathub ${path}: HTTP ${res.status}`);
+		const data: CollectionResponse = await res.json();
+		const ids = (data.hits ?? []).map((a) => a.app_id).filter(Boolean);
+		cache[path] = { ids, at: Date.now() };
+		return ids.slice(0, limit);
 	} catch {
-		cache ??= new Map();
+		return hit?.ids.slice(0, limit) ?? [];
 	}
-	return cache;
 }
 
-export async function getFlathubInstalls(appid: string): Promise<number> {
-	const stats = await getFlathubStats();
-	return stats.get(appid) ?? 0;
-}
+export const getPopular = (limit: number) => fetchCollection('/collection/popular', limit);
+export const getTrending = (limit: number) => fetchCollection('/collection/trending', limit);
+export const getRecentlyAdded = (limit: number) => fetchCollection('/collection/recently-added', limit);

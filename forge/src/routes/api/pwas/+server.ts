@@ -1,7 +1,8 @@
 import { db } from '$lib/server/db';
+import { applyLang, parseLang } from '$lib/server/pwa';
 import type { RequestHandler } from './$types';
 
-function toPublic(app: Awaited<ReturnType<typeof db.pwaApp.findMany>>[number]) {
+function toPublic(app: ReturnType<typeof applyLang>) {
 	return {
 		id: app.appid,
 		appid: app.appid,
@@ -24,7 +25,11 @@ function toPublic(app: Awaited<ReturnType<typeof db.pwaApp.findMany>>[number]) {
 	};
 }
 
-export const GET: RequestHandler = async () => {
-	const apps = await db.pwaApp.findMany({ orderBy: { createdAt: 'asc' } });
-	return Response.json(apps.map(toPublic));
+export const GET: RequestHandler = async ({ url }) => {
+	const lang = parseLang(url);
+	const apps = await db.pwaApp.findMany({
+		orderBy: { createdAt: 'asc' },
+		include: { translations: true }
+	});
+	return Response.json(apps.map((a) => toPublic(applyLang(a, lang))));
 };

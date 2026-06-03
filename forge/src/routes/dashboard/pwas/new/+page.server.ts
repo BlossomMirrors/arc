@@ -1,5 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
+import { saveTranslations } from '$lib/server/pwa-form';
 import type { Actions } from './$types';
 
 function parseForm(data: FormData) {
@@ -32,7 +33,8 @@ export const actions: Actions = {
 		const fields = parseForm(data);
 		if (!fields.appid || !fields.name) return fail(400, { error: 'Missing required fields' });
 
-		await db.pwaApp.create({ data: fields });
+		const app = await db.pwaApp.create({ data: fields });
+		await saveTranslations(app.id, data);
 		throw redirect(303, '/dashboard/pwas');
 	}
 };

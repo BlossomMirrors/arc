@@ -54,6 +54,20 @@ model FrontPage {
   updatedAt DateTime @updatedAt
 }
 
+model PwaTranslation {
+  id          String   @id @default(cuid())
+  appId       String
+  app         PwaApp   @relation(references: [id], fields: [appId], onDelete: Cascade)
+  lang        String
+  name        String?
+  summary     String?
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([appId, lang])
+}
+
 model PwaApp {
   id            String   @id @default(cuid())
   appid         String   @unique
@@ -72,8 +86,9 @@ model PwaApp {
   useragent     String   @default("")
   widevine      Boolean  @default(false)
   tray          Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  translations  PwaTranslation[]
 }
 
 model WhitelistEntry {

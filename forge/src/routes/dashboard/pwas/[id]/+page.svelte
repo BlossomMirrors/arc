@@ -12,6 +12,6 @@
 <div class="space-y-6">
 	<h2 class="text-lg font-semibold">{m.pwa_edit_heading()} {data.app.name}</h2>
 	<form method="POST">
-		<PwaForm values={data.app} submitLabel={m.pwa_save_changes()} />
+		<PwaForm values={data.app} translations={data.translations} submitLabel={m.pwa_save_changes()} />
 	</form>
 </div>
