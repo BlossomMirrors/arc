@@ -4,6 +4,7 @@
 	import { Button, buttonVariants } from '$lib/components/ui/button/index.js';
 	import * as m from '$lib/paraglide/messages';
 	import { CONTENT_LANGS } from '$lib/content-langs';
+	import UploadButton from '$lib/components/upload-button.svelte';
 
 	type PwaFormData = {
 		appid?: string;
@@ -39,6 +40,7 @@
 	let screenshots = $state(untrack(() => (values.screenshots ?? []).join('\n')));
 	let widevine    = $state(untrack(() => values.widevine ?? false));
 	let tray        = $state(untrack(() => values.tray ?? false));
+	let iconUrl     = $state(untrack(() => values.iconUrl ?? ''));
 </script>
 
 <div class="space-y-4">
@@ -72,7 +74,10 @@
 	<div class="grid grid-cols-2 gap-4">
 		<label class="space-y-1.5">
 			<span class="text-sm font-medium">{m.form_icon_url()}</span>
-			<Input name="iconUrl" value={values.iconUrl ?? ''} placeholder="https://..." required />
+			<div class="flex gap-2">
+				<Input name="iconUrl" bind:value={iconUrl} placeholder="https://..." required class="flex-1" />
+				<UploadButton onurl={(url) => (iconUrl = url)} />
+			</div>
 		</label>
 		<label class="space-y-1.5">
 			<span class="text-sm font-medium">{m.form_homepage_url()}</span>
@@ -80,8 +85,11 @@
 		</label>
 	</div>
 
-	<label class="space-y-1.5">
-		<span class="text-sm font-medium">{m.form_screenshots()}</span>
+	<div class="space-y-1.5">
+		<div class="flex items-center justify-between">
+			<span class="text-sm font-medium">{m.form_screenshots()}</span>
+			<UploadButton onurl={(url) => (screenshots = screenshots ? screenshots + '\n' + url : url)} />
+		</div>
 		<textarea
 			name="screenshots"
 			rows={3}
@@ -89,7 +97,7 @@
 			placeholder="https://..."
 			bind:value={screenshots}
 		></textarea>
-	</label>
+	</div>
 
 	<div class="grid grid-cols-2 gap-4">
 		<label class="space-y-1.5">

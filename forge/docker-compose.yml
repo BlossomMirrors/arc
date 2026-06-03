@@ -29,6 +29,7 @@ services:
       AUTHENTIK_URL: ${AUTHENTIK_URL}
       AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID}
       AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET}
+      BUNNYCDN_PASSWORD: ${BUNNYCDN_PASSWORD}
     healthcheck:
       test: ['CMD-SHELL', 'curl -f http://localhost:3000/health || exit 1']
       interval: 10s

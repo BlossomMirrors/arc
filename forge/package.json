@@ -58,6 +58,7 @@
 		"@prisma/adapter-pg": "^7.8.0",
 		"@prisma/client": "^7.8.0",
 		"@types/pg": "^8.20.0",
+		"basic-ftp": "^6.0.1",
 		"better-auth": "^1.6.13",
 		"mode-watcher": "^1.1.0",
 		"pg": "^8.21.0"

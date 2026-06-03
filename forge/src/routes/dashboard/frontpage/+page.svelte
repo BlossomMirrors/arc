@@ -26,6 +26,7 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { newSection, type Section, type LangString, HTML_TYPES } from '$lib/frontpage.js';
 	import * as m from '$lib/paraglide/messages';
+	import UploadButton from '$lib/components/upload-button.svelte';
 
 	let { data } = $props();
 
@@ -665,12 +666,15 @@
 															class="h-8 font-mono text-sm"
 														/>
 													{:else}
-														<Input
-															placeholder="banner.jpg"
-															bind:value={item.banner}
-															oninput={mark}
-															class="h-8 text-sm"
-														/>
+														<div class="flex gap-2">
+															<Input
+																placeholder="banner.jpg"
+																bind:value={item.banner}
+																oninput={mark}
+																class="h-8 flex-1 text-sm"
+															/>
+															<UploadButton onurl={(url) => { item.banner = url; mark(); }} />
+														</div>
 														{#each item.titles as t, k (k)}
 															<div class="flex gap-2">
 																<Input
