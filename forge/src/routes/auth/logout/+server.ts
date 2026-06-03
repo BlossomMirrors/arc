@@ -1,5 +1,5 @@
 import { auth } from '$lib/auth';
-import { AUTHENTIK_URL } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ request }) => {
@@ -9,7 +9,7 @@ export const GET: RequestHandler = async ({ request }) => {
 	});
 
 	const headers = new Headers({
-		Location: `${AUTHENTIK_URL}/application/o/arc-forge/end-session/`
+		Location: `${env.AUTHENTIK_URL}/application/o/arc-forge/end-session/`
 	});
 	for (const cookie of signOutResponse.headers.getSetCookie?.() ?? []) {
 		headers.append('set-cookie', cookie);
