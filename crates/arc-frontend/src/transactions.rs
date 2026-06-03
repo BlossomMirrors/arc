@@ -428,6 +428,12 @@ pub async fn run_signal_listener(
                 if let Some((pkg_id, installed_after, refresh_detail, refresh_extensions, ok, name, tx_type)) =
                     side_effect
                 {
+                    // Track successful Flatpak installs in forge.
+                    if ok && tx_type == "install" && crate::forge::is_flatpak_id(&pkg_id) {
+                        let id_for_forge = pkg_id.clone();
+                        tokio::spawn(crate::forge::post_install(id_for_forge));
+                    }
+
                     // Detect completed AppImage installs so we can patch the transaction
                     // entry with the real name/icon extracted by the daemon.
                     let appimage_stem = if ok && tx_type == "install" {

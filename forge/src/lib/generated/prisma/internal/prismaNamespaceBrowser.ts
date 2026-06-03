@@ -57,7 +57,9 @@ export const ModelName = {
   FrontPage: 'FrontPage',
   PwaApp: 'PwaApp',
   WhitelistEntry: 'WhitelistEntry',
-  Verification: 'Verification'
+  Verification: 'Verification',
+  AppInstall: 'AppInstall',
+  FlathubCache: 'FlathubCache'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -175,6 +177,24 @@ export const VerificationScalarFieldEnum = {
 } as const
 
 export type VerificationScalarFieldEnum = (typeof VerificationScalarFieldEnum)[keyof typeof VerificationScalarFieldEnum]
+
+
+export const AppInstallScalarFieldEnum = {
+  id: 'id',
+  appid: 'appid',
+  createdAt: 'createdAt'
+} as const
+
+export type AppInstallScalarFieldEnum = (typeof AppInstallScalarFieldEnum)[keyof typeof AppInstallScalarFieldEnum]
+
+
+export const FlathubCacheScalarFieldEnum = {
+  appid: 'appid',
+  installs: 'installs',
+  cachedAt: 'cachedAt'
+} as const
+
+export type FlathubCacheScalarFieldEnum = (typeof FlathubCacheScalarFieldEnum)[keyof typeof FlathubCacheScalarFieldEnum]
 
 
 export const SortOrder = {

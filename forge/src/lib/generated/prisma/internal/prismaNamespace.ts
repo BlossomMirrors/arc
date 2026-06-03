@@ -390,7 +390,9 @@ export const ModelName = {
   FrontPage: 'FrontPage',
   PwaApp: 'PwaApp',
   WhitelistEntry: 'WhitelistEntry',
-  Verification: 'Verification'
+  Verification: 'Verification',
+  AppInstall: 'AppInstall',
+  FlathubCache: 'FlathubCache'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -406,7 +408,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "session" | "account" | "frontPage" | "pwaApp" | "whitelistEntry" | "verification"
+    modelProps: "user" | "session" | "account" | "frontPage" | "pwaApp" | "whitelistEntry" | "verification" | "appInstall" | "flathubCache"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -928,6 +930,154 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    AppInstall: {
+      payload: Prisma.$AppInstallPayload<ExtArgs>
+      fields: Prisma.AppInstallFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.AppInstallFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppInstallPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.AppInstallFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppInstallPayload>
+        }
+        findFirst: {
+          args: Prisma.AppInstallFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppInstallPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.AppInstallFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppInstallPayload>
+        }
+        findMany: {
+          args: Prisma.AppInstallFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppInstallPayload>[]
+        }
+        create: {
+          args: Prisma.AppInstallCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppInstallPayload>
+        }
+        createMany: {
+          args: Prisma.AppInstallCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.AppInstallCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppInstallPayload>[]
+        }
+        delete: {
+          args: Prisma.AppInstallDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppInstallPayload>
+        }
+        update: {
+          args: Prisma.AppInstallUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppInstallPayload>
+        }
+        deleteMany: {
+          args: Prisma.AppInstallDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.AppInstallUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.AppInstallUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppInstallPayload>[]
+        }
+        upsert: {
+          args: Prisma.AppInstallUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppInstallPayload>
+        }
+        aggregate: {
+          args: Prisma.AppInstallAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateAppInstall>
+        }
+        groupBy: {
+          args: Prisma.AppInstallGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AppInstallGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.AppInstallCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AppInstallCountAggregateOutputType> | number
+        }
+      }
+    }
+    FlathubCache: {
+      payload: Prisma.$FlathubCachePayload<ExtArgs>
+      fields: Prisma.FlathubCacheFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.FlathubCacheFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FlathubCachePayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.FlathubCacheFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FlathubCachePayload>
+        }
+        findFirst: {
+          args: Prisma.FlathubCacheFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FlathubCachePayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.FlathubCacheFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FlathubCachePayload>
+        }
+        findMany: {
+          args: Prisma.FlathubCacheFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FlathubCachePayload>[]
+        }
+        create: {
+          args: Prisma.FlathubCacheCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FlathubCachePayload>
+        }
+        createMany: {
+          args: Prisma.FlathubCacheCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.FlathubCacheCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FlathubCachePayload>[]
+        }
+        delete: {
+          args: Prisma.FlathubCacheDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FlathubCachePayload>
+        }
+        update: {
+          args: Prisma.FlathubCacheUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FlathubCachePayload>
+        }
+        deleteMany: {
+          args: Prisma.FlathubCacheDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.FlathubCacheUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.FlathubCacheUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FlathubCachePayload>[]
+        }
+        upsert: {
+          args: Prisma.FlathubCacheUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FlathubCachePayload>
+        }
+        aggregate: {
+          args: Prisma.FlathubCacheAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateFlathubCache>
+        }
+        groupBy: {
+          args: Prisma.FlathubCacheGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FlathubCacheGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.FlathubCacheCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FlathubCacheCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -1068,6 +1218,24 @@ export const VerificationScalarFieldEnum = {
 export type VerificationScalarFieldEnum = (typeof VerificationScalarFieldEnum)[keyof typeof VerificationScalarFieldEnum]
 
 
+export const AppInstallScalarFieldEnum = {
+  id: 'id',
+  appid: 'appid',
+  createdAt: 'createdAt'
+} as const
+
+export type AppInstallScalarFieldEnum = (typeof AppInstallScalarFieldEnum)[keyof typeof AppInstallScalarFieldEnum]
+
+
+export const FlathubCacheScalarFieldEnum = {
+  appid: 'appid',
+  installs: 'installs',
+  cachedAt: 'cachedAt'
+} as const
+
+export type FlathubCacheScalarFieldEnum = (typeof FlathubCacheScalarFieldEnum)[keyof typeof FlathubCacheScalarFieldEnum]
+
+
 export const SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -1174,6 +1342,20 @@ export type IntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'In
  * Reference to a field of type 'Int[]'
  */
 export type ListIntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Int[]'>
+    
+
+
+/**
+ * Reference to a field of type 'Float'
+ */
+export type FloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float'>
+    
+
+
+/**
+ * Reference to a field of type 'Float[]'
+ */
+export type ListFloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float[]'>
     
 
 /**
@@ -1293,6 +1475,8 @@ export type GlobalOmitConfig = {
   pwaApp?: Prisma.PwaAppOmit
   whitelistEntry?: Prisma.WhitelistEntryOmit
   verification?: Prisma.VerificationOmit
+  appInstall?: Prisma.AppInstallOmit
+  flathubCache?: Prisma.FlathubCacheOmit
 }
 
 /* Types for Logging */

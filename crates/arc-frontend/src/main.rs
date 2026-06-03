@@ -1,3 +1,4 @@
+mod forge;
 mod helpers;
 mod icons;
 mod packages;

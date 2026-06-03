@@ -76,3 +76,13 @@ export type WhitelistEntry = Prisma.WhitelistEntryModel
  * 
  */
 export type Verification = Prisma.VerificationModel
+/**
+ * Model AppInstall
+ * 
+ */
+export type AppInstall = Prisma.AppInstallModel
+/**
+ * Model FlathubCache
+ * 
+ */
+export type FlathubCache = Prisma.FlathubCacheModel

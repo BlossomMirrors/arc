@@ -266,34 +266,133 @@ struct DaemonHomeData {
     recent: Vec<DaemonHomeEntry>,
 }
 
+/// Resolve a single frontpage section into home-card entries.
+async fn resolve_section(
+    section: &crate::forge::FpSection,
+    proxy: Option<&ArcDaemonProxy<'static>>,
+) -> Vec<DaemonHomeEntry> {
+    use crate::forge::FpSection;
+    match section {
+        FpSection::Carousel(ids) | FpSection::Custom(ids) => {
+            let Some(p) = proxy else { return vec![] };
+            let futs: Vec<_> = ids.iter().map(|id| {
+                let id = id.clone();
+                let p = p.clone();
+                tokio::spawn(async move {
+                    let pkgs: Vec<libarc::Package> = p
+                        .search(&id)
+                        .await
+                        .ok()
+                        .and_then(|j| serde_json::from_str(&j).ok())
+                        .unwrap_or_default();
+                    pkgs.into_iter()
+                        .find(|pkg| pkg.id == id)
+                        .map(|pkg| DaemonHomeEntry {
+                            id: pkg.id,
+                            name: pkg.name,
+                            summary: pkg.description,
+                            icon_url: pkg.icon_url,
+                        })
+                })
+            }).collect();
+            join_all(futs).await
+                .into_iter()
+                .filter_map(|r| r.ok().flatten())
+                .collect()
+        }
+        FpSection::Top | FpSection::Charts => {
+            crate::forge::fetch_apps("api/top", 12).await
+                .into_iter()
+                .map(|a| DaemonHomeEntry { id: a.appid, name: a.name, summary: a.summary, icon_url: a.icon_url })
+                .collect()
+        }
+        FpSection::Trending => {
+            crate::forge::fetch_apps("api/trending", 12).await
+                .into_iter()
+                .map(|a| DaemonHomeEntry { id: a.appid, name: a.name, summary: a.summary, icon_url: a.icon_url })
+                .collect()
+        }
+        FpSection::New => {
+            crate::forge::fetch_apps("api/new", 20).await
+                .into_iter()
+                .map(|a| DaemonHomeEntry { id: a.appid, name: a.name, summary: a.summary, icon_url: a.icon_url })
+                .collect()
+        }
+        FpSection::Categories => vec![],
+    }
+}
+
 pub async fn load_home(
     app_weak: slint::Weak<crate::AppWindow>,
     proxy: Option<ArcDaemonProxy<'static>>,
 ) {
-    let (popular_apps, recent_apps): (Vec<DaemonHomeEntry>, Vec<DaemonHomeEntry>) =
-        if let Some(ref p) = proxy {
-            p.get_home_apps(10, 20)
-                .await
-                .ok()
-                .and_then(|json| serde_json::from_str::<DaemonHomeData>(&json).ok())
-                .map(|d| (d.popular, d.recent))
-                .unwrap_or_default()
-        } else {
-            (vec![], vec![])
-        };
+    use crate::forge::FpSection;
 
-    let installed_ids: std::collections::HashSet<String> = if let Some(ref p) = proxy {
-        p.list_installed()
-            .await
-            .ok()
-            .and_then(|json| serde_json::from_str::<Vec<libarc::Package>>(&json).ok())
-            .unwrap_or_default()
-            .into_iter()
-            .map(|pkg| pkg.id)
-            .collect()
-    } else {
-        std::collections::HashSet::new()
-    };
+    // Fetch frontpage sections and installed list concurrently.
+    let (fp_sections, installed_ids) = tokio::join!(
+        crate::forge::fetch_frontpage(),
+        async {
+            if let Some(ref p) = proxy {
+                p.list_installed()
+                    .await
+                    .ok()
+                    .and_then(|json| serde_json::from_str::<Vec<libarc::Package>>(&json).ok())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|pkg| pkg.id)
+                    .collect::<std::collections::HashSet<_>>()
+            } else {
+                std::collections::HashSet::new()
+            }
+        }
+    );
+
+    // Collect app-producing sections in order; skip Categories (no app list).
+    let app_sections: Vec<&FpSection> = fp_sections.iter()
+        .filter(|s| !matches!(s, FpSection::Categories))
+        .collect();
+
+    // Resolve the first two app sections in parallel to fill popular/recent slots.
+    let (popular_apps, recent_apps): (Vec<DaemonHomeEntry>, Vec<DaemonHomeEntry>) =
+        if app_sections.is_empty() {
+            // No frontpage data — fall back to daemon.
+            if let Some(ref p) = proxy {
+                p.get_home_apps(10, 20)
+                    .await
+                    .ok()
+                    .and_then(|json| serde_json::from_str::<DaemonHomeData>(&json).ok())
+                    .map(|d| (d.popular, d.recent))
+                    .unwrap_or_default()
+            } else {
+                (vec![], vec![])
+            }
+        } else {
+            let (pop, rec) = tokio::join!(
+                resolve_section(app_sections[0], proxy.as_ref()),
+                async {
+                    if app_sections.len() > 1 {
+                        resolve_section(app_sections[1], proxy.as_ref()).await
+                    } else {
+                        vec![]
+                    }
+                }
+            );
+            // If the forge/daemon returned nothing useful, fall back.
+            if pop.is_empty() && rec.is_empty() {
+                if let Some(ref p) = proxy {
+                    p.get_home_apps(10, 20)
+                        .await
+                        .ok()
+                        .and_then(|json| serde_json::from_str::<DaemonHomeData>(&json).ok())
+                        .map(|d| (d.popular, d.recent))
+                        .unwrap_or_default()
+                } else {
+                    (vec![], vec![])
+                }
+            } else {
+                (pop, rec)
+            }
+        };
 
     let popular_tasks: Vec<_> = popular_apps
         .into_iter()
