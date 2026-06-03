@@ -34,4 +34,4 @@ RUN bun install --production --frozen-lockfile
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "bunx prisma generate && bunx prisma migrate deploy && bun build/index.js"]
+CMD ["sh", "-c", "bunx prisma migrate deploy && bun build/index.js"]
