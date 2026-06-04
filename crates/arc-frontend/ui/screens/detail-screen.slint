@@ -27,6 +27,7 @@ export component DetailScreen inherits Rectangle {
     in property <string> tr-verified: "Verified developer";
     in property <string> tr-proprietary: "Proprietary";
     in property <string> tr-all-ages: "All ages";
+    in property <string> tr-pwa: "PWA";
 
     callback back-clicked();
     callback install-requested(string);
@@ -76,6 +77,7 @@ export component DetailScreen inherits Rectangle {
                 tr-verified: root.tr-verified;
                 tr-proprietary: root.tr-proprietary;
                 tr-all-ages: root.tr-all-ages;
+                tr-pwa: root.tr-pwa;
                 back-clicked => {
                     root.back-clicked();
                 }

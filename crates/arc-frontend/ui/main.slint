@@ -165,6 +165,7 @@ export component AppWindow inherits Window {
     in-out property <string> tr-search-placeholder: "Search for applications...";
     in-out property <string> tr-proprietary: "Proprietary";
     in-out property <string> tr-all-ages: "All ages";
+    in-out property <string> tr-pwa: "PWA";
     in-out property <string> tr-uninstall: "Uninstall";
     in-out property <string> tr-uninstall-title-prefix: "Uninstall ";
     in-out property <string> tr-uninstall-title-suffix: "";
@@ -390,6 +391,7 @@ export component AppWindow inherits Window {
                 tr-verified: root.tr-verified;
                 tr-proprietary: root.tr-proprietary;
                 tr-all-ages: root.tr-all-ages;
+                tr-pwa: root.tr-pwa;
                 back-clicked => {
                     if root.prev-view == "home" {
                         root.back-to-home();

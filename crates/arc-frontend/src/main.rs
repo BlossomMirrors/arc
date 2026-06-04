@@ -105,6 +105,7 @@ fn apply_translations(app: &AppWindow) {
     app.set_tr_search_placeholder(tr!("Search for applications...").into());
     app.set_tr_proprietary(tr!("Proprietary").into());
     app.set_tr_all_ages(tr!("All ages").into());
+    app.set_tr_pwa(tr!("PWA").into());
     app.set_tr_uninstall(tr!("Uninstall").into());
     app.set_tr_install_from_suffix(tr!(" from Arc Software instead").into());
     // Verb-final languages (German, etc.) translate this sentinel to a non-empty value.

@@ -19,6 +19,7 @@ export component DetailHeader inherits Rectangle {
     in property <string> tr-verified: "Verified developer";
     in property <string> tr-proprietary: "Proprietary";
     in property <string> tr-all-ages: "All ages";
+    in property <string> tr-pwa: "PWA";
 
     callback back-clicked();
     callback install-requested(string);
@@ -192,6 +193,11 @@ export component DetailHeader inherits Rectangle {
                             ? root.tr-all-ages
                             : root.detail-app.content-rating;
                         accent: root.detail-app.content-rating == "18+" ? #ef4444 : root.detail-app.content-rating == "12+" ? #f97316 : root.detail-app.content-rating == "7+" ? #eab308 : Palette.foreground.transparentize(0.4);
+                    }
+
+                    if root.detail-app.pwa: Badge {
+                        label: root.tr-pwa;
+                        accent: #8b5cf6;
                     }
                 }
             }

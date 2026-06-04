@@ -254,6 +254,7 @@ pub struct RawDetailData {
     pub lutris_installed: bool,
     pub appimage_installed: bool,
     pub verified: bool,
+    pub pwa: bool,
     pub license: String,
     pub eula_url: String,
     pub homepage_url: String,
@@ -1162,6 +1163,7 @@ pub async fn load_detail(
         lutris_installed,
         appimage_installed,
         verified,
+        pwa: pwa_pkg.is_some(),
         license: metadata
             .as_ref()
             .and_then(|m| m.license.clone())
@@ -1226,6 +1228,7 @@ pub async fn load_detail(
                 || raw.lutris_installed
                 || raw.appimage_installed,
             verified: raw.verified,
+            pwa: raw.pwa,
             license: raw.license.into(),
             eula_url: raw.eula_url.into(),
             homepage_url: raw.homepage_url.into(),
