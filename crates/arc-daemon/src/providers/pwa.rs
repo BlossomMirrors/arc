@@ -145,14 +145,15 @@ impl PwaProvider {
     }
 
     fn build_exec(&self, pwa: &ForgePwa) -> String {
-        let color = if pwa.color.is_empty() { "#000000" } else { &pwa.color };
         let mut exec = format!(
-            "blossomos-webapps --url={url} --name={name} --color={color} --appid={appid}",
+            "blossomos-webapps --url={url} --name={name} --appid={appid}",
             url = pwa.url,
             name = pwa.name,
-            color = color,
             appid = pwa.appid,
         );
+        if !pwa.color.is_empty() && pwa.color != "#000000" {
+            exec.push_str(&format!(" --color={}", pwa.color));
+        }
         if let Some(ref icon_url) = pwa.icon_url {
             exec.push_str(&format!(" --icon={}", icon_url));
         }
