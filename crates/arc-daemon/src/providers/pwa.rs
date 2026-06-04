@@ -113,7 +113,11 @@ impl PwaProvider {
     }
 
     async fn download_icon(&self, appid: &str, icon_url: &str) -> (String, String) {
-        let ext = if icon_url.contains(".svg") { "svg" } else { "png" };
+        let ext = if icon_url.contains(".svg") {
+            "svg"
+        } else {
+            "png"
+        };
         let icon_name = format!("arc-pwa-{}", appid);
         let icon_path = self.icons_dir.join(format!("{}.{}", icon_name, ext));
         let icon_path_str = icon_path.to_string_lossy().to_string();
@@ -146,7 +150,7 @@ impl PwaProvider {
 
     fn build_exec(&self, pwa: &ForgePwa) -> String {
         let mut exec = format!(
-            "blossomos-webapps --url={url} --name={name} --appid={appid}",
+            "blossomos-webapps -- --url={url} --name={name} --appid={appid}",
             url = pwa.url,
             name = pwa.name,
             appid = pwa.appid,
@@ -239,7 +243,10 @@ impl PackageProvider for PwaProvider {
     async fn get_app_info(&self, package_id: &str) -> Result<Option<Package>, ArcError> {
         let appid = Self::strip_prefix(package_id);
         let pwas = self.fetch_pwas().await;
-        Ok(pwas.iter().find(|p| p.appid == appid).map(|p| self.to_package(p)))
+        Ok(pwas
+            .iter()
+            .find(|p| p.appid == appid)
+            .map(|p| self.to_package(p)))
     }
 
     async fn list_installed(&self) -> Result<Vec<Package>, ArcError> {
@@ -258,7 +265,11 @@ impl PackageProvider for PwaProvider {
                         .strip_prefix("arc-pwa-")?
                         .strip_suffix(".desktop")?
                         .to_string();
-                    if !appid.is_empty() { Some(appid) } else { None }
+                    if !appid.is_empty() {
+                        Some(appid)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
