@@ -36,6 +36,18 @@ struct ForgePwa {
     content_rating: Option<String>,
     #[serde(default)]
     verified: bool,
+    #[serde(default)]
+    color: String,
+    #[serde(default)]
+    css: String,
+    #[serde(default)]
+    js: String,
+    #[serde(default)]
+    useragent: String,
+    #[serde(default)]
+    widevine: bool,
+    #[serde(default)]
+    tray: bool,
 }
 
 pub struct PwaProvider {
@@ -100,14 +112,15 @@ impl PwaProvider {
         }
     }
 
-    async fn download_icon(&self, appid: &str, icon_url: &str) -> String {
+    async fn download_icon(&self, appid: &str, icon_url: &str) -> (String, String) {
         let ext = if icon_url.contains(".svg") { "svg" } else { "png" };
         let icon_name = format!("arc-pwa-{}", appid);
         let icon_path = self.icons_dir.join(format!("{}.{}", icon_name, ext));
+        let icon_path_str = icon_path.to_string_lossy().to_string();
 
         if let Err(e) = std::fs::create_dir_all(&self.icons_dir) {
             warn!("Could not create icons dir: {}", e);
-            return icon_name;
+            return (icon_name, icon_path_str);
         }
 
         match self
@@ -128,18 +141,49 @@ impl PwaProvider {
             Err(e) => warn!("Could not download icon: {}", e),
         }
 
-        icon_name
+        (icon_name, icon_path_str)
+    }
+
+    fn build_exec(&self, pwa: &ForgePwa) -> String {
+        let color = if pwa.color.is_empty() { "#000000" } else { &pwa.color };
+        let mut exec = format!(
+            "blossomos-webapps --url={url} --name={name} --color={color} --appid={appid}",
+            url = pwa.url,
+            name = pwa.name,
+            color = color,
+            appid = pwa.appid,
+        );
+        if let Some(ref icon_url) = pwa.icon_url {
+            exec.push_str(&format!(" --icon={}", icon_url));
+        }
+        if !pwa.css.is_empty() {
+            exec.push_str(&format!(" --css={}", pwa.css));
+        }
+        if !pwa.js.is_empty() {
+            exec.push_str(&format!(" --js={}", pwa.js));
+        }
+        if !pwa.useragent.is_empty() {
+            exec.push_str(&format!(" --useragent=\"{}\"", pwa.useragent));
+        }
+        if pwa.widevine {
+            exec.push_str(" --widevine");
+        }
+        if pwa.tray {
+            exec.push_str(" --tray");
+        }
+        exec
     }
 
     fn write_desktop(&self, pwa: &ForgePwa, icon_name: &str) -> Result<(), ArcError> {
         std::fs::create_dir_all(&self.desktop_dir)?;
 
         let comment = pwa.summary.replace('\n', " ");
+        let exec = self.build_exec(pwa);
         let content = format!(
-            "[Desktop Entry]\nVersion=1.0\nType=Application\nName={name}\nComment={comment}\nExec=xdg-open {url}\nIcon={icon}\nCategories=Network;WebApplication;\nStartupNotify=true\n",
+            "[Desktop Entry]\nVersion=1.0\nType=Application\nName={name}\nComment={comment}\nExec={exec}\nIcon={icon}\nCategories=Network;WebApplication;\nStartupNotify=true\n",
             name = pwa.name,
             comment = comment,
-            url = pwa.url,
+            exec = exec,
             icon = icon_name,
         );
 
@@ -262,7 +306,8 @@ impl PackageProvider for PwaProvider {
             .ok_or_else(|| ArcError::PackageNotFound(appid.to_string()))?;
 
         let icon_name = if let Some(ref url) = pwa.icon_url {
-            self.download_icon(appid, url).await
+            let (name, _) = self.download_icon(appid, url).await;
+            name
         } else {
             format!("arc-pwa-{}", appid)
         };
@@ -301,15 +346,17 @@ impl PackageProvider for PwaProvider {
         let appid = Self::strip_prefix(package_id);
         let pwas = self.fetch_pwas().await;
 
-        let url = pwas
-            .iter()
-            .find(|p| p.appid == appid)
-            .map(|p| p.url.clone())
-            .unwrap_or_else(|| format!("https://{}", appid));
+        let Some(pwa) = pwas.iter().find(|p| p.appid == appid) else {
+            return Err(ArcError::PackageNotFound(appid.to_string()));
+        };
 
-        info!("Opening PWA {} at {}", appid, url);
-        tokio::process::Command::new("xdg-open")
-            .arg(&url)
+        let exec = self.build_exec(pwa);
+
+        info!("Running PWA {}: {}", appid, exec);
+        let mut parts = exec.split_whitespace();
+        let bin = parts.next().unwrap_or("blossomos-webapps");
+        tokio::process::Command::new(bin)
+            .args(parts)
             .spawn()
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
 
