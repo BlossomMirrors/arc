@@ -354,11 +354,18 @@ impl ArcDaemonInterface {
                 Ok(()) => {
                     if delete_data {
                         if let Some(home) = std::env::var_os("HOME") {
-                            let data_dir = std::path::PathBuf::from(home)
-                                .join(".var/app")
-                                .join(&package_id);
-                            if data_dir.exists() {
-                                let _ = std::fs::remove_dir_all(&data_dir);
+                            let home = std::path::PathBuf::from(home);
+                            let flatpak_dir = home.join(".var/app").join(&package_id);
+                            if flatpak_dir.exists() {
+                                let _ = std::fs::remove_dir_all(&flatpak_dir);
+                            }
+                            if let Some(appid) = package_id.strip_prefix("pwa:") {
+                                let pwa_dir = home
+                                    .join(".local/share/blossomos-webapps")
+                                    .join(appid);
+                                if pwa_dir.exists() {
+                                    let _ = std::fs::remove_dir_all(&pwa_dir);
+                                }
                             }
                         }
                     }

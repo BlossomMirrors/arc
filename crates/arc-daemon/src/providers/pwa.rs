@@ -185,11 +185,12 @@ impl PwaProvider {
         let comment = pwa.summary.replace('\n', " ");
         let exec = self.build_exec(pwa);
         let content = format!(
-            "[Desktop Entry]\nVersion=1.0\nType=Application\nName={name}\nComment={comment}\nExec={exec}\nIcon={icon}\nCategories=Network;WebApplication;\nStartupNotify=true\n",
+            "[Desktop Entry]\nVersion=1.0\nType=Application\nName={name}\nComment={comment}\nExec={exec}\nIcon={icon}\nCategories=Network;WebApplication;\nStartupNotify=true\nStartupWMClass={appid}",
             name = pwa.name,
             comment = comment,
             exec = exec,
             icon = icon_name,
+            appid = pwa.appid
         );
 
         let path = self.desktop_path(&pwa.appid);
