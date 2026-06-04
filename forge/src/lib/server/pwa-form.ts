@@ -1,5 +1,11 @@
 import { db } from './db';
 import { CONTENT_LANGS } from '$lib/content-langs';
+import { CDN_BASE, uploadText } from './bunny';
+
+export async function uploadCodeField(value: string, ext: 'css' | 'js'): Promise<string> {
+	if (!value || value.startsWith(CDN_BASE)) return value;
+	return uploadText(value, ext);
+}
 
 export function parseTranslations(data: FormData) {
 	return CONTENT_LANGS.map(({ code }) => ({
