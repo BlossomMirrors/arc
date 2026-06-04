@@ -2,8 +2,15 @@ import { db } from './db';
 import { CONTENT_LANGS } from '$lib/content-langs';
 import { CDN_BASE, uploadText } from './bunny';
 
+export async function fetchCodeField(value: string): Promise<string> {
+	if (!value || !value.startsWith(CDN_BASE)) return value;
+	const res = await fetch(value);
+	if (!res.ok) return value;
+	return res.text();
+}
+
 export async function uploadCodeField(value: string, ext: 'css' | 'js'): Promise<string> {
-	if (!value || value.startsWith(CDN_BASE)) return value;
+	if (!value) return value;
 	return uploadText(value, ext);
 }
 

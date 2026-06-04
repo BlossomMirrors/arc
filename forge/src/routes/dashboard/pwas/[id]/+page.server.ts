@@ -1,6 +1,6 @@
 import { fail, redirect, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
-import { saveTranslations, uploadCodeField } from '$lib/server/pwa-form';
+import { saveTranslations, uploadCodeField, fetchCodeField } from '$lib/server/pwa-form';
 import type { Actions, PageServerLoad } from './$types';
 
 async function parseForm(data: FormData) {
@@ -36,10 +36,15 @@ export const load: PageServerLoad = async ({ params }) => {
 	});
 	if (!app) throw error(404, 'PWA not found');
 
+	const [css, js] = await Promise.all([
+		fetchCodeField(app.css ?? ''),
+		fetchCodeField(app.js ?? '')
+	]);
+
 	const translations = Object.fromEntries(
 		app.translations.map((t) => [t.lang, { name: t.name, summary: t.summary, description: t.description }])
 	);
-	return { app, translations };
+	return { app: { ...app, css, js }, translations };
 };
 
 export const actions: Actions = {
