@@ -9,7 +9,13 @@ import { PopularCard } from "../components/popular-card.slint";
 import { Carousel } from "../components/carousel.slint";
 import { HeroCarousel } from "../components/hero-carousel.slint";
 import { EditorialCard } from "../components/editorial-card.slint";
-import { HomeItem, AppCardData, CategoryItem, StoryItem, HeroItem } from "../types.slint";
+import {
+    HomeItem,
+    AppCardData,
+    CategoryItem,
+    StoryItem,
+    HeroItem,
+} from "../types.slint";
 
 export component HomeScreen inherits Rectangle {
     in property <[HomeItem]> home-items;
@@ -41,15 +47,20 @@ export component HomeScreen inherits Rectangle {
         viewport-width: self.visible-width;
 
         VerticalLayout {
-            padding: 16px;
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 16px;
+            padding-bottom: 40px;
             spacing: 0px;
             width: scroller.visible-width;
 
             for item[i] in root.home-items: VerticalLayout {
-                padding-top: item.item-type == "app-row" || item.item-type == "app-grid" || item.item-type == "categories" || item.item-type == "carousel" ? 20px : 6px;
+                // No top padding for the very first item; otherwise separate sections clearly
+                padding-top: i == 0 ? 0px : item.item-type == "app-row" || item.item-type == "app-grid" || item.item-type == "categories" || item.item-type == "carousel" ? 28px : 8px;
 
+                // Carousel section (hero + editorial)
                 if item.item-type == "carousel": VerticalLayout {
-                    spacing: 8px;
+                    spacing: 12px;
 
                     if item.hero-items.length > 0: HeroCarousel {
                         width: parent.width;
@@ -60,19 +71,21 @@ export component HomeScreen inherits Rectangle {
                                 root.story-selected(root.home-stories[idx]);
                             }
                         }
-                        app-clicked(id) => { root.detail-requested(id); }
+                        app-clicked(id) => {
+                            root.detail-requested(id);
+                        }
                     }
 
                     if item.editorial-items.length > 0: Flickable {
                         width: parent.width;
-                        height: 178px;
-                        viewport-width: item.editorial-items.length * 252px;
-                        viewport-height: 178px;
+                        height: 154px;
+                        viewport-width: item.editorial-items.length * 232px;
+                        viewport-height: 154px;
                         interactive: true;
 
                         for eitem[j] in item.editorial-items: EditorialCard {
-                            x: j * 252px;
-                            y: 4px;
+                            x: j * 232px;
+                            y: 0px;
                             item: eitem;
                             clicked(id, is-story) => {
                                 if is-story {
@@ -87,6 +100,7 @@ export component HomeScreen inherits Rectangle {
                     }
                 }
 
+                // Text elements
                 if item.item-type == "h1": Text {
                     text: item.text;
                     font-size: 22px;
@@ -96,7 +110,7 @@ export component HomeScreen inherits Rectangle {
 
                 if item.item-type == "h2": Text {
                     text: item.text;
-                    font-size: 16px;
+                    font-size: 17px;
                     font-weight: 700;
                     wrap: word-wrap;
                 }
@@ -111,22 +125,31 @@ export component HomeScreen inherits Rectangle {
                 if item.item-type == "p": Text {
                     text: item.text;
                     font-size: 13px;
-                    color: Palette.foreground.transparentize(0.35);
+                    color: Palette.foreground.transparentize(0.4);
                     wrap: word-wrap;
                 }
 
                 if item.item-type == "br" && i > 0: Rectangle {
-                    height: 12px;
+                    height: 1px;
+                    background: Palette.foreground.transparentize(0.88);
                 }
 
+                // Horizontal app row
                 if item.item-type == "app-row" && item.apps.length > 0: VerticalLayout {
-                    spacing: 8px;
+                    spacing: 10px;
 
-                    if item.title != "": Text {
-                        text: item.title;
-                        font-size: 16px;
-                        font-weight: 700;
-                        height: 22px;
+                    if item.title != "": VerticalLayout {
+                        spacing: 10px;
+                        Text {
+                            text: item.title;
+                            font-size: 17px;
+                            font-weight: 700;
+                        }
+
+                        Rectangle {
+                            height: 1px;
+                            background: Palette.foreground.transparentize(0.88);
+                        }
                     }
 
                     Carousel {
@@ -138,18 +161,25 @@ export component HomeScreen inherits Rectangle {
                     }
                 }
 
+                // App grid
                 if item.item-type == "app-grid" && item.apps.length > 0: VerticalLayout {
-                    spacing: 4px;
+                    spacing: 10px;
 
-                    if item.title != "": Text {
-                        text: item.title;
-                        font-size: 16px;
-                        font-weight: 700;
-                        height: 22px;
+                    if item.title != "": VerticalLayout {
+                        spacing: 10px;
+                        Text {
+                            text: item.title;
+                            font-size: 17px;
+                            font-weight: 700;
+                        }
+
+                        Rectangle {
+                            height: 1px;
+                            background: Palette.foreground.transparentize(0.88);
+                        }
                     }
 
                     Rectangle {
-                        // Ceiling division: (n + 4) / 5
                         height: ((item.apps.length + 4) / 5) * 164px;
                         preferred-width: 0px;
 
@@ -167,14 +197,22 @@ export component HomeScreen inherits Rectangle {
                     }
                 }
 
+                // Categories
                 if item.item-type == "categories" && root.categories.length > 0: VerticalLayout {
-                    spacing: 24px;
+                    spacing: 10px;
 
-                    Text {
-                        text: root.tr-categories;
-                        font-size: 16px;
-                        font-weight: 700;
-                        height: 22px;
+                    VerticalLayout {
+                        spacing: 10px;
+                        Text {
+                            text: root.tr-categories;
+                            font-size: 17px;
+                            font-weight: 700;
+                        }
+
+                        Rectangle {
+                            height: 1px;
+                            background: Palette.foreground.transparentize(0.88);
+                        }
                     }
 
                     HorizontalLayout {

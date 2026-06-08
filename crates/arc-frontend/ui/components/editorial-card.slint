@@ -5,18 +5,11 @@ export component EditorialCard inherits Rectangle {
     in property <HeroItem> item;
     callback clicked(string, bool);  // (id, is-story)
 
-    width: 240px;
-    height: 170px;
-    border-radius: 12px;
+    width: 220px;
+    height: 150px;
+    border-radius: 14px;
     clip: true;
     background: Palette.alternate-background;
-
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => {
-            root.clicked(root.item.id, root.item.is-story);
-        }
-    }
 
     // Story: full-coverage banner
     if root.item.is-story && root.item.banner.width > 0: Image {
@@ -26,47 +19,42 @@ export component EditorialCard inherits Rectangle {
         image-fit: cover;
     }
 
-    // App / no-banner fallback: gradient
+    // App / no-banner: dark gradient
     if !root.item.is-story || root.item.banner.width == 0: Rectangle {
         width: parent.width;
         height: parent.height;
-        background: @linear-gradient(135deg, #1e2240 0%, #0d0d1a 100%);
+        background: @linear-gradient(135deg, #1e2440 0%, #0d0f1e 100%);
     }
 
-    // App: icon centered in the upper half
+    // App: icon in upper center
     if !root.item.is-story && root.item.icon.width > 0: Rectangle {
-        x: (parent.width - 64px) / 2;
-        y: 24px;
-        width: 64px;
-        height: 64px;
-        border-radius: 14px;
-        background: #ffffff15;
-        border-width: 1px;
-        border-color: #ffffff20;
-
+        x: (parent.width - 56px) / 2;
+        y: 20px;
+        width: 56px;
+        height: 56px;
+        border-radius: 13px;
+        clip: true;
         Image {
             source: root.item.icon;
-            width: 48px;
-            height: 48px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
+            width: parent.width;
+            height: parent.height;
             image-fit: contain;
         }
     }
 
-    // Bottom gradient overlay
+    // Bottom gradient
     Rectangle {
         x: 0;
-        y: parent.height - 90px;
+        y: parent.height - 80px;
         width: parent.width;
-        height: 90px;
-        background: @linear-gradient(180deg, transparent 0%, #000000cc 100%);
+        height: 80px;
+        background: @linear-gradient(180deg, transparent 0%, #000000d0 100%);
     }
 
     // Title + subtitle
     VerticalLayout {
         x: 12px;
-        y: parent.height - 72px;
+        y: parent.height - 58px;
         width: parent.width - 24px;
         spacing: 3px;
 
@@ -86,14 +74,20 @@ export component EditorialCard inherits Rectangle {
         }
     }
 
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(root.item.id, root.item.is-story); }
+    }
+
     // Hover border
     Rectangle {
         width: parent.width;
         height: parent.height;
         border-radius: parent.border-radius;
         border-width: ta.has-hover ? 2px : 1px;
-        border-color: ta.has-hover ? #ffffff44 : #ffffff18;
+        border-color: ta.has-hover ? #ffffff50 : #ffffff18;
         background: transparent;
         animate border-width { duration: 100ms; }
+        animate border-color { duration: 100ms; }
     }
 }

@@ -1,46 +1,50 @@
-import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
 import { CategoryItem } from "../types.slint";
 
 export component CategoryCard inherits Rectangle {
     in property <CategoryItem> category;
     callback clicked(string);
 
-    border-radius: 10px;
+    border-radius: 12px;
     background: root.category.bg-color;
-    border-width: 1px;
-    border-color: root.category.bg-color.brighter(0.1);
 
-    TouchArea {
-        clicked => {
-            root.clicked(root.category.id);
-        }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(root.category.id); }
     }
 
-    HorizontalBox {
-        alignment: center;
-        padding: 12px;
+    // Subtle hover overlay
+    if ta.has-hover: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: parent.border-radius;
+        background: #ffffff12;
+    }
 
-        HorizontalBox {
-            padding-top: 24px;
+    HorizontalLayout {
+        padding: 14px;
+        spacing: 12px;
+        alignment: start;
+
+        Rectangle {
+            width: 38px;
+            height: 38px;
             vertical-stretch: 0;
+            background: transparent;
             Image {
                 source: root.category.icon;
-                width: 36px;
-                height: 36px;
+                width: 38px;
+                height: 38px;
                 image-fit: contain;
-                vertical-stretch: 0;
             }
         }
 
-        VerticalBox {
-            padding-top: 32px;
-            padding-right: 32px;
-            Text {
-                text: root.category.label;
-                font-weight: 600;
-                font-size: 14px;
-                color: white;
-            }
+        Text {
+            text: root.category.label;
+            font-weight: 600;
+            font-size: 14px;
+            color: white;
+            vertical-alignment: center;
         }
     }
 }
