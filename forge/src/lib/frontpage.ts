@@ -11,7 +11,7 @@ export type Section =
 	| { type: 'p'; text: string }
 	| { type: 'ul'; items: string[] }
 	| { type: 'br' }
-	| { type: 'carousel'; breakpoint: number; flathub: boolean; items: CarouselItem[] }
+	| { type: 'carousel'; breakpoint: number; items: CarouselItem[] }
 	| { type: 'top' }
 	| { type: 'new' }
 	| { type: 'trending' }
@@ -67,7 +67,7 @@ function sectionToXml(s: Section): string {
 		case 'br':
 			return `<br />`;
 		case 'carousel':
-			return `<carousel breakpoint="${s.breakpoint}" flathub="${s.flathub}">\n${s.items.map(carouselItemToXml).join('\n')}\n</carousel>`;
+			return `<carousel breakpoint="${s.breakpoint}">\n${s.items.map(carouselItemToXml).join('\n')}\n</carousel>`;
 		case 'top':
 			return '<top />';
 		case 'new':
@@ -104,7 +104,7 @@ export function newSection(type: Section['type']): Section {
 		case 'br':
 			return { type };
 		case 'carousel':
-			return { type, breakpoint: 5, flathub: false, items: [] };
+			return { type, breakpoint: 5, items: [] };
 		case 'category':
 			return { type, value: '' };
 		case 'custom':

@@ -231,6 +231,44 @@ pub struct RawStory {
     pub featured_apps: Vec<RawCard>,
 }
 
+pub struct RawHeroItem {
+    pub id: String,
+    pub banner: Option<RawIcon>,
+    pub icon: Option<RawIcon>,
+    pub title: String,
+    pub body: String,
+    pub is_story: bool,
+    pub story_index: i32,
+}
+
+impl RawHeroItem {
+    fn to_slint(&self) -> crate::HeroItem {
+        crate::HeroItem {
+            id: SharedString::from(self.id.as_str()),
+            banner: self.banner.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+            icon: self.icon.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+            title: SharedString::from(self.title.as_str()),
+            body: SharedString::from(self.body.as_str()),
+            is_story: self.is_story,
+            story_index: self.story_index,
+        }
+    }
+}
+
+fn strip_html_tags(s: &str) -> String {
+    let mut result = String::new();
+    let mut in_tag = false;
+    for ch in s.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => result.push(ch),
+            _ => {}
+        }
+    }
+    result.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 pub struct RawCategoryData {
     pub id: String,
     pub label: String,
@@ -480,12 +518,14 @@ async fn load_raw_stories(
     out
 }
 
-/// One entry in the home-items model: either a text block or an app section.
+/// One entry in the home-items model: either a text block, app section, or carousel.
 struct RawHomeItem {
     item_type: &'static str,
     text: String,
     title: String,
     cards: Vec<RawCard>,
+    hero_items: Vec<RawHeroItem>,
+    editorial_items: Vec<RawHeroItem>,
 }
 
 pub async fn load_home(
@@ -530,65 +570,127 @@ pub async fn load_home(
         .iter()
         .any(|s| matches!(s, FpSection::Categories));
     let mut raw_items: Vec<RawHomeItem> = Vec::new();
-    let mut raw_story_candidates: Vec<crate::forge::ForgeStory> = Vec::new();
+    let mut raw_stories: Vec<RawStory> = Vec::new();
 
     for section in fp_sections {
         match section {
             FpSection::H1(t) => raw_items.push(RawHomeItem {
-                item_type: "h1",
-                text: t,
-                title: String::new(),
-                cards: vec![],
+                item_type: "h1", text: t, title: String::new(), cards: vec![],
+                hero_items: vec![], editorial_items: vec![],
             }),
             FpSection::H2(t) => raw_items.push(RawHomeItem {
-                item_type: "h2",
-                text: t,
-                title: String::new(),
-                cards: vec![],
+                item_type: "h2", text: t, title: String::new(), cards: vec![],
+                hero_items: vec![], editorial_items: vec![],
             }),
             FpSection::H3(t) => raw_items.push(RawHomeItem {
-                item_type: "h3",
-                text: t,
-                title: String::new(),
-                cards: vec![],
+                item_type: "h3", text: t, title: String::new(), cards: vec![],
+                hero_items: vec![], editorial_items: vec![],
             }),
             FpSection::P(t) => raw_items.push(RawHomeItem {
-                item_type: "p",
-                text: t,
-                title: String::new(),
-                cards: vec![],
+                item_type: "p", text: t, title: String::new(), cards: vec![],
+                hero_items: vec![], editorial_items: vec![],
             }),
             FpSection::Br => raw_items.push(RawHomeItem {
-                item_type: "br",
-                text: String::new(),
-                title: String::new(),
-                cards: vec![],
+                item_type: "br", text: String::new(), title: String::new(), cards: vec![],
+                hero_items: vec![], editorial_items: vec![],
             }),
             FpSection::Categories => raw_items.push(RawHomeItem {
-                item_type: "categories",
-                text: String::new(),
-                title: String::new(),
-                cards: vec![],
+                item_type: "categories", text: String::new(), title: String::new(), cards: vec![],
+                hero_items: vec![], editorial_items: vec![],
             }),
-            FpSection::Story(s) => raw_story_candidates.push(s),
-            FpSection::Carousel(ids) => {
-                let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
-                let cards = entries_to_cards(entries, &installed_ids).await;
+            FpSection::CarouselSection { breakpoint, items, .. } => {
+                use crate::forge::CarouselItem;
+
+                let hero_count = breakpoint.min(items.len());
+                // Stories from previous carousels; new stories append after this offset.
+                let story_offset = raw_stories.len();
+
+                let mut story_positions: Vec<usize> = Vec::new();
+                let mut story_forge: Vec<crate::forge::ForgeStory> = Vec::new();
+                let mut app_id_list: Vec<String> = Vec::new();
+
+                for (pos, item) in items.iter().enumerate() {
+                    match item {
+                        CarouselItem::Story(s) => {
+                            story_positions.push(pos);
+                            story_forge.push(s.clone());
+                        }
+                        CarouselItem::App(id) => {
+                            app_id_list.push(id.clone());
+                        }
+                    }
+                }
+
+                let indexed = story_forge.into_iter().enumerate().collect::<Vec<_>>();
+                let (loaded_stories, app_entries) = tokio::join!(
+                    load_raw_stories(indexed, proxy.as_ref(), &pwa_map, &installed_ids),
+                    resolve_ids(&app_id_list, proxy.as_ref(), &pwa_map),
+                );
+                let app_cards = entries_to_cards(app_entries, &installed_ids).await;
+
+                let card_by_id: std::collections::HashMap<&str, &RawCard> =
+                    app_cards.iter().map(|c| (c.id.as_str(), c)).collect();
+
+                let pos_to_story_idx: std::collections::HashMap<usize, usize> =
+                    story_positions.iter().enumerate().map(|(si, &pos)| (pos, si)).collect();
+
+                let mut hero_items: Vec<RawHeroItem> = Vec::new();
+                let mut editorial_items: Vec<RawHeroItem> = Vec::new();
+
+                for (pos, carousel_item) in items.iter().enumerate() {
+                    let hero_item = match carousel_item {
+                        CarouselItem::Story(s) => {
+                            let story_idx = pos_to_story_idx[&pos];
+                            let global_idx = story_offset + story_idx;
+                            let rs = loaded_stories.get(story_idx);
+                            RawHeroItem {
+                                id: rs.map(|r| r.id.clone()).unwrap_or_else(|| format!("story-{global_idx}")),
+                                banner: rs.and_then(|r| r.screenshot.clone()),
+                                icon: None,
+                                title: s.title.clone(),
+                                body: strip_html_tags(&s.body),
+                                is_story: true,
+                                story_index: global_idx as i32,
+                            }
+                        }
+                        CarouselItem::App(id) => {
+                            let card = card_by_id.get(id.as_str()).copied();
+                            RawHeroItem {
+                                id: id.clone(),
+                                banner: None,
+                                icon: card.and_then(|c| c.icon.clone()),
+                                title: card.map(|c| c.name.clone()).unwrap_or_default(),
+                                body: card.map(|c| c.summary.clone()).unwrap_or_default(),
+                                is_story: false,
+                                story_index: -1,
+                            }
+                        }
+                    };
+                    if pos < hero_count {
+                        hero_items.push(hero_item);
+                    } else {
+                        editorial_items.push(hero_item);
+                    }
+                }
+
+                // Accumulate stories across all carousels; don't overwrite.
+                raw_stories.extend(loaded_stories);
+
                 raw_items.push(RawHomeItem {
-                    item_type: "app-row",
+                    item_type: "carousel",
                     text: String::new(),
                     title: String::new(),
-                    cards,
+                    cards: vec![],
+                    hero_items,
+                    editorial_items,
                 });
             }
             FpSection::Custom { title, app_ids } => {
                 let entries = resolve_ids(&app_ids, proxy.as_ref(), &pwa_map).await;
                 let cards = entries_to_cards(entries, &installed_ids).await;
                 raw_items.push(RawHomeItem {
-                    item_type: "app-row",
-                    text: String::new(),
-                    title,
-                    cards,
+                    item_type: "app-row", text: String::new(), title, cards,
+                    hero_items: vec![], editorial_items: vec![],
                 });
             }
             FpSection::Top => {
@@ -596,10 +698,8 @@ pub async fn load_home(
                 let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
                 let cards = entries_to_cards(entries, &installed_ids).await;
                 raw_items.push(RawHomeItem {
-                    item_type: "app-grid",
-                    text: String::new(),
-                    title: "Popular".into(),
-                    cards,
+                    item_type: "app-grid", text: String::new(), title: "Popular".into(), cards,
+                    hero_items: vec![], editorial_items: vec![],
                 });
             }
             FpSection::New => {
@@ -607,10 +707,8 @@ pub async fn load_home(
                 let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
                 let cards = entries_to_cards(entries, &installed_ids).await;
                 raw_items.push(RawHomeItem {
-                    item_type: "app-row",
-                    text: String::new(),
-                    title: tr!("Recently Added").to_string(),
-                    cards,
+                    item_type: "app-row", text: String::new(), title: tr!("Recently Added").to_string(), cards,
+                    hero_items: vec![], editorial_items: vec![],
                 });
             }
             FpSection::Trending => {
@@ -618,10 +716,8 @@ pub async fn load_home(
                 let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
                 let cards = entries_to_cards(entries, &installed_ids).await;
                 raw_items.push(RawHomeItem {
-                    item_type: "app-row",
-                    text: String::new(),
-                    title: tr!("Trending").to_string(),
-                    cards,
+                    item_type: "app-row", text: String::new(), title: tr!("Trending").to_string(), cards,
+                    hero_items: vec![], editorial_items: vec![],
                 });
             }
             FpSection::Charts { cards: as_cards } => {
@@ -630,28 +726,12 @@ pub async fn load_home(
                 let cards = entries_to_cards(entries, &installed_ids).await;
                 raw_items.push(RawHomeItem {
                     item_type: if as_cards { "app-grid" } else { "app-row" },
-                    text: String::new(),
-                    title: tr!("Charts").to_string(),
-                    cards,
+                    text: String::new(), title: tr!("Charts").to_string(), cards,
+                    hero_items: vec![], editorial_items: vec![],
                 });
             }
         }
     }
-    let lang_prefix = lang.split(['-', '_']).next().unwrap_or("en").to_string();
-    let mut filtered_stories: Vec<crate::forge::ForgeStory> = raw_story_candidates
-        .iter()
-        .filter(|s| s.lang == lang_prefix)
-        .cloned()
-        .collect();
-    if filtered_stories.is_empty() {
-        filtered_stories = raw_story_candidates
-            .into_iter()
-            .filter(|s| s.lang == "en")
-            .collect();
-    }
-    let indexed_stories: Vec<(usize, crate::forge::ForgeStory)> =
-        filtered_stories.into_iter().enumerate().collect();
-    let raw_stories = load_raw_stories(indexed_stories, proxy.as_ref(), &pwa_map, &installed_ids).await;
     let raw_cats: Vec<RawCategoryData> = if show_categories {
         let cat_defs = [
             ("AudioVideo", "Multimedia", "applications-multimedia"),
@@ -692,6 +772,12 @@ pub async fn load_home(
                 text: item.text.into(),
                 title: item.title.into(),
                 apps: cards_to_model(item.cards),
+                hero_items: slint::ModelRc::new(slint::VecModel::from(
+                    item.hero_items.iter().map(|h| h.to_slint()).collect::<Vec<_>>(),
+                )),
+                editorial_items: slint::ModelRc::new(slint::VecModel::from(
+                    item.editorial_items.iter().map(|h| h.to_slint()).collect::<Vec<_>>(),
+                )),
             })
             .collect();
 

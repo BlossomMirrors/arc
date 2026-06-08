@@ -14,6 +14,13 @@ struct ChartEntry {
     pub id: String,
 }
 
+/// An item inside a `<carousel>` block, preserving document order.
+#[derive(Debug, Clone)]
+pub enum CarouselItem {
+    Story(ForgeStory),
+    App(String),
+}
+
 /// A section parsed from `/api/frontpage`.
 #[derive(Debug, Clone)]
 pub enum FpSection {
@@ -24,14 +31,21 @@ pub enum FpSection {
     P(String),
     Br,
     // App store sections
-    Carousel(Vec<String>),
-    Custom { title: String, app_ids: Vec<String> },
+    CarouselSection {
+        breakpoint: usize,
+        items: Vec<CarouselItem>,
+    },
+    Custom {
+        title: String,
+        app_ids: Vec<String>,
+    },
     Top,
     New,
     Trending,
-    Charts { cards: bool },
+    Charts {
+        cards: bool,
+    },
     Categories,
-    Story(ForgeStory),
 }
 
 pub async fn fetch_frontpage() -> Vec<FpSection> {
@@ -104,12 +118,12 @@ pub async fn fetch_pwas(lang: &str) -> Vec<PwaApp> {
 }
 
 /// A story element parsed from the frontpage XML (inside a carousel).
+/// Language selection happens at parse time via `extract_localized_title`.
 #[derive(Debug, Clone)]
 pub struct ForgeStory {
     pub banner_url: Option<String>,
     pub title: String,
     pub body: String,
-    pub lang: String,
 }
 
 pub async fn post_install(appid: String) {
@@ -210,20 +224,24 @@ fn parse_frontpage(xml: &str) -> Vec<FpSection> {
                 pos = end;
             }
             "carousel" if !self_closing => {
+                let breakpoint = tag
+                    .find("breakpoint=\"")
+                    .and_then(|p| {
+                        let after = &tag[p + 12..];
+                        after
+                            .find('"')
+                            .and_then(|e| after[..e].parse::<usize>().ok())
+                    })
+                    .unwrap_or(usize::MAX);
                 const CLOSE: &str = "</carousel>";
                 let body_start = gt + 1;
                 let body_end = xml[body_start..]
                     .find(CLOSE)
                     .map(|i| i + body_start)
                     .unwrap_or(xml.len());
-                let body = &xml[body_start..body_end];
-                let ids = extract_app_ids(body);
-                let stories = extract_stories(body);
-                if !ids.is_empty() {
-                    sections.push(FpSection::Carousel(ids));
-                }
-                for s in stories {
-                    sections.push(FpSection::Story(s));
+                let items = extract_carousel_items(&xml[body_start..body_end]);
+                if !items.is_empty() {
+                    sections.push(FpSection::CarouselSection { breakpoint, items });
                 }
                 pos = body_end + CLOSE.len();
             }
@@ -266,94 +284,162 @@ fn extract_text_content(xml: &str, start: usize, tag: &str) -> (String, usize) {
     (text, end + close.len())
 }
 
-/// Parse all `<story>` elements from a block of XML and return them as `ForgeStory` values.
-fn extract_stories(xml: &str) -> Vec<ForgeStory> {
-    let mut stories = Vec::new();
-    let mut s = xml;
-    while let Some(rel) = s.find("<story") {
-        let rest = &s[rel..];
-        let tag_end = match rest.find('>') {
-            Some(e) => e,
-            None => break,
-        };
-        let tag = &rest[1..tag_end]; // e.g. `story banner="..."`
-
-        // Extract banner attribute
-        let banner_url = tag
-            .find("banner=\"")
-            .map(|p| {
-                let after = &tag[p + 8..];
-                after.find('"').map(|e| after[..e].to_string())
+/// Extract all `(lang, title)` pairs from the inner XML of a `<story>` element.
+fn extract_all_titles(xml: &str) -> Vec<(String, String)> {
+    let mut titles = Vec::new();
+    let mut t = xml;
+    while let Some(tp) = t.find("<title") {
+        let rest = &t[tp..];
+        let Some(tgt) = rest.find('>') else { break };
+        let tag = &rest[1..tgt];
+        let lang = tag
+            .find("lang=\"")
+            .and_then(|p| {
+                let a = &tag[p + 6..];
+                a.find('"').map(|e| a[..e].to_string())
             })
-            .flatten();
-
-        let body_start = rel + tag_end + 1;
-
-        // Find closing </story>
-        const CLOSE: &str = "</story>";
-        let body_end = match s[body_start..].find(CLOSE) {
-            Some(e) => body_start + e,
-            None => break,
-        };
-        let inner = &s[body_start..body_end];
-
-        // Extract all <title lang="XX"> entries
-        let mut titles: Vec<(String, String)> = Vec::new();
-        let mut t = inner;
-        while let Some(tp) = t.find("<title") {
-            let rest_t = &t[tp..];
-            let tgt = match rest_t.find('>') {
-                Some(e) => e,
-                None => break,
-            };
-            let tag_t = &rest_t[1..tgt];
-            let lang = tag_t
-                .find("lang=\"")
-                .map(|p| {
-                    let a = &tag_t[p + 6..];
-                    a.find('"')
-                        .map(|e| a[..e].to_string())
-                        .unwrap_or_else(|| "en".to_string())
-                })
-                .unwrap_or_else(|| "en".to_string());
-
-            let text_start = tp + tgt + 1;
-            let text_end = t[text_start..]
-                .find("</title>")
-                .map(|e| text_start + e)
-                .unwrap_or(t.len());
-            let title_text = t[text_start..text_end].trim().to_string();
-
-            if !title_text.is_empty() {
-                titles.push((lang, title_text));
-            }
-            t = &t[text_end + 8..]; // skip past </title>
+            .unwrap_or_else(|| "en".to_string());
+        let text_start = tp + tgt + 1;
+        let text_end = t[text_start..]
+            .find("</title>")
+            .map(|e| text_start + e)
+            .unwrap_or(t.len());
+        let text = t[text_start..text_end].trim().to_string();
+        if !text.is_empty() {
+            titles.push((lang, text));
         }
-
-        // Extract <body>
-        let body_text = inner
-            .find("<body>")
-            .map(|bp| {
-                let after = &inner[bp + 6..];
-                after
-                    .find("</body>")
-                    .map(|e| after[..e].trim().to_string())
-                    .unwrap_or_default()
-            })
-            .unwrap_or_default();
-
-        for (lang, title) in titles {
-            stories.push(ForgeStory {
-                banner_url: banner_url.clone(),
-                title,
-                body: body_text.clone(),
-                lang,
-            });
-        }
-
-        s = &s[body_end + CLOSE.len()..];
+        t = &t[text_end + 8..];
     }
-    stories
+    titles
+}
+
+/// Intermediate story before locale selection.
+struct RawStory {
+    banner_url: Option<String>,
+    body: String,
+    titles: Vec<(String, String)>,
+}
+
+enum RawCarouselItem {
+    App(String),
+    Story(RawStory),
+}
+
+/// Parse all items inside a `<carousel>` body in document order.
+///
+/// Stories whose `<title>` elements do not match the system locale (or its
+/// "en" fallback) are excluded — each logical story is represented only once,
+/// in the user's preferred language.
+fn extract_carousel_items(xml: &str) -> Vec<CarouselItem> {
+    let sys = sys_locale::get_locale().unwrap_or_default();
+    let user_lang = sys.split(['_', '-']).next().unwrap_or("en").to_string();
+
+    // Pass 1: collect raw items keeping every title lang
+    let mut raw: Vec<RawCarouselItem> = Vec::new();
+    let mut pos = 0;
+    while pos < xml.len() {
+        let Some(rel_lt) = xml[pos..].find('<') else {
+            break;
+        };
+        let lt = pos + rel_lt;
+        let Some(rel_gt) = xml[lt + 1..].find('>') else {
+            break;
+        };
+        let gt = lt + 1 + rel_gt;
+
+        let chunk = xml[lt + 1..gt].trim();
+        if chunk.starts_with('/') || chunk.starts_with('!') || chunk.starts_with('?') {
+            pos = gt + 1;
+            continue;
+        }
+
+        let self_closing = chunk.ends_with('/');
+        let tag = chunk.trim_end_matches('/').trim();
+        let name = tag.split_ascii_whitespace().next().unwrap_or("");
+
+        match name {
+            "app" => {
+                if let Some(id) = tag.find("id=\"").and_then(|p| {
+                    let after = &tag[p + 4..];
+                    after.find('"').map(|e| after[..e].trim().to_string())
+                }) {
+                    if !id.is_empty() {
+                        raw.push(RawCarouselItem::App(id));
+                    }
+                }
+                pos = gt + 1;
+            }
+            "story" if !self_closing => {
+                let banner_url = tag.find("banner=\"").and_then(|p| {
+                    let after = &tag[p + 8..];
+                    after.find('"').map(|e| after[..e].to_string())
+                });
+
+                const CLOSE: &str = "</story>";
+                let body_start = gt + 1;
+                let body_end = xml[body_start..]
+                    .find(CLOSE)
+                    .map(|i| i + body_start)
+                    .unwrap_or(xml.len());
+                let inner = &xml[body_start..body_end];
+
+                let titles = extract_all_titles(inner);
+                let body_text = inner
+                    .find("<body>")
+                    .and_then(|bp| {
+                        let after = &inner[bp + 6..];
+                        after.find("</body>").map(|e| after[..e].trim().to_string())
+                    })
+                    .unwrap_or_default();
+
+                if !titles.is_empty() {
+                    raw.push(RawCarouselItem::Story(RawStory {
+                        banner_url,
+                        body: body_text,
+                        titles,
+                    }));
+                }
+                pos = body_end + CLOSE.len();
+            }
+            _ => {
+                pos = gt + 1;
+            }
+        }
+    }
+
+    // Pass 2: locale selection
+    // If any story has a title for the user's locale, prefer that; otherwise
+    // fall back to "en" so e.g. a French user still sees the English stories.
+    let has_user_lang = raw.iter().any(|item| {
+        matches!(item, RawCarouselItem::Story(s) if s.titles.iter().any(|(l, _)| l == &user_lang))
+    });
+    let preferred: &str = if has_user_lang { &user_lang } else { "en" };
+
+    let mut items = Vec::new();
+    for item in raw {
+        match item {
+            RawCarouselItem::App(id) => items.push(CarouselItem::App(id)),
+            RawCarouselItem::Story(s) => {
+                // Only include this story element if it carries the preferred lang.
+                // Stories with a single lang that isn't preferred belong to another locale.
+                let title = s
+                    .titles
+                    .iter()
+                    .find(|(l, _)| l.as_str() == preferred)
+                    .map(|(_, t)| t.clone());
+
+                if let Some(title) = title {
+                    items.push(CarouselItem::Story(ForgeStory {
+                        banner_url: s.banner_url,
+                        title,
+                        body: s.body,
+                    }));
+                }
+            }
+        }
+    }
+
+    items
 }
 
 fn extract_app_ids(xml: &str) -> Vec<String> {

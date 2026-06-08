@@ -618,7 +618,7 @@
 										>{SECTION_LABELS[section.type]?.()}</span
 									>
 									<span class="text-xs text-muted-foreground/50">
-										{#if section.type === 'carousel'}{section.items.length} items · bp={section.breakpoint}
+										{#if section.type === 'carousel'}{section.items.length} items · breakpoint={section.breakpoint}
 										{:else if section.type === 'category'}{section.value || '—'}
 										{:else if section.type === 'custom'}{section.titles[0]?.text || '—'}
 										{:else if section.type === 'charts'}cards={section.cards}
@@ -628,7 +628,7 @@
 								{#if expanded}
 									<div class="border-t border-border/40 px-4 py-3 text-sm">
 										{#if section.type === 'carousel'}
-											<div class="mb-3 flex gap-4">
+											<div class="mb-3">
 												<label class="space-y-1">
 													<span class="text-xs text-muted-foreground"
 														>{m.frontpage_breakpoint()}</span
@@ -640,9 +640,6 @@
 														oninput={mark}
 														min={1}
 													/>
-												</label>
-												<label class="flex items-center gap-2 self-end pb-0.5 text-sm">
-													<input type="checkbox" bind:checked={section.flathub} onchange={mark} /> Flathub
 												</label>
 											</div>
 											{#each section.items as item, j (j)}

@@ -62,11 +62,23 @@ export struct ExtensionItem {
     installed: bool,
 }
 
+export struct HeroItem {
+    id: string,
+    banner: image,       // story banner (may be empty for apps)
+    icon: image,         // app icon (may be empty for stories)
+    title: string,
+    body: string,
+    is-story: bool,
+    story-index: int,    // index into home-stories (-1 for apps)
+}
+
 export struct HomeItem {
-    item-type: string,   // "h1"|"h2"|"h3"|"p"|"br"|"app-row"|"app-grid"|"categories"
+    item-type: string,   // "h1"|"h2"|"h3"|"p"|"br"|"app-row"|"app-grid"|"categories"|"carousel"
     text: string,        // text sections
     title: string,       // optional heading for app sections
     apps: [AppCardData],
+    hero-items: [HeroItem],
+    editorial-items: [HeroItem],
 }
 
 export struct RemoteItem {

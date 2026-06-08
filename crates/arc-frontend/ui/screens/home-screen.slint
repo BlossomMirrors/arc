@@ -7,8 +7,9 @@ import {
 import { CategoryCard } from "../components/category-card.slint";
 import { PopularCard } from "../components/popular-card.slint";
 import { Carousel } from "../components/carousel.slint";
-import { StoryCard } from "../components/story-card.slint";
-import { HomeItem, AppCardData, CategoryItem, StoryItem } from "../types.slint";
+import { HeroCarousel } from "../components/hero-carousel.slint";
+import { EditorialCard } from "../components/editorial-card.slint";
+import { HomeItem, AppCardData, CategoryItem, StoryItem, HeroItem } from "../types.slint";
 
 export component HomeScreen inherits Rectangle {
     in property <[HomeItem]> home-items;
@@ -44,39 +45,47 @@ export component HomeScreen inherits Rectangle {
             spacing: 0px;
             width: scroller.visible-width;
 
-            if root.home-stories.length > 0: VerticalLayout {
-                padding-bottom: 8px;
-                spacing: 0px;
+            for item[i] in root.home-items: VerticalLayout {
+                padding-top: item.item-type == "app-row" || item.item-type == "app-grid" || item.item-type == "categories" || item.item-type == "carousel" ? 20px : 6px;
 
-                stories-flick := Flickable {
-                    width: parent.width;
-                    height: 210px;
-                    viewport-width: root.home-stories.length * 316px;
-                    viewport-height: 210px;
+                if item.item-type == "carousel": VerticalLayout {
+                    spacing: 8px;
 
-                    for s[i] in root.home-stories: StoryCard {
-                        x: i * 316px;
-                        y: 0px;
-                        story: s;
-                        clicked(_id) => {
-                            root.story-selected(s);
+                    if item.hero-items.length > 0: HeroCarousel {
+                        width: parent.width;
+                        items: item.hero-items;
+                        tr-installed: root.tr-installed;
+                        story-clicked(idx) => {
+                            if idx >= 0 && idx < root.home-stories.length {
+                                root.story-selected(root.home-stories[idx]);
+                            }
+                        }
+                        app-clicked(id) => { root.detail-requested(id); }
+                    }
+
+                    if item.editorial-items.length > 0: Flickable {
+                        width: parent.width;
+                        height: 178px;
+                        viewport-width: item.editorial-items.length * 252px;
+                        viewport-height: 178px;
+                        interactive: true;
+
+                        for eitem[j] in item.editorial-items: EditorialCard {
+                            x: j * 252px;
+                            y: 4px;
+                            item: eitem;
+                            clicked(id, is-story) => {
+                                if is-story {
+                                    if eitem.story-index >= 0 && eitem.story-index < root.home-stories.length {
+                                        root.story-selected(root.home-stories[eitem.story-index]);
+                                    }
+                                } else {
+                                    root.detail-requested(id);
+                                }
+                            }
                         }
                     }
                 }
-            }
-
-            // "Recommended Apps" heading shown between stories and the app sections
-            if root.home-stories.length > 0 && root.home-items.length > 0: VerticalLayout {
-                padding-top: 20px;
-                Text {
-                    text: root.tr-recommended-apps;
-                    font-size: 16px;
-                    font-weight: 700;
-                }
-            }
-
-            for item[i] in root.home-items: VerticalLayout {
-                padding-top: item.item-type == "app-row" || item.item-type == "app-grid" || item.item-type == "categories" ? 20px : 6px;
 
                 if item.item-type == "h1": Text {
                     text: item.text;

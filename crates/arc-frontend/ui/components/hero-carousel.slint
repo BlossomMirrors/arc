@@ -1,0 +1,201 @@
+import { Palette } from "std-widgets.slint";
+import { HeroItem } from "../types.slint";
+
+export component HeroCarousel inherits Rectangle {
+    in property <[HeroItem]> items;
+    in property <string> tr-installed: "Installed";
+
+    // Emitted for story items (navigate to story detail)
+    callback story-clicked(int);
+    // Emitted for app items (navigate to app detail)
+    callback app-clicked(string);
+
+    private property <int> current-index: 0;
+
+    height: 340px;
+    clip: true;
+    border-radius: 14px;
+    background: Palette.alternate-background;
+
+    // Lowest z-order: used only for has-hover to pause auto-advance
+    hover-bg := TouchArea {
+        x: 0; y: 0;
+        width: parent.width;
+        height: parent.height;
+    }
+
+    Timer {
+        interval: 5s;
+        running: root.items.length > 1 && !hover-bg.has-hover;
+        triggered => {
+            root.current-index = mod(root.current-index + 1, root.items.length);
+        }
+    }
+
+    // Render all items stacked; only the current one is fully visible
+    for item[i] in root.items: Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        opacity: i == root.current-index ? 1.0 : 0.0;
+        animate opacity { duration: 400ms; easing: ease-in-out; }
+
+        // Story: full-coverage banner image
+        if item.is-story && item.banner.width > 0: Image {
+            source: item.banner;
+            width: parent.width;
+            height: parent.height;
+            image-fit: cover;
+        }
+
+        // Story fallback / app: dark gradient background
+        if !item.is-story || item.banner.width == 0: Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: @linear-gradient(135deg, #1a1a3e 0%, #0f0f1f 100%);
+        }
+
+        // App: large icon centered
+        if !item.is-story && item.icon.width > 0: Rectangle {
+            x: (parent.width - 110px) / 2;
+            y: 50px;
+            width: 110px;
+            height: 110px;
+            border-radius: 24px;
+            background: #ffffff18;
+            border-width: 1px;
+            border-color: #ffffff25;
+
+            Image {
+                source: item.icon;
+                width: 88px;
+                height: 88px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                image-fit: contain;
+            }
+        }
+
+        // Bottom gradient overlay (stories + apps)
+        Rectangle {
+            x: 0;
+            y: parent.height - 160px;
+            width: parent.width;
+            height: 160px;
+            background: @linear-gradient(180deg, transparent 0%, #000000cc 100%);
+        }
+
+        // Title + body (bottom-left)
+        VerticalLayout {
+            x: 20px;
+            y: parent.height - 120px;
+            width: parent.width - 56px;
+            spacing: 6px;
+
+            Text {
+                text: item.title;
+                font-size: item.is-story ? 22px : 20px;
+                font-weight: 700;
+                color: white;
+                wrap: word-wrap;
+                overflow: elide;
+            }
+
+            if item.body != "": Text {
+                text: item.body;
+                font-size: 13px;
+                color: #ffffffbb;
+                wrap: word-wrap;
+                overflow: elide;
+                max-height: 36px;
+            }
+        }
+
+        // Clickable touch area for the whole card
+        ta := TouchArea {
+            enabled: i == root.current-index;
+            mouse-cursor: pointer;
+            clicked => {
+                if item.is-story {
+                    root.story-clicked(item.story-index);
+                } else {
+                    root.app-clicked(item.id);
+                }
+            }
+        }
+    }
+
+    // Left arrow
+    if root.items.length > 1: Rectangle {
+        x: 12px;
+        y: (parent.height - 44px) / 2;
+        width: 36px;
+        height: 44px;
+        border-radius: 8px;
+        background: #000000aa;
+        opacity: root.current-index > 0 ? 1.0 : 0.0;
+        animate opacity { duration: 150ms; }
+
+        TouchArea {
+            enabled: root.current-index > 0;
+            mouse-cursor: pointer;
+            clicked => {
+                root.current-index = root.current-index - 1;
+            }
+        }
+
+        Image {
+            source: @image-url("../../assets/chevron-left.svg");
+            width: 16px; height: 16px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            image-fit: contain;
+            colorize: white;
+        }
+    }
+
+    // Right arrow
+    if root.items.length > 1: Rectangle {
+        x: parent.width - 48px;
+        y: (parent.height - 44px) / 2;
+        width: 36px;
+        height: 44px;
+        border-radius: 8px;
+        background: #000000aa;
+        opacity: root.current-index < root.items.length - 1 ? 1.0 : 0.0;
+        animate opacity { duration: 150ms; }
+
+        TouchArea {
+            enabled: root.current-index < root.items.length - 1;
+            mouse-cursor: pointer;
+            clicked => {
+                root.current-index = root.current-index + 1;
+            }
+        }
+
+        Image {
+            source: @image-url("../../assets/chevron-right.svg");
+            width: 16px; height: 16px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            image-fit: contain;
+            colorize: white;
+        }
+    }
+
+    // Page dots
+    if root.items.length > 1: HorizontalLayout {
+        x: (parent.width - (root.items.length * 10px)) / 2;
+        y: parent.height - 18px;
+        spacing: 4px;
+
+        for item[i] in root.items: Rectangle {
+            width: i == root.current-index ? 18px : 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: i == root.current-index ? white : #ffffff60;
+            animate width { duration: 200ms; easing: ease-in-out; }
+        }
+    }
+}

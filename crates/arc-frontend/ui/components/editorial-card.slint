@@ -1,0 +1,99 @@
+import { Palette } from "std-widgets.slint";
+import { HeroItem } from "../types.slint";
+
+export component EditorialCard inherits Rectangle {
+    in property <HeroItem> item;
+    callback clicked(string, bool);  // (id, is-story)
+
+    width: 240px;
+    height: 170px;
+    border-radius: 12px;
+    clip: true;
+    background: Palette.alternate-background;
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked(root.item.id, root.item.is-story);
+        }
+    }
+
+    // Story: full-coverage banner
+    if root.item.is-story && root.item.banner.width > 0: Image {
+        source: root.item.banner;
+        width: parent.width;
+        height: parent.height;
+        image-fit: cover;
+    }
+
+    // App / no-banner fallback: gradient
+    if !root.item.is-story || root.item.banner.width == 0: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: @linear-gradient(135deg, #1e2240 0%, #0d0d1a 100%);
+    }
+
+    // App: icon centered in the upper half
+    if !root.item.is-story && root.item.icon.width > 0: Rectangle {
+        x: (parent.width - 64px) / 2;
+        y: 24px;
+        width: 64px;
+        height: 64px;
+        border-radius: 14px;
+        background: #ffffff15;
+        border-width: 1px;
+        border-color: #ffffff20;
+
+        Image {
+            source: root.item.icon;
+            width: 48px;
+            height: 48px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            image-fit: contain;
+        }
+    }
+
+    // Bottom gradient overlay
+    Rectangle {
+        x: 0;
+        y: parent.height - 90px;
+        width: parent.width;
+        height: 90px;
+        background: @linear-gradient(180deg, transparent 0%, #000000cc 100%);
+    }
+
+    // Title + subtitle
+    VerticalLayout {
+        x: 12px;
+        y: parent.height - 72px;
+        width: parent.width - 24px;
+        spacing: 3px;
+
+        Text {
+            text: root.item.title;
+            font-size: 13px;
+            font-weight: 700;
+            color: white;
+            overflow: elide;
+        }
+
+        if root.item.body != "": Text {
+            text: root.item.body;
+            font-size: 11px;
+            color: #ffffffaa;
+            overflow: elide;
+        }
+    }
+
+    // Hover border
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: parent.border-radius;
+        border-width: ta.has-hover ? 2px : 1px;
+        border-color: ta.has-hover ? #ffffff44 : #ffffff18;
+        background: transparent;
+        animate border-width { duration: 100ms; }
+    }
+}
