@@ -1,6 +1,6 @@
 services:
   arc-api:
-    build: .
+    image: registry.blossomos.org/blossom/arc-store/arc/main:latest
     ports:
       - "1312:1312"
     environment:
