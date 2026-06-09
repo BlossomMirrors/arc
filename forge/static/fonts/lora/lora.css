@@ -1,8 +1,0 @@
-/* lora-italic */
-@font-face {
-	font-family: "Lora";
-	font-style: italic;
-	font-weight: 400 700;
-	font-stretch: 100%;
-	src: url(Lora-Italic.ttf) format("truetype");
-}
