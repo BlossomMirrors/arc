@@ -67,6 +67,11 @@
 	"cmd_category": "Category",
 	"cmd_custom": "Custom",
 	"cmd_charts": "Charts",
+	"cmd_links": "Links",
+	"frontpage_links_items": "Links",
+	"frontpage_links_text": "Text",
+	"frontpage_links_href": "URL",
+	"frontpage_links_story_index": "Story index",
 	"pwas_delete_confirm": "Are you sure you want to delete this app?",
 	"form_translations": "Translations",
 	"form_translation_fallback_note": "Optional — falls back to English if left empty"

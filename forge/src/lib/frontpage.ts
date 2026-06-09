@@ -4,6 +4,11 @@ export type CarouselApp = { type: 'app'; id: string };
 export type CarouselStory = { type: 'story'; banner: string; titles: LangString[]; body: string };
 export type CarouselItem = CarouselApp | CarouselStory;
 
+export type LinksItem =
+	| { kind: 'url'; text: string; href: string }
+	| { kind: 'app'; id: string }
+	| { kind: 'story'; banner: string; titles: LangString[]; body: string };
+
 export type Section =
 	| { type: 'h1'; text: string }
 	| { type: 'h2'; text: string }
@@ -18,7 +23,8 @@ export type Section =
 	| { type: 'categories' }
 	| { type: 'category'; value: string }
 	| { type: 'custom'; titles: LangString[]; apps: string[] }
-	| { type: 'charts'; cards: boolean };
+	| { type: 'charts'; cards: boolean }
+	| { type: 'links'; titles: LangString[]; items: LinksItem[] };
 
 export const HTML_TYPES = ['h1', 'h2', 'h3', 'p', 'ul', 'br'] as const;
 export const APP_TYPES = [
@@ -29,7 +35,8 @@ export const APP_TYPES = [
 	'categories',
 	'category',
 	'custom',
-	'charts'
+	'charts',
+	'links'
 ] as const;
 
 function esc(s: string) {
@@ -85,6 +92,22 @@ function sectionToXml(s: Section): string {
 		}
 		case 'charts':
 			return `<charts cards="${s.cards}" />`;
+		case 'links': {
+			const titles = langStrings(s.titles, '    ');
+			const items = s.items
+				.map((item) => {
+					if (item.kind === 'url') {
+						return `    <a href="${esc(item.href)}">${esc(item.text)}</a>`;
+					} else if (item.kind === 'app') {
+						return `    <app id="${esc(item.id)}" />`;
+					} else {
+						const storyTitles = langStrings(item.titles, '        ');
+						return `    <story banner="${esc(item.banner)}">\n${storyTitles}\n        <body>\n            ${item.body}\n        </body>\n    </story>`;
+					}
+				})
+				.join('\n');
+			return `<links>\n${titles}\n${items}\n</links>`;
+		}
 	}
 }
 
@@ -111,6 +134,8 @@ export function newSection(type: Section['type']): Section {
 			return { type, titles: [{ lang: 'en', text: '' }], apps: [] };
 		case 'charts':
 			return { type, cards: false };
+		case 'links':
+			return { type, titles: [{ lang: 'en', text: '' }], items: [] };
 		default:
 			return { type } as Section;
 	}

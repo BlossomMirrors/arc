@@ -22,6 +22,7 @@ import {
     CategoryItem,
     HomeItem,
     HeroItem,
+    LinkItem,
     TransactionItem,
     RemoteItem,
     ExtensionItem,
@@ -35,6 +36,7 @@ export {
     CategoryItem,
     HomeItem,
     HeroItem,
+    LinkItem,
     TransactionItem,
     RemoteItem,
     ExtensionItem,
@@ -316,6 +318,9 @@ export component AppWindow inherits Window {
                     root.current-story = story;
                     root.prev-view = "home";
                     root.current-view = "story";
+                }
+                open-url-requested(url) => {
+                    root.open-url-requested(url);
                 }
             }
 

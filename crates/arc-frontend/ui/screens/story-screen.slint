@@ -93,22 +93,54 @@ export component StoryScreen inherits Rectangle {
                     color: Palette.foreground;
                 }
 
-                // Description blocks (HTML body parsed into paragraphs/headings)
+                // Description blocks (HTML body parsed into paragraphs/headings/images)
                 for block in root.story.description-blocks: Rectangle {
                     width: parent.width;
-                    height: block-text.preferred-height + (block.is-heading ? 24px : 12px);
+                    height: block.is-image
+                        ? (parent.width * 9 / 16 + 20px)
+                        : (block-text.preferred-height + (block.is-heading ? 24px : 12px));
 
+                    // Text (always present; zero-width when this is an image block so it
+                    // contributes zero preferred-height and is invisible)
                     block-text := Text {
                         x: 0;
                         y: block.is-heading ? 16px : 8px;
-                        width: parent.width;
-                        text: block.text;
+                        width: block.is-image ? 0px : parent.width;
+                        text: block.is-image ? "" : block.text;
                         font-size: block.is-heading ? 16px : 14px;
                         font-weight: block.is-heading ? 700 : (block.is-bold ? 600 : 400);
                         color: block.is-heading
                             ? Palette.foreground
                             : Palette.foreground.transparentize(0.2);
                         wrap: word-wrap;
+                    }
+
+                    // Image (only rendered for image blocks)
+                    if block.is-image: Rectangle {
+                        y: 0px;
+                        width: parent.width;
+                        height: parent.width * 9 / 16;
+                        border-radius: 10px;
+                        clip: true;
+                        background: Palette.alternate-background;
+
+                        if block.image.width > 0: Image {
+                            source: block.image;
+                            width: parent.width;
+                            height: parent.height;
+                            image-fit: cover;
+                        }
+                    }
+
+                    // Alt text caption below image
+                    if block.is-image && block.text != "": Text {
+                        x: 0;
+                        y: parent.width * 9 / 16 + 4px;
+                        width: parent.width;
+                        text: block.text;
+                        font-size: 11px;
+                        color: Palette.foreground.transparentize(0.5);
+                        horizontal-alignment: center;
                     }
                 }
 

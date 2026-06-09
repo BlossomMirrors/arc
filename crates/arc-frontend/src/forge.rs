@@ -21,6 +21,14 @@ pub enum CarouselItem {
     App(String),
 }
 
+/// A link item inside a `<links>` block.
+#[derive(Debug, Clone)]
+pub enum FpLinksItem {
+    Story(ForgeStory),
+    App(String),
+    Url { text: String, href: String },
+}
+
 /// A section parsed from `/api/frontpage`.
 #[derive(Debug, Clone)]
 pub enum FpSection {
@@ -46,6 +54,10 @@ pub enum FpSection {
         cards: bool,
     },
     Categories,
+    LinksSection {
+        title: String,
+        items: Vec<FpLinksItem>,
+    },
 }
 
 pub async fn fetch_frontpage() -> Vec<FpSection> {
@@ -260,6 +272,19 @@ fn parse_frontpage(xml: &str) -> Vec<FpSection> {
                 }
                 pos = body_end + CLOSE.len();
             }
+            "links" if !self_closing => {
+                const CLOSE: &str = "</links>";
+                let body_start = gt + 1;
+                let body_end = xml[body_start..]
+                    .find(CLOSE)
+                    .map(|i| i + body_start)
+                    .unwrap_or(xml.len());
+                let inner = &xml[body_start..body_end];
+                let title = extract_localized_title(inner);
+                let items = extract_links_items(inner);
+                sections.push(FpSection::LinksSection { title, items });
+                pos = body_end + CLOSE.len();
+            }
             _ if self_closing => pos = gt + 1,
             _ => {
                 let close = format!("</{}>", name);
@@ -459,6 +484,85 @@ fn extract_app_ids(xml: &str) -> Vec<String> {
         }
     }
     ids
+}
+
+fn extract_links_items(xml: &str) -> Vec<FpLinksItem> {
+    let sys = sys_locale::get_locale().unwrap_or_default();
+    let user_lang = sys.split(['_', '-']).next().unwrap_or("en").to_string();
+
+    let mut items = Vec::new();
+    let mut pos = 0;
+    while pos < xml.len() {
+        let Some(rel_lt) = xml[pos..].find('<') else { break };
+        let lt = pos + rel_lt;
+        let Some(rel_gt) = xml[lt + 1..].find('>') else { break };
+        let gt = lt + 1 + rel_gt;
+
+        let chunk = xml[lt + 1..gt].trim();
+        if chunk.starts_with('/') || chunk.starts_with('!') || chunk.starts_with('?') {
+            pos = gt + 1;
+            continue;
+        }
+        let self_closing = chunk.ends_with('/');
+        let tag = chunk.trim_end_matches('/').trim();
+        let name = tag.split_ascii_whitespace().next().unwrap_or("");
+
+        match name {
+            "a" if !self_closing => {
+                let href = tag.find("href=\"").and_then(|p| {
+                    let after = &tag[p + 6..];
+                    after.find('"').map(|e| after[..e].to_string())
+                }).unwrap_or_default();
+                let text_start = gt + 1;
+                let text_end = xml[text_start..].find("</a>").map(|e| text_start + e).unwrap_or(xml.len());
+                let text = xml[text_start..text_end].trim().to_string();
+                pos = text_end + 4;
+                if !href.is_empty() {
+                    items.push(FpLinksItem::Url { text, href });
+                }
+            }
+            "app" => {
+                let id = tag.find("id=\"").and_then(|p| {
+                    let after = &tag[p + 4..];
+                    after.find('"').map(|e| after[..e].trim().to_string())
+                }).unwrap_or_default();
+                pos = gt + 1;
+                if !id.is_empty() {
+                    items.push(FpLinksItem::App(id));
+                }
+            }
+            "story" if !self_closing => {
+                let banner_url = tag.find("banner=\"").and_then(|p| {
+                    let after = &tag[p + 8..];
+                    after.find('"').map(|e| after[..e].to_string())
+                });
+                const CLOSE: &str = "</story>";
+                let body_start = gt + 1;
+                let body_end = xml[body_start..].find(CLOSE).map(|i| i + body_start).unwrap_or(xml.len());
+                let inner = &xml[body_start..body_end];
+                let titles = extract_all_titles(inner);
+                let body_text = inner.find("<body>").and_then(|bp| {
+                    let after = &inner[bp + 6..];
+                    after.find("</body>").map(|e| after[..e].trim().to_string())
+                }).unwrap_or_default();
+                pos = body_end + CLOSE.len();
+                if !titles.is_empty() {
+                    // locale selection
+                    let has_user = titles.iter().any(|(l, _)| l == &user_lang);
+                    let preferred = if has_user { user_lang.as_str() } else { "en" };
+                    if let Some((_, title)) = titles.iter().find(|(l, _)| l.as_str() == preferred) {
+                        items.push(FpLinksItem::Story(ForgeStory {
+                            banner_url,
+                            title: title.clone(),
+                            body: body_text,
+                        }));
+                    }
+                }
+            }
+            _ => { pos = gt + 1; }
+        }
+    }
+    items
 }
 
 fn extract_localized_title(xml: &str) -> String {

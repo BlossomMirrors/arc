@@ -20,11 +20,12 @@
 		ChevronUp,
 		ChevronDown,
 		Plus,
-		GripVertical
+		GripVertical,
+		Link
 	} from '@lucide/svelte';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import { newSection, type Section, type LangString, HTML_TYPES } from '$lib/frontpage.js';
+	import { newSection, type Section, type LangString, type LinksItem, HTML_TYPES } from '$lib/frontpage.js';
 	import * as m from '$lib/paraglide/messages';
 	import UploadButton from '$lib/components/upload-button.svelte';
 
@@ -96,7 +97,8 @@
 			icon: LayoutList,
 			shorthand: ''
 		},
-		{ type: 'charts' as const, label: m.cmd_charts(), badge: null, icon: BarChart2, shorthand: '' }
+		{ type: 'charts' as const, label: m.cmd_charts(), badge: null, icon: BarChart2, shorthand: '' },
+		{ type: 'links' as const, label: m.cmd_links(), badge: null, icon: Link, shorthand: '' }
 	]);
 
 	const filtered = $derived(
@@ -333,6 +335,7 @@
 
 	type Carousel = Extract<Section, { type: 'carousel' }>;
 	type Custom = Extract<Section, { type: 'custom' }>;
+	type Links = Extract<Section, { type: 'links' }>;
 
 	function addCarouselApp(s: Carousel) {
 		s.items = [...s.items, { type: 'app', id: '' }];
@@ -363,6 +366,22 @@
 	}
 	function removeTitle(arr: LangString[], j: number) {
 		arr.splice(j, 1);
+		mark();
+	}
+	function addLinksUrl(s: Links) {
+		s.items = [...s.items, { kind: 'url', text: '', href: '' }];
+		mark();
+	}
+	function addLinksApp(s: Links) {
+		s.items = [...s.items, { kind: 'app', id: '' }];
+		mark();
+	}
+	function addLinksStory(s: Links) {
+		s.items = [...s.items, { kind: 'story', banner: '', titles: [{ lang: 'en', text: '' }], body: '' }];
+		mark();
+	}
+	function removeLinksItem(s: Links, j: number) {
+		s.items = s.items.filter((_: LinksItem, k: number) => k !== j);
 		mark();
 	}
 
@@ -407,7 +426,8 @@
 		'categories',
 		'category',
 		'custom',
-		'charts'
+		'charts',
+		'links'
 	]);
 
 	const SECTION_LABELS: Record<string, () => string> = {
@@ -418,7 +438,8 @@
 		categories: m.cmd_categories,
 		category: m.cmd_category,
 		custom: m.cmd_custom,
-		charts: m.cmd_charts
+		charts: m.cmd_charts,
+		links: m.cmd_links
 	};
 </script>
 
@@ -622,6 +643,7 @@
 										{:else if section.type === 'category'}{section.value || '—'}
 										{:else if section.type === 'custom'}{section.titles[0]?.text || '—'}
 										{:else if section.type === 'charts'}cards={section.cards}
+										{:else if section.type === 'links'}{section.titles[0]?.text || '—'} · {section.items.length} links
 										{:else}–{/if}
 									</span>
 								</div>
@@ -793,6 +815,142 @@
 														onclick={() => addCustomApp(section)}
 														><Plus class="size-3" /> app</button
 													>
+												</div>
+											</div>
+										{:else if section.type === 'links'}
+											<div class="space-y-3">
+												<div class="space-y-2">
+													<p class="text-xs text-muted-foreground">{m.frontpage_titles()}</p>
+													{#each section.titles as t, k (k)}
+														<div class="flex gap-2">
+															<Input
+																class="h-8 w-14 text-sm"
+																placeholder="en"
+																bind:value={t.lang}
+																oninput={mark}
+															/>
+															<Input
+																class="h-8 flex-1 text-sm"
+																placeholder="More Information"
+																bind:value={t.text}
+																oninput={mark}
+															/>
+															<button
+																type="button"
+																onclick={() => removeTitle(section.titles, k)}
+																class="text-muted-foreground hover:text-destructive"
+																><Trash2 class="size-3.5" /></button
+															>
+														</div>
+													{/each}
+													<button
+														type="button"
+														class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+														onclick={() => addTitle(section.titles)}
+														><Plus class="size-3" /> title</button
+													>
+												</div>
+												<div class="space-y-2">
+													<p class="text-xs text-muted-foreground">{m.frontpage_links_items()}</p>
+													{#each section.items as item, k (k)}
+														<div class="space-y-1.5 rounded border border-border p-2.5">
+															<div class="flex items-center justify-between">
+																<span class="text-xs tracking-wide text-muted-foreground uppercase">{item.kind}</span>
+																<button
+																	type="button"
+																	onclick={() => removeLinksItem(section, k)}
+																	class="text-muted-foreground hover:text-destructive"
+																	><Trash2 class="size-3.5" /></button
+																>
+															</div>
+															{#if item.kind === 'url'}
+																<Input
+																	class="h-8 text-sm"
+																	placeholder={m.frontpage_links_text()}
+																	bind:value={item.text}
+																	oninput={mark}
+																/>
+																<Input
+																	class="h-8 font-mono text-sm"
+																	placeholder="https://example.com"
+																	bind:value={item.href}
+																	oninput={mark}
+																/>
+															{:else if item.kind === 'app'}
+																<Input
+																	class="h-8 font-mono text-sm"
+																	placeholder="com.example.App"
+																	bind:value={item.id}
+																	oninput={mark}
+																/>
+															{:else}
+																<div class="flex gap-2">
+																	<Input
+																		placeholder="banner.jpg"
+																		bind:value={item.banner}
+																		oninput={mark}
+																		class="h-8 flex-1 text-sm"
+																	/>
+																	<UploadButton onurl={(url) => { item.banner = url; mark(); }} />
+																</div>
+																{#each item.titles as t, j (j)}
+																	<div class="flex gap-2">
+																		<Input
+																			class="h-8 w-14 text-sm"
+																			placeholder="en"
+																			bind:value={t.lang}
+																			oninput={mark}
+																		/>
+																		<Input
+																			class="h-8 flex-1 text-sm"
+																			placeholder="Title"
+																			bind:value={t.text}
+																			oninput={mark}
+																		/>
+																		<button
+																			type="button"
+																			onclick={() => removeTitle(item.titles, j)}
+																			class="text-muted-foreground hover:text-destructive"
+																			><Trash2 class="size-3.5" /></button
+																		>
+																	</div>
+																{/each}
+																<button
+																	type="button"
+																	class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+																	onclick={() => addTitle(item.titles)}
+																	><Plus class="size-3" /> title</button
+																>
+																<textarea
+																	class="mt-1 w-full rounded border border-input bg-muted/30 px-3 py-2 font-mono text-xs outline-none"
+																	rows={3}
+																	placeholder="Body XML…"
+																	bind:value={item.body}
+																	oninput={mark}
+																></textarea>
+															{/if}
+														</div>
+													{/each}
+													<div class="flex gap-3">
+														<button
+															type="button"
+															class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+															onclick={() => addLinksUrl(section)}
+															><Plus class="size-3" /> URL</button
+														>
+														<button
+															type="button"
+															class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+															onclick={() => addLinksApp(section)}
+															><Plus class="size-3" /> app</button
+														>
+														<button
+															type="button"
+															class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+															onclick={() => addLinksStory(section)}
+															><Plus class="size-3" /> story</button
+														>
+													</div>
 												</div>
 											</div>
 										{:else}

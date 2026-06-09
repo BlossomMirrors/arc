@@ -15,6 +15,7 @@ import {
     CategoryItem,
     StoryItem,
     HeroItem,
+    LinkItem,
 } from "../types.slint";
 
 export component HomeScreen inherits Rectangle {
@@ -30,6 +31,7 @@ export component HomeScreen inherits Rectangle {
     callback detail-requested(string);
     callback category-selected(string);
     callback story-selected(StoryItem);
+    callback open-url-requested(string);
 
     clip: true;
 
@@ -193,6 +195,77 @@ export component HomeScreen inherits Rectangle {
                             clicked(id) => {
                                 root.detail-requested(id);
                             }
+                        }
+                    }
+                }
+
+                // Links section (Mac App Store "More Information" style)
+                if item.item-type == "links" && item.link-items.length > 0: VerticalLayout {
+                    spacing: 0px;
+
+                    if item.link-title != "": VerticalLayout {
+                        spacing: 10px;
+                        Text {
+                            text: item.link-title;
+                            font-size: 17px;
+                            font-weight: 700;
+                        }
+
+                        Rectangle {
+                            height: 1px;
+                            background: Palette.foreground.transparentize(0.88);
+                        }
+                    }
+
+                    for link[j] in item.link-items: VerticalLayout {
+                        spacing: 0px;
+
+                        Rectangle {
+                            height: 44px;
+                            background: link-ta.has-hover ? Palette.alternate-background : transparent;
+
+                            link-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    if link.story-index >= 0 {
+                                        if link.story-index < root.home-stories.length {
+                                            root.story-selected(root.home-stories[link.story-index]);
+                                        }
+                                    } else if link.app-id != "" {
+                                        root.detail-requested(link.app-id);
+                                    } else if link.href != "" {
+                                        root.open-url-requested(link.href);
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 2px;
+                                padding-right: 2px;
+                                alignment: center;
+
+                                Text {
+                                    text: link.text;
+                                    font-size: 14px;
+                                    color: link.href != ""
+                                        ? Palette.foreground.transparentize(0.15)
+                                        : Palette.foreground;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                if link.href != "": Text {
+                                    text: "↗";
+                                    font-size: 11px;
+                                    color: Palette.foreground.transparentize(0.4);
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 1px;
+                            background: Palette.foreground.transparentize(0.88);
                         }
                     }
                 }

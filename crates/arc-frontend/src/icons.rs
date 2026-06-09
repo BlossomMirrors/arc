@@ -186,7 +186,6 @@ fn load_png_icon(path: &Path, size: u32) -> Option<RawIcon> {
     })
 }
 
-
 fn load_icon_from_path(path: &Path, size: u32) -> Option<RawIcon> {
     match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
         "png" => load_png_icon(path, size),
@@ -343,6 +342,7 @@ fn search_flatpak_icon_dir(base: impl AsRef<Path>, icon_name: &str) -> Option<Pa
 
 pub struct CategoryIconData {
     pub icon: Option<RawIcon>,
+    #[allow(dead_code)]
     pub color: (u8, u8, u8),
 }
 
@@ -395,7 +395,9 @@ pub fn load_local_flatpak_icon(app_id: &str) -> Option<RawIcon> {
         PathBuf::from("/var/lib/flatpak"),
     ];
     for base in &bases {
-        for size in &["128x128", "256x256", "96x96", "64x64", "48x48", "32x32", "scalable"] {
+        for size in &[
+            "128x128", "256x256", "96x96", "64x64", "48x48", "32x32", "scalable",
+        ] {
             for ext in &["png", "svg", "svgz"] {
                 let p = base
                     .join("app")
@@ -572,7 +574,11 @@ fn load_icon_from_desktop(package_name: &str) -> Option<RawIcon> {
     let desktop_names = [
         format!("{}.desktop", package_name),
         format!("{}.desktop", package_name.to_lowercase()),
-        format!("org.{}.{}.desktop", package_name.to_lowercase(), capitalized),
+        format!(
+            "org.{}.{}.desktop",
+            package_name.to_lowercase(),
+            capitalized
+        ),
     ];
 
     let desktop_file = desktop_dirs.iter().find_map(|dir| {

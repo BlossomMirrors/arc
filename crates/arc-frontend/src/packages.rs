@@ -41,61 +41,43 @@ pub(crate) struct DescBlock {
     is_list_item: bool,
     is_heading: bool,
     is_bold: bool,
+    is_image: bool,
+    image_url: String,
+    pub image: Option<RawIcon>,
 }
 
 // Split a block's text on `**...**` markers into bold and normal segments.
 // Headings are already bold so we skip splitting them.
+fn text_block(text: String, is_list_item: bool, is_heading: bool, is_bold: bool) -> DescBlock {
+    DescBlock { text, is_list_item, is_heading, is_bold, is_image: false, image_url: String::new(), image: None }
+}
+
 fn split_bold(text: String, is_list_item: bool, is_heading: bool) -> Vec<DescBlock> {
     if is_heading || !text.contains("**") {
-        return vec![DescBlock {
-            text,
-            is_list_item,
-            is_heading,
-            is_bold: false,
-        }];
+        return vec![text_block(text, is_list_item, is_heading, false)];
     }
     let mut result = Vec::new();
     let mut remaining = text.as_str();
     while !remaining.is_empty() {
         match remaining.find("**") {
             None => {
-                result.push(DescBlock {
-                    text: remaining.to_string(),
-                    is_list_item,
-                    is_heading,
-                    is_bold: false,
-                });
+                result.push(text_block(remaining.to_string(), is_list_item, is_heading, false));
                 break;
             }
             Some(start) => {
                 if start > 0 {
-                    result.push(DescBlock {
-                        text: remaining[..start].to_string(),
-                        is_list_item,
-                        is_heading,
-                        is_bold: false,
-                    });
+                    result.push(text_block(remaining[..start].to_string(), is_list_item, is_heading, false));
                 }
                 remaining = &remaining[start + 2..];
                 match remaining.find("**") {
                     None => {
-                        result.push(DescBlock {
-                            text: remaining.to_string(),
-                            is_list_item,
-                            is_heading,
-                            is_bold: false,
-                        });
+                        result.push(text_block(remaining.to_string(), is_list_item, is_heading, false));
                         break;
                     }
                     Some(end) => {
                         let bold = &remaining[..end];
                         if !bold.is_empty() {
-                            result.push(DescBlock {
-                                text: bold.to_string(),
-                                is_list_item,
-                                is_heading,
-                                is_bold: true,
-                            });
+                            result.push(text_block(bold.to_string(), is_list_item, is_heading, true));
                         }
                         remaining = &remaining[end + 2..];
                     }
@@ -104,6 +86,18 @@ fn split_bold(text: String, is_list_item: bool, is_heading: bool) -> Vec<DescBlo
         }
     }
     result
+}
+
+fn attr_from_tag(tag: &str, name: &str) -> String {
+    let needle = format!("{}=\"", name);
+    let lower = tag.to_ascii_lowercase();
+    if let Some(pos) = lower.find(&needle) {
+        let after = &tag[pos + needle.len()..];
+        if let Some(end) = after.find('"') {
+            return after[..end].to_string();
+        }
+    }
+    String::new()
 }
 
 fn parse_heading(s: &str) -> Option<String> {
@@ -158,16 +152,11 @@ fn html_to_blocks(html: &str) -> Vec<DescBlock> {
                         }
                         current.clear();
                     }
-                    (true, "p") => {
+                    (true, "p") | (true, "figcaption") => {
                         let t = current.trim().to_string();
                         if !t.is_empty() {
                             if let Some(heading) = parse_heading(&t) {
-                                blocks.push(DescBlock {
-                                    text: heading,
-                                    is_list_item: false,
-                                    is_heading: true,
-                                    is_bold: false,
-                                });
+                                blocks.push(text_block(heading, false, true, false));
                             } else {
                                 blocks.extend(split_bold(t, false, false));
                             }
@@ -177,14 +166,37 @@ fn html_to_blocks(html: &str) -> Vec<DescBlock> {
                     (true, "h1") | (true, "h2") | (true, "h3") => {
                         let t = current.trim().to_string();
                         if !t.is_empty() {
-                            blocks.push(DescBlock {
-                                text: t,
-                                is_list_item: false,
-                                is_heading: true,
-                                is_bold: false,
-                            });
+                            blocks.push(text_block(t, false, true, false));
                         }
                         current.clear();
+                    }
+                    // <img src="..."> — self-closing; flush pending text then push image block
+                    (_, "img") => {
+                        let t = current.trim().to_string();
+                        if !t.is_empty() {
+                            blocks.extend(split_bold(t, false, false));
+                            current.clear();
+                        }
+                        let src = attr_from_tag(raw_tag, "src");
+                        if !src.is_empty() {
+                            blocks.push(DescBlock {
+                                text: attr_from_tag(raw_tag, "alt"),
+                                is_list_item: false,
+                                is_heading: false,
+                                is_bold: false,
+                                is_image: true,
+                                image_url: src,
+                                image: None,
+                            });
+                        }
+                    }
+                    // <figure> / </figure> are container elements — just flush pending text
+                    (true, "figure") => {
+                        let t = current.trim().to_string();
+                        if !t.is_empty() {
+                            blocks.extend(split_bold(t, false, false));
+                            current.clear();
+                        }
                     }
                     _ => {}
                 }
@@ -239,6 +251,24 @@ pub struct RawHeroItem {
     pub body: String,
     pub is_story: bool,
     pub story_index: i32,
+}
+
+pub struct RawLinkItem {
+    pub text: String,
+    pub href: String,
+    pub story_index: i32,
+    pub app_id: String,
+}
+
+impl RawLinkItem {
+    fn to_slint(&self) -> crate::LinkItem {
+        crate::LinkItem {
+            text: SharedString::from(self.text.as_str()),
+            href: SharedString::from(self.href.as_str()),
+            story_index: self.story_index,
+            app_id: SharedString::from(self.app_id.as_str()),
+        }
+    }
 }
 
 impl RawHeroItem {
@@ -507,11 +537,19 @@ async fn load_raw_stories(
             }
         );
 
+        let mut description_blocks = html_to_blocks(&body_html);
+        // Load any inline images referenced via <img> / <figure><img>
+        for block in &mut description_blocks {
+            if block.is_image && !block.image_url.is_empty() {
+                block.image = icons::load_banner(&block.image_url).await;
+            }
+        }
+
         out.push(RawStory {
             id: format!("story-{}", idx),
             title: s.title,
             screenshot,
-            description_blocks: html_to_blocks(&body_html),
+            description_blocks,
             featured_apps: app_cards,
         });
     }
@@ -526,6 +564,8 @@ struct RawHomeItem {
     cards: Vec<RawCard>,
     hero_items: Vec<RawHeroItem>,
     editorial_items: Vec<RawHeroItem>,
+    link_title: String,
+    link_items: Vec<RawLinkItem>,
 }
 
 pub async fn load_home(
@@ -576,27 +616,27 @@ pub async fn load_home(
         match section {
             FpSection::H1(t) => raw_items.push(RawHomeItem {
                 item_type: "h1", text: t, title: String::new(), cards: vec![],
-                hero_items: vec![], editorial_items: vec![],
+                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
             }),
             FpSection::H2(t) => raw_items.push(RawHomeItem {
                 item_type: "h2", text: t, title: String::new(), cards: vec![],
-                hero_items: vec![], editorial_items: vec![],
+                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
             }),
             FpSection::H3(t) => raw_items.push(RawHomeItem {
                 item_type: "h3", text: t, title: String::new(), cards: vec![],
-                hero_items: vec![], editorial_items: vec![],
+                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
             }),
             FpSection::P(t) => raw_items.push(RawHomeItem {
                 item_type: "p", text: t, title: String::new(), cards: vec![],
-                hero_items: vec![], editorial_items: vec![],
+                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
             }),
             FpSection::Br => raw_items.push(RawHomeItem {
                 item_type: "br", text: String::new(), title: String::new(), cards: vec![],
-                hero_items: vec![], editorial_items: vec![],
+                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
             }),
             FpSection::Categories => raw_items.push(RawHomeItem {
                 item_type: "categories", text: String::new(), title: String::new(), cards: vec![],
-                hero_items: vec![], editorial_items: vec![],
+                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
             }),
             FpSection::CarouselSection { breakpoint, items, .. } => {
                 use crate::forge::CarouselItem;
@@ -683,6 +723,8 @@ pub async fn load_home(
                     cards: vec![],
                     hero_items,
                     editorial_items,
+                    link_title: String::new(),
+                    link_items: vec![],
                 });
             }
             FpSection::Custom { title, app_ids } => {
@@ -690,7 +732,7 @@ pub async fn load_home(
                 let cards = entries_to_cards(entries, &installed_ids).await;
                 raw_items.push(RawHomeItem {
                     item_type: "app-row", text: String::new(), title, cards,
-                    hero_items: vec![], editorial_items: vec![],
+                    hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
                 });
             }
             FpSection::Top => {
@@ -699,7 +741,7 @@ pub async fn load_home(
                 let cards = entries_to_cards(entries, &installed_ids).await;
                 raw_items.push(RawHomeItem {
                     item_type: "app-grid", text: String::new(), title: "Popular".into(), cards,
-                    hero_items: vec![], editorial_items: vec![],
+                    hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
                 });
             }
             FpSection::New => {
@@ -708,7 +750,7 @@ pub async fn load_home(
                 let cards = entries_to_cards(entries, &installed_ids).await;
                 raw_items.push(RawHomeItem {
                     item_type: "app-row", text: String::new(), title: tr!("Recently Added").to_string(), cards,
-                    hero_items: vec![], editorial_items: vec![],
+                    hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
                 });
             }
             FpSection::Trending => {
@@ -717,7 +759,7 @@ pub async fn load_home(
                 let cards = entries_to_cards(entries, &installed_ids).await;
                 raw_items.push(RawHomeItem {
                     item_type: "app-row", text: String::new(), title: tr!("Trending").to_string(), cards,
-                    hero_items: vec![], editorial_items: vec![],
+                    hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
                 });
             }
             FpSection::Charts { cards: as_cards } => {
@@ -727,37 +769,102 @@ pub async fn load_home(
                 raw_items.push(RawHomeItem {
                     item_type: if as_cards { "app-grid" } else { "app-row" },
                     text: String::new(), title: tr!("Charts").to_string(), cards,
-                    hero_items: vec![], editorial_items: vec![],
+                    hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                });
+            }
+            FpSection::LinksSection { title, items } => {
+                let story_offset = raw_stories.len();
+                let mut link_items: Vec<RawLinkItem> = Vec::new();
+                let mut story_forge: Vec<crate::forge::ForgeStory> = Vec::new();
+
+                for item in &items {
+                    match item {
+                        crate::forge::FpLinksItem::Story(s) => {
+                            story_forge.push(s.clone());
+                            link_items.push(RawLinkItem {
+                                text: s.title.clone(),
+                                href: String::new(),
+                                story_index: -1, // filled in after loading
+                                app_id: String::new(),
+                            });
+                        }
+                        crate::forge::FpLinksItem::App(id) => {
+                            let entries = resolve_ids(&[id.clone()], proxy.as_ref(), &pwa_map).await;
+                            let name = entries.first().map(|e| e.name.clone()).unwrap_or_else(|| id.clone());
+                            link_items.push(RawLinkItem {
+                                text: name,
+                                href: String::new(),
+                                story_index: -1,
+                                app_id: id.clone(),
+                            });
+                        }
+                        crate::forge::FpLinksItem::Url { text, href } => {
+                            link_items.push(RawLinkItem {
+                                text: text.clone(),
+                                href: href.clone(),
+                                story_index: -1,
+                                app_id: String::new(),
+                            });
+                        }
+                    }
+                }
+
+                // Load stories
+                let indexed = story_forge.into_iter().enumerate().collect::<Vec<_>>();
+                let loaded_stories = load_raw_stories(indexed, proxy.as_ref(), &pwa_map, &installed_ids).await;
+
+                // Back-fill story indices
+                let mut link_story_count = 0usize;
+                for item in link_items.iter_mut() {
+                    if item.story_index == -1 && item.href.is_empty() && item.app_id.is_empty() {
+                        let global_idx = story_offset + link_story_count;
+                        item.story_index = global_idx as i32;
+                        if let Some(rs) = loaded_stories.get(link_story_count) {
+                            item.text = rs.title.clone();
+                        }
+                        link_story_count += 1;
+                    }
+                }
+                raw_stories.extend(loaded_stories);
+
+                raw_items.push(RawHomeItem {
+                    item_type: "links",
+                    text: String::new(),
+                    title: String::new(),
+                    cards: vec![],
+                    hero_items: vec![],
+                    editorial_items: vec![],
+                    link_title: title,
+                    link_items,
                 });
             }
         }
     }
     let raw_cats: Vec<RawCategoryData> = if show_categories {
-        let cat_defs = [
-            ("AudioVideo", "Multimedia", "applications-multimedia"),
-            ("Development", "Developer Tools", "applications-development"),
-            ("Education", "Education", "applications-education"),
-            ("Graphics", "Graphics", "applications-graphics"),
-            ("Network", "Internet", "applications-internet"),
-            ("Office", "Office", "applications-office"),
-            ("Science", "Science", "applications-science"),
-            ("System", "System", "applications-system"),
-            ("Utility", "Utilities", "applications-utilities"),
+        // Predefined colors; icon is still loaded from the system for display.
+        let cat_defs: &[(&str, &str, &str, (u8, u8, u8))] = &[
+            ("AudioVideo",  "Multimedia",      "applications-multimedia",  (41,  128, 185)),
+            ("Development", "Developer Tools", "applications-development", (142, 68,  173)),
+            ("Education",   "Education",       "applications-education",   (39,  174, 96)),
+            ("Graphics",    "Graphics",        "applications-graphics",    (192, 57,  43)),
+            ("Network",     "Internet",        "applications-internet",    (22,  160, 133)),
+            ("Office",      "Office",          "applications-office",      (211, 84,  0)),
+            ("Science",     "Science",         "applications-science",     (41,  128, 185)),
+            ("System",      "System",          "applications-system",      (100, 100, 110)),
+            ("Utility",     "Utilities",       "applications-utilities",   (192, 57,  43)),
         ];
         let mut out = Vec::new();
-        for (id, label, icon_name) in &cat_defs {
+        for (id, label, icon_name, color) in cat_defs {
             let name = icon_name.to_string();
-            let data = tokio::task::spawn_blocking(move || icons::load_category_icon(&name))
+            let icon = tokio::task::spawn_blocking(move || icons::load_category_icon(&name))
                 .await
-                .unwrap_or(icons::CategoryIconData {
-                    icon: None,
-                    color: (80, 80, 90),
-                });
+                .ok()
+                .and_then(|d| d.icon);
             out.push(RawCategoryData {
                 id: id.to_string(),
                 label: label.to_string(),
-                icon: data.icon,
-                color: data.color,
+                icon,
+                color: *color,
             });
         }
         out
@@ -777,6 +884,10 @@ pub async fn load_home(
                 )),
                 editorial_items: slint::ModelRc::new(slint::VecModel::from(
                     item.editorial_items.iter().map(|h| h.to_slint()).collect::<Vec<_>>(),
+                )),
+                link_title: item.link_title.into(),
+                link_items: slint::ModelRc::new(slint::VecModel::from(
+                    item.link_items.iter().map(|l| l.to_slint()).collect::<Vec<_>>(),
                 )),
             })
             .collect();
@@ -806,6 +917,8 @@ pub async fn load_home(
                         is_list_item: b.is_list_item,
                         is_heading: b.is_heading,
                         is_bold: b.is_bold,
+                        is_image: b.is_image,
+                        image: b.image.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
                     })
                     .collect();
                 let apps: Vec<crate::AppCardData> =
@@ -1276,17 +1389,19 @@ pub async fn load_detail(
         raw.appimage_id.clone()
     };
     let flatpak_id_for_extensions = raw.flatpak_id.clone();
-    let description_blocks: Vec<crate::DescriptionBlock> = raw
-        .description_blocks
-        .into_iter()
-        .map(|b| crate::DescriptionBlock {
-            text: b.text.into(),
-            is_list_item: b.is_list_item,
-            is_heading: b.is_heading,
-            is_bold: b.is_bold,
-        })
-        .collect();
+    let raw_description_blocks = raw.description_blocks;
     let _ = app_weak.upgrade_in_event_loop(move |app| {
+        let description_blocks: Vec<crate::DescriptionBlock> = raw_description_blocks
+            .into_iter()
+            .map(|b| crate::DescriptionBlock {
+                text: b.text.into(),
+                is_list_item: b.is_list_item,
+                is_heading: b.is_heading,
+                is_bold: b.is_bold,
+                is_image: b.is_image,
+                image: b.image.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+            })
+            .collect();
         app.set_detail_screenshots([].as_slice().into());
         app.set_detail_extensions([].as_slice().into());
         app.set_detail_description_blocks(description_blocks.as_slice().into());

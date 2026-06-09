@@ -67,6 +67,11 @@
 	"cmd_category": "Kategorie",
 	"cmd_custom": "Benutzerdefiniert",
 	"cmd_charts": "Charts",
+	"cmd_links": "Links",
+	"frontpage_links_items": "Links",
+	"frontpage_links_text": "Text",
+	"frontpage_links_href": "URL",
+	"frontpage_links_story_index": "Story-Index",
 	"pwas_delete_confirm": "Bist du sicher, dass du diese App löschen möchtest?",
 	"form_translations": "Übersetzungen",
 	"form_translation_fallback_note": "Optional — fällt auf Englisch zurück, wenn leer"

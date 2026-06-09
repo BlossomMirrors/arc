@@ -15,6 +15,8 @@ export struct DescriptionBlock {
     is-list-item: bool,
     is-heading: bool,
     is-bold: bool,
+    is-image: bool,
+    image: image,
 }
 
 export struct AppDetailData {
@@ -72,13 +74,22 @@ export struct HeroItem {
     story-index: int,    // index into home-stories (-1 for apps)
 }
 
+export struct LinkItem {
+    text: string,
+    href: string,        // external URL (empty for story/app)
+    story-index: int,    // -1 if not a story, else index into home-stories
+    app-id: string,      // flatpak ID (empty for non-app items)
+}
+
 export struct HomeItem {
-    item-type: string,   // "h1"|"h2"|"h3"|"p"|"br"|"app-row"|"app-grid"|"categories"|"carousel"
+    item-type: string,   // "h1"|"h2"|"h3"|"p"|"br"|"app-row"|"app-grid"|"categories"|"carousel"|"links"
     text: string,        // text sections
     title: string,       // optional heading for app sections
     apps: [AppCardData],
     hero-items: [HeroItem],
     editorial-items: [HeroItem],
+    link-title: string,
+    link-items: [LinkItem],
 }
 
 export struct RemoteItem {
