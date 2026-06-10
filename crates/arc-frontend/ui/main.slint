@@ -292,8 +292,12 @@ export component AppWindow inherits Window {
             settings-clicked => {
                 root.nav-settings();
             }
-            nav-back => { root.nav-back(); }
-            nav-forward => { root.nav-forward(); }
+            nav-back => {
+                root.nav-back();
+            }
+            nav-forward => {
+                root.nav-forward();
+            }
         }
 
         Rectangle {
@@ -339,11 +343,7 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 story: root.current-story;
-                tr-back: root.tr-back;
                 tr-installed: root.tr-installed;
-                back-clicked => {
-                    root.nav-back();
-                }
                 app-clicked(id) => {
                     root.detail-requested(id);
                 }
@@ -400,7 +400,6 @@ export component AppWindow inherits Window {
                 tr-extensions: root.tr-extensions;
                 tr-install: root.tr-install;
                 tr-remove: root.tr-remove;
-                tr-back: root.tr-back;
                 tr-run: root.tr-run;
                 tr-cancel: root.tr-cancel;
                 tr-working: root.tr-working;
@@ -408,9 +407,6 @@ export component AppWindow inherits Window {
                 tr-proprietary: root.tr-proprietary;
                 tr-all-ages: root.tr-all-ages;
                 tr-pwa: root.tr-pwa;
-                back-clicked => {
-                    root.nav-back();
-                }
                 install-requested(id) => {
                     root.install-requested(id);
                 }
@@ -483,6 +479,7 @@ export component AppWindow inherits Window {
                     root.cancel-requested(id);
                 }
                 detail-requested(id) => {
+                    root.prev-view = "downloads";
                     root.detail-requested(id);
                 }
             }
@@ -618,7 +615,7 @@ export component AppWindow inherits Window {
                 settings-remotes <=> root.settings-remotes;
                 settings-remotes-loading <=> root.settings-remotes-loading;
                 back-clicked => {
-                    root.nav-back();
+                    root.current-view = root.prev-view;
                 }
                 save-settings(preferred, ignore, auto_upd, concur, warnings) => {
                     root.save-settings(preferred, ignore, auto_upd, concur, warnings);

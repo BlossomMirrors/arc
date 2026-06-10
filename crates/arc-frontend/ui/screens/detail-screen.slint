@@ -20,7 +20,6 @@ export component DetailScreen inherits Rectangle {
     in property <string> tr-extensions: "Extensions";
     in property <string> tr-install: "Install";
     in property <string> tr-remove: "Remove";
-    in property <string> tr-back: "Back";
     in property <string> tr-run: "Run";
     in property <string> tr-cancel: "Cancel";
     in property <string> tr-working: "Working...";
@@ -60,6 +59,7 @@ export component DetailScreen inherits Rectangle {
         VerticalLayout {
             spacing: 0px;
             width: parent.width;
+            padding-top: 20px;
 
             DetailHeader {
                 detail-app: root.detail-app;
@@ -69,7 +69,6 @@ export component DetailScreen inherits Rectangle {
                 settings-preferred: root.settings-preferred;
                 has-extensions: root.detail-extensions.length > 0;
                 icon-trash: root.icon-trash;
-                tr-back: root.tr-back;
                 tr-install: root.tr-install;
                 tr-run: root.tr-run;
                 tr-cancel: root.tr-cancel;
@@ -149,9 +148,7 @@ export component DetailScreen inherits Rectangle {
                         font-size: 12px;
                         font-weight: block.is-bold ? 700 : 400;
                         wrap: word-wrap;
-                        color: block.is-bold
-                            ? Palette.foreground.transparentize(0.1)
-                            : Palette.foreground.transparentize(0.25);
+                        color: block.is-bold ? Palette.foreground.transparentize(0.1) : Palette.foreground.transparentize(0.25);
                     }
                     if block.is-list-item: HorizontalLayout {
                         padding-left: 8px;
@@ -164,14 +161,13 @@ export component DetailScreen inherits Rectangle {
                             vertical-alignment: top;
                             min-width: 10px;
                         }
+
                         Text {
                             text: block.text;
                             font-size: 12px;
                             font-weight: block.is-bold ? 700 : 400;
                             wrap: word-wrap;
-                            color: block.is-bold
-                                ? Palette.foreground.transparentize(0.1)
-                                : Palette.foreground.transparentize(0.25);
+                            color: block.is-bold ? Palette.foreground.transparentize(0.1) : Palette.foreground.transparentize(0.25);
                             horizontal-stretch: 1;
                         }
                     }

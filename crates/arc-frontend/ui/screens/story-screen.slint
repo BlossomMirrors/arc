@@ -5,7 +5,6 @@ import { AppIcon } from "../components/app-icon.slint";
 
 export component StoryScreen inherits Rectangle {
     in property <StoryItem> story;
-    in property <string> tr-back: "Back";
     in property <string> tr-installed: "Installed";
 
     callback back-clicked();
@@ -48,31 +47,6 @@ export component StoryScreen inherits Rectangle {
                 height: 60px;
                 background: @linear-gradient(180deg, #00000066 0%, transparent 100%);
             }
-
-            // Back button
-            Rectangle {
-                x: 12px;
-                y: 12px;
-                width: back-lbl.preferred-width + 28px;
-                height: 34px;
-                border-radius: 17px;
-                background: back-ta.has-hover ? #00000088 : #00000066;
-                border-width: 1px;
-                border-color: #ffffff30;
-
-                back-ta := TouchArea {
-                    clicked => { root.back-clicked(); }
-                }
-
-                back-lbl := Text {
-                    text: root.tr-back;
-                    color: white;
-                    font-size: 13px;
-                    font-weight: 600;
-                    x: (parent.width - self.preferred-width) / 2;
-                    y: (parent.height - self.preferred-height) / 2;
-                }
-            }
         }
 
         // Scrollable content
@@ -97,11 +71,7 @@ export component StoryScreen inherits Rectangle {
                 // Description blocks (HTML body parsed into paragraphs/headings/images/app-links)
                 for block in root.story.description-blocks: Rectangle {
                     width: parent.width;
-                    height: block.is-image
-                        ? (parent.width * 9 / 16 + 20px)
-                        : block.is-app
-                            ? (block.app-card.id != "" ? 88px : 0px)
-                            : (block-text.preferred-height + (block.is-heading ? 24px : 12px));
+                    height: block.is-image ? (parent.width * 9 / 16 + 20px) : block.is-app ? (block.app-card.id != "" ? 88px : 0px) : (block-text.preferred-height + (block.is-heading ? 24px : 12px));
 
                     // Text (zero-width/zero-text for image and app blocks)
                     block-text := Text {
@@ -111,9 +81,7 @@ export component StoryScreen inherits Rectangle {
                         text: (block.is-image || block.is-app) ? "" : block.text;
                         font-size: block.is-heading ? 16px : 14px;
                         font-weight: block.is-heading ? 700 : (block.is-bold ? 600 : 400);
-                        color: block.is-heading
-                            ? Palette.foreground
-                            : Palette.foreground.transparentize(0.2);
+                        color: block.is-heading ? Palette.foreground : Palette.foreground.transparentize(0.2);
                         wrap: word-wrap;
                     }
 
@@ -152,15 +120,15 @@ export component StoryScreen inherits Rectangle {
                         width: parent.width;
                         height: 72px;
                         border-radius: 12px;
-                        background: app-link-ta.has-hover
-                            ? Palette.alternate-background.darker(0.03)
-                            : Palette.alternate-background;
+                        background: app-link-ta.has-hover ? Palette.alternate-background.darker(0.03) : Palette.alternate-background;
                         border-width: 1px;
                         border-color: Palette.foreground.transparentize(0.9);
 
                         app-link-ta := TouchArea {
                             mouse-cursor: pointer;
-                            clicked => { root.app-clicked(block.app-card.id); }
+                            clicked => {
+                                root.app-clicked(block.app-card.id);
+                            }
                         }
 
                         HorizontalLayout {
@@ -204,14 +172,14 @@ export component StoryScreen inherits Rectangle {
                     for app[i] in root.story.featured-apps: Rectangle {
                         height: 96px;
                         border-radius: 12px;
-                        background: app-ta.has-hover
-                            ? Palette.alternate-background.darker(0.03)
-                            : Palette.alternate-background;
+                        background: app-ta.has-hover ? Palette.alternate-background.darker(0.03) : Palette.alternate-background;
                         border-width: 1px;
                         border-color: Palette.foreground.transparentize(0.9);
 
                         app-ta := TouchArea {
-                            clicked => { root.app-clicked(app.id); }
+                            clicked => {
+                                root.app-clicked(app.id);
+                            }
                         }
 
                         HorizontalLayout {
@@ -249,7 +217,9 @@ export component StoryScreen inherits Rectangle {
                 }
 
                 // Bottom padding
-                Rectangle { height: 32px; }
+                Rectangle {
+                    height: 32px;
+                }
             }
         }
     }

@@ -27,6 +27,7 @@ include!(concat!(env!("OUT_DIR"), "/locale/translators.rs"));
 struct NavEntry {
     view: String,
     detail_id: String,
+    #[allow(dead_code)]
     search_text: String,
 }
 
@@ -38,7 +39,10 @@ struct NavHistory {
 impl NavHistory {
     fn new() -> Self {
         Self {
-            entries: vec![NavEntry { view: "home".to_string(), ..Default::default() }],
+            entries: vec![NavEntry {
+                view: "home".to_string(),
+                ..Default::default()
+            }],
             cursor: 0,
         }
     }
@@ -99,7 +103,9 @@ fn apply_translations(app: &AppWindow) {
     app.set_tr_url(tr!("URL").into());
     app.set_tr_categories(tr!("Categories").into());
     app.set_tr_recommended_apps(tr!("Recommended Apps").into());
-    app.set_tr_no_packages(tr!("No packages found.\nSearch for an application to get started.").into());
+    app.set_tr_no_packages(
+        tr!("No packages found.\nSearch for an application to get started.").into(),
+    );
     app.set_tr_up_to_date(tr!("Everything is up to date.").into());
     app.set_tr_no_installed(tr!("No applications installed.").into());
     app.set_tr_downloads(tr!("Downloads & Updates").into());
@@ -120,15 +126,23 @@ fn apply_translations(app: &AppWindow) {
     app.set_tr_updating(tr!("Updating").into());
     app.set_tr_installing(tr!("Installing").into());
     app.set_tr_license(tr!("License Agreement").into());
-    app.set_tr_eula_requires(tr!(" requires you to accept its End User License Agreement before installing.").into());
+    app.set_tr_eula_requires(
+        tr!(" requires you to accept its End User License Agreement before installing.").into(),
+    );
     app.set_tr_read_license(tr!("Read License Agreement →").into());
     app.set_tr_accept_install(tr!("Accept & Install").into());
     app.set_tr_install_flatpak_bundle(tr!("Install Flatpak Bundle").into());
-    app.set_tr_install_flatpak_bundle_desc(tr!("This will install the bundled Flatpak application on your system.").into());
+    app.set_tr_install_flatpak_bundle_desc(
+        tr!("This will install the bundled Flatpak application on your system.").into(),
+    );
     app.set_tr_install_appimage(tr!("Install AppImage").into());
-    app.set_tr_install_appimage_desc(tr!("This will register the AppImage so it appears in your app launcher.").into());
+    app.set_tr_install_appimage_desc(
+        tr!("This will register the AppImage so it appears in your app launcher.").into(),
+    );
     app.set_tr_install_package(tr!("Install Package").into());
-    app.set_tr_install_package_desc(tr!("Choose how you'd like to install this package file.").into());
+    app.set_tr_install_package_desc(
+        tr!("Choose how you'd like to install this package file.").into(),
+    );
     app.set_tr_install_bundle(tr!("Install Bundle").into());
     app.set_tr_install_as_appimage(tr!("Install as AppImage").into());
     app.set_tr_install_distrobox(tr!("Install via Distrobox").into());
@@ -143,9 +157,13 @@ fn apply_translations(app: &AppWindow) {
     app.set_tr_settings(tr!("Settings").into());
     app.set_tr_general(tr!("GENERAL").into());
     app.set_tr_auto_updates(tr!("Auto-updates").into());
-    app.set_tr_auto_updates_desc(tr!("Automatically update installed apps in the background").into());
+    app.set_tr_auto_updates_desc(
+        tr!("Automatically update installed apps in the background").into(),
+    );
     app.set_tr_security_warnings(tr!("Security warnings").into());
-    app.set_tr_security_warnings_desc(tr!("Show warnings when installing third-party software or adding repositories").into());
+    app.set_tr_security_warnings_desc(
+        tr!("Show warnings when installing third-party software or adding repositories").into(),
+    );
     app.set_tr_downloads_section(tr!("DOWNLOADS").into());
     app.set_tr_concurrent(tr!("Concurrent downloads").into());
     app.set_tr_concurrent_desc(tr!("Maximum number of simultaneous downloads (1-16)").into());
@@ -155,10 +173,14 @@ fn apply_translations(app: &AppWindow) {
     app.set_tr_add_repo_section(tr!("ADD REPOSITORY").into());
     app.set_tr_danger_zone(tr!("DANGER ZONE").into());
     app.set_tr_force_updates(tr!("Force updates").into());
-    app.set_tr_force_updates_desc(tr!("Runs flatpak update -y directly, bypassing the daemon").into());
+    app.set_tr_force_updates_desc(
+        tr!("Runs flatpak update -y directly, bypassing the daemon").into(),
+    );
     app.set_tr_force_update(tr!("Force Update").into());
     app.set_tr_restart_daemon(tr!("Restart daemon").into());
-    app.set_tr_restart_daemon_desc(tr!("Kills the running arc-daemon and starts a fresh one in the background").into());
+    app.set_tr_restart_daemon_desc(
+        tr!("Kills the running arc-daemon and starts a fresh one in the background").into(),
+    );
     app.set_tr_search_placeholder(tr!("Search for applications...").into());
     app.set_tr_proprietary(tr!("Proprietary").into());
     app.set_tr_all_ages(tr!("All ages").into());
@@ -386,7 +408,11 @@ fn main() -> Result<()> {
 
             let (can_back, can_fwd) = {
                 let mut h = history.lock().unwrap();
-                h.push(NavEntry { view: "search".to_string(), search_text: query_str.clone(), ..Default::default() });
+                h.push(NavEntry {
+                    view: "search".to_string(),
+                    search_text: query_str.clone(),
+                    ..Default::default()
+                });
                 (h.can_go_back(), h.can_go_forward())
             };
 
@@ -625,7 +651,9 @@ fn main() -> Result<()> {
 
         app.on_remove_requested(move |pkg_id| {
             let pkg_id_str = pkg_id.to_string();
-            let Some(app) = app_weak.upgrade() else { return };
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
             let display_name = get_display_name(&app, &pkg_id_str);
             let icon = {
                 let pkgs = app.get_packages();
@@ -660,7 +688,12 @@ fn main() -> Result<()> {
                 .upgrade()
                 .map(|a| get_display_name(&a, &pkg_id_str))
                 .unwrap_or_else(|| pkg_id_str.clone());
-            let tx_type = if delete_data { "remove_with_data" } else { "remove" }.to_string();
+            let tx_type = if delete_data {
+                "remove_with_data"
+            } else {
+                "remove"
+            }
+            .to_string();
 
             begin_transaction(
                 pkg_id_str,
@@ -972,7 +1005,11 @@ fn main() -> Result<()> {
 
             let (can_back, can_fwd) = {
                 let mut h = history.lock().unwrap();
-                h.push(NavEntry { view: "detail".to_string(), detail_id: id_str, ..Default::default() });
+                h.push(NavEntry {
+                    view: "detail".to_string(),
+                    detail_id: id_str,
+                    ..Default::default()
+                });
                 (h.can_go_back(), h.can_go_forward())
             };
 
@@ -1533,7 +1570,10 @@ fn main() -> Result<()> {
         app.on_nav_story(move |story| {
             let (can_back, can_fwd) = {
                 let mut h = history.lock().unwrap();
-                h.push(NavEntry { view: "story".to_string(), ..Default::default() });
+                h.push(NavEntry {
+                    view: "story".to_string(),
+                    ..Default::default()
+                });
                 (h.can_go_back(), h.can_go_forward())
             };
             if let Some(app_ref) = app_weak.upgrade() {
@@ -1552,7 +1592,10 @@ fn main() -> Result<()> {
         app.on_nav_settings(move || {
             let (can_back, can_fwd) = {
                 let mut h = history.lock().unwrap();
-                h.push(NavEntry { view: "settings".to_string(), ..Default::default() });
+                h.push(NavEntry {
+                    view: "settings".to_string(),
+                    ..Default::default()
+                });
                 (h.can_go_back(), h.can_go_forward())
             };
             if let Some(app_ref) = app_weak.upgrade() {
@@ -1570,7 +1613,10 @@ fn main() -> Result<()> {
         app.on_nav_installed(move || {
             let (can_back, can_fwd) = {
                 let mut h = history.lock().unwrap();
-                h.push(NavEntry { view: "installed".to_string(), ..Default::default() });
+                h.push(NavEntry {
+                    view: "installed".to_string(),
+                    ..Default::default()
+                });
                 (h.can_go_back(), h.can_go_forward())
             };
             if let Some(app_ref) = app_weak.upgrade() {
@@ -1589,7 +1635,10 @@ fn main() -> Result<()> {
         app.on_nav_downloads(move || {
             let (can_back, can_fwd) = {
                 let mut h = history.lock().unwrap();
-                h.push(NavEntry { view: "downloads".to_string(), ..Default::default() });
+                h.push(NavEntry {
+                    view: "downloads".to_string(),
+                    ..Default::default()
+                });
                 (h.can_go_back(), h.can_go_forward())
             };
             if let Some(app_ref) = app_weak.upgrade() {
@@ -1618,7 +1667,9 @@ fn main() -> Result<()> {
                 let h = history.lock().unwrap();
                 (h.can_go_back(), h.can_go_forward())
             };
-            let Some(app_ref) = app_weak.upgrade() else { return };
+            let Some(app_ref) = app_weak.upgrade() else {
+                return;
+            };
             app_ref.set_can_go_back(can_back);
             app_ref.set_can_go_forward(can_fwd);
             match entry.view.as_str() {
@@ -1683,7 +1734,9 @@ fn main() -> Result<()> {
                 let h = history.lock().unwrap();
                 (h.can_go_back(), h.can_go_forward())
             };
-            let Some(app_ref) = app_weak.upgrade() else { return };
+            let Some(app_ref) = app_weak.upgrade() else {
+                return;
+            };
             app_ref.set_can_go_back(can_back);
             app_ref.set_can_go_forward(can_fwd);
             match entry.view.as_str() {

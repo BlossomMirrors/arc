@@ -12,7 +12,6 @@ export component DetailHeader inherits Rectangle {
     in property <string> settings-preferred;
     in property <bool> has-extensions: false;
     in property <image> icon-trash;
-    in property <string> tr-back: "Back";
     in property <string> tr-install: "Install";
     in property <string> tr-run: "Run";
     in property <string> tr-cancel: "Cancel";
@@ -40,55 +39,6 @@ export component DetailHeader inherits Rectangle {
 
     VerticalLayout {
         spacing: 0px;
-
-        // Back button row
-        HorizontalLayout {
-            padding-left: 30px;
-            padding-right: 30px;
-            padding-top: 20px;
-            padding-bottom: 12px;
-            alignment: start;
-
-            Rectangle {
-                width: back-row.preferred-width + 12px;
-                height: 28px;
-                border-radius: 6px;
-                background: back-ta.has-hover ? #80808018 : #00000000;
-                border-width: 1px;
-                border-color: back-ta.has-hover ? #80808035 : #80808025;
-
-                back-ta := TouchArea {
-                    clicked => {
-                        root.back-clicked();
-                    }
-                }
-
-                back-row := HorizontalLayout {
-                    x: 0;
-                    y: 0;
-                    padding-left: 6px;
-                    padding-right: 8px;
-                    padding-top: 4px;
-                    padding-bottom: 4px;
-                    spacing: 4px;
-                    alignment: center;
-
-                    Text {
-                        text: "←";
-                        font-size: 13px;
-                        vertical-alignment: center;
-                        color: Palette.foreground.transparentize(0.2);
-                    }
-
-                    Text {
-                        text: root.tr-back;
-                        font-size: 13px;
-                        vertical-alignment: center;
-                        color: Palette.foreground.transparentize(0.2);
-                    }
-                }
-            }
-        }
 
         // App info row: icon | name/developer/badges (stretch) | install button
         HorizontalLayout {
@@ -138,7 +88,7 @@ export component DetailHeader inherits Rectangle {
                             colorize: #0d6efd;
                         }
 
-                        verified-ta := TouchArea {}
+                        verified-ta := TouchArea { }
 
                         if verified-ta.has-hover: Rectangle {
                             x: 0px;
@@ -170,16 +120,12 @@ export component DetailHeader inherits Rectangle {
                     }
 
                     if root.detail-app.license != "": Badge {
-                        label: root.detail-app.license == "Proprietary"
-                            ? root.tr-proprietary
-                            : root.detail-app.license;
+                        label: root.detail-app.license == "Proprietary" ? root.tr-proprietary : root.detail-app.license;
                         accent: root.detail-app.license == "Proprietary" ? #ef4444 : #3b82f6;
                     }
 
                     if root.detail-app.content-rating != "": Badge {
-                        label: root.detail-app.content-rating == "All ages"
-                            ? root.tr-all-ages
-                            : root.detail-app.content-rating;
+                        label: root.detail-app.content-rating == "All ages" ? root.tr-all-ages : root.detail-app.content-rating;
                         accent: root.detail-app.content-rating == "18+" ? #ef4444 : root.detail-app.content-rating == "12+" ? #f97316 : root.detail-app.content-rating == "7+" ? #eab308 : Palette.foreground.transparentize(0.4);
                     }
 
@@ -226,8 +172,7 @@ export component DetailHeader inherits Rectangle {
                         width: root.shared-btn-height;
                         height: root.shared-btn-height;
                         border-radius: 8px;
-                        background: root.btn-active-id == "" ? #80808030 :
-                            (remove-ta.has-hover ? #dc2626 : #ef4444);
+                        background: root.btn-active-id == "" ? #80808030 : (remove-ta.has-hover ? #dc2626 : #ef4444);
                         border-width: root.btn-active-id == "" ? 1px : 0px;
                         border-color: #80808040;
 
@@ -252,8 +197,7 @@ export component DetailHeader inherits Rectangle {
                         width: root.shared-btn-width;
                         height: root.shared-btn-height;
                         border-radius: 8px;
-                        background: root.btn-active-id == "" ? #80808030 :
-                            (install-ta.has-hover ? #80808035 : #80808020);
+                        background: root.btn-active-id == "" ? #80808030 : (install-ta.has-hover ? #80808035 : #80808020);
                         border-width: 1px;
                         border-color: #80808040;
 
@@ -272,9 +216,7 @@ export component DetailHeader inherits Rectangle {
                             text: root.tr-install;
                             font-size: 13px;
                             font-weight: 600;
-                            color: root.btn-active-id == "" ?
-                                Palette.foreground.transparentize(0.6) :
-                                Palette.foreground.transparentize(0.05);
+                            color: root.btn-active-id == "" ? Palette.foreground.transparentize(0.6) : Palette.foreground.transparentize(0.05);
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
