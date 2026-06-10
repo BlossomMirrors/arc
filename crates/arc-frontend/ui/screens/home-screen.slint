@@ -33,6 +33,8 @@ export component HomeScreen inherits Rectangle {
     callback story-selected(StoryItem);
     callback open-url-requested(string);
 
+    in-out property <length> scroll-y: 0px;
+
     clip: true;
 
     if root.home-loading: VerticalBox {
@@ -43,10 +45,12 @@ export component HomeScreen inherits Rectangle {
         }
     }
 
-    if !root.home-loading: scroller := ScrollView {
+    scroller := ScrollView {
+        visible: !root.home-loading;
         width: parent.width;
         height: parent.height;
         viewport-width: self.visible-width;
+        viewport-y <=> root.scroll-y;
 
         VerticalLayout {
             padding-left: 20px;

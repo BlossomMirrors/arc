@@ -8,6 +8,10 @@ export component TopBar inherits Rectangle {
     in property <image> icon-home;
     in property <image> icon-search;
     in property <image> icon-settings;
+    in property <image> icon-nav-back;
+    in property <image> icon-nav-forward;
+    in property <bool> can-go-back: false;
+    in property <bool> can-go-forward: false;
 
     in property <string> tr-search-placeholder: "Search for applications...";
     in property <string> tr-installed: "Installed";
@@ -18,6 +22,8 @@ export component TopBar inherits Rectangle {
     callback downloads-clicked();
     callback home-clicked();
     callback settings-clicked();
+    callback nav-back();
+    callback nav-forward();
 
     public function clear-search-focus() {
         search-input.clear-focus();
@@ -38,11 +44,66 @@ export component TopBar inherits Rectangle {
         spacing: 0px;
 
         HorizontalLayout {
-            padding-left: 16px;
+            padding-left: 12px;
             padding-right: 16px;
             padding-top: 8px;
             padding-bottom: 11px;
-            spacing: 12px;
+            spacing: 8px;
+
+            // Back / forward navigation buttons
+            Rectangle {
+                width: 56px;
+                border-radius: 6px;
+                background: transparent;
+
+                HorizontalLayout {
+                    spacing: 0px;
+
+                    Rectangle {
+                        width: 28px;
+                        border-radius: 6px;
+                        background: back-nav-ta.has-hover && root.can-go-back ? #80808018 : #00000000;
+
+                        back-nav-ta := TouchArea {
+                            enabled: root.can-go-back;
+                            mouse-cursor: root.can-go-back ? pointer : default;
+                            clicked => { root.nav-back(); }
+                        }
+
+                        Image {
+                            width: 14px;
+                            height: 14px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            source: root.icon-nav-back;
+                            colorize: root.can-go-back ? Palette.foreground : Palette.foreground.transparentize(0.65);
+                            image-fit: contain;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 28px;
+                        border-radius: 6px;
+                        background: fwd-nav-ta.has-hover && root.can-go-forward ? #80808018 : #00000000;
+
+                        fwd-nav-ta := TouchArea {
+                            enabled: root.can-go-forward;
+                            mouse-cursor: root.can-go-forward ? pointer : default;
+                            clicked => { root.nav-forward(); }
+                        }
+
+                        Image {
+                            width: 14px;
+                            height: 14px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            source: root.icon-nav-forward;
+                            colorize: root.can-go-forward ? Palette.foreground : Palette.foreground.transparentize(0.65);
+                            image-fit: contain;
+                        }
+                    }
+                }
+            }
 
             Rectangle {
                 width: 34px;

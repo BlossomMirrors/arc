@@ -23,6 +23,63 @@ use transactions::{
 slint::include_modules!();
 include!(concat!(env!("OUT_DIR"), "/locale/translators.rs"));
 
+#[derive(Clone, Debug, Default)]
+struct NavEntry {
+    view: String,
+    detail_id: String,
+    search_text: String,
+}
+
+struct NavHistory {
+    entries: Vec<NavEntry>,
+    cursor: usize,
+}
+
+impl NavHistory {
+    fn new() -> Self {
+        Self {
+            entries: vec![NavEntry { view: "home".to_string(), ..Default::default() }],
+            cursor: 0,
+        }
+    }
+
+    fn push(&mut self, entry: NavEntry) {
+        self.entries.truncate(self.cursor + 1);
+        self.entries.push(entry);
+        self.cursor = self.entries.len() - 1;
+    }
+
+    fn can_go_back(&self) -> bool {
+        self.cursor > 0
+    }
+
+    fn can_go_forward(&self) -> bool {
+        self.cursor < self.entries.len() - 1
+    }
+
+    fn back(&mut self) -> Option<NavEntry> {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+            Some(self.entries[self.cursor].clone())
+        } else {
+            None
+        }
+    }
+
+    fn forward(&mut self) -> Option<NavEntry> {
+        if self.cursor < self.entries.len() - 1 {
+            self.cursor += 1;
+            Some(self.entries[self.cursor].clone())
+        } else {
+            None
+        }
+    }
+
+    fn reset(&mut self) {
+        *self = Self::new();
+    }
+}
+
 fn apply_translations(app: &AppWindow) {
     use tr::tr;
     app.set_tr_install(tr!("Install").into());
@@ -150,6 +207,16 @@ fn main() -> Result<()> {
     if let Some(icon) = icons::load_ui_icon_large("package-x-generic-symbolic") {
         app.set_icon_package(icon.to_slint_image());
     }
+    if let Some(icon) = icons::load_ui_icon("go-previous-symbolic") {
+        app.set_icon_nav_back(icon.to_slint_image());
+    }
+    if let Some(icon) = icons::load_ui_icon("go-next-symbolic") {
+        app.set_icon_nav_forward(icon.to_slint_image());
+    }
+
+    let nav_history: Arc<Mutex<NavHistory>> = Arc::new(Mutex::new(NavHistory::new()));
+
+    let rt_handle_global = rt.handle().clone();
 
     let proxy_opt: Arc<Mutex<Option<ArcDaemonProxy<'static>>>> =
         Arc::new(Mutex::new(proxy_result.ok()));
@@ -182,14 +249,24 @@ fn main() -> Result<()> {
     {
         let app_weak = app.as_weak();
         let proxy = proxy_opt.lock().unwrap().clone();
-        let rt_handle = rt.handle().clone();
+        let rt_handle = rt_handle_global.clone();
+        let history = nav_history.clone();
 
         app.on_home_clicked(move || {
-            let app_weak = app_weak.clone();
-            let proxy = proxy.clone();
-            let rt_handle = rt_handle.clone();
-            rt_handle.spawn(async move {
-                refresh_home_installed(app_weak, proxy).await;
+            {
+                let mut h = history.lock().unwrap();
+                h.reset();
+            }
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_can_go_back(false);
+                app_ref.set_can_go_forward(false);
+                app_ref.set_current_view("home".into());
+            }
+            let app_weak2 = app_weak.clone();
+            let proxy2 = proxy.clone();
+            let rt_handle2 = rt_handle.clone();
+            rt_handle2.spawn(async move {
+                refresh_home_installed(app_weak2, proxy2).await;
             });
         });
     }
@@ -197,7 +274,7 @@ fn main() -> Result<()> {
     {
         let app_weak = app.as_weak();
         let proxy = proxy_opt.lock().unwrap().clone();
-        let rt_handle = rt.handle().clone();
+        let rt_handle = rt_handle_global.clone();
 
         app.on_back_to_home(move || {
             let app_weak = app_weak.clone();
@@ -299,6 +376,7 @@ fn main() -> Result<()> {
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
         let settings = settings.clone();
+        let history = nav_history.clone();
 
         app.on_search_requested(move |query| {
             let query_str = query.to_string();
@@ -306,7 +384,16 @@ fn main() -> Result<()> {
                 return;
             }
 
+            let (can_back, can_fwd) = {
+                let mut h = history.lock().unwrap();
+                h.push(NavEntry { view: "search".to_string(), search_text: query_str.clone(), ..Default::default() });
+                (h.can_go_back(), h.can_go_forward())
+            };
+
             if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_can_go_back(can_back);
+                app_ref.set_can_go_forward(can_fwd);
+                app_ref.set_current_view("search".into());
                 app_ref.set_packages([].as_slice().into());
                 app_ref.set_is_loading(true);
             }
@@ -871,8 +958,10 @@ fn main() -> Result<()> {
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
         let store = tx_store.clone();
+        let history = nav_history.clone();
 
         app.on_detail_requested(move |id| {
+            let id_str = id.to_string();
             let app_weak2 = app_weak.clone();
             let proxy = get_proxy(&proxy_arc);
             let store = store.clone();
@@ -881,7 +970,15 @@ fn main() -> Result<()> {
                 load_detail(id, proxy, store, app_weak2).await;
             });
 
+            let (can_back, can_fwd) = {
+                let mut h = history.lock().unwrap();
+                h.push(NavEntry { view: "detail".to_string(), detail_id: id_str, ..Default::default() });
+                (h.can_go_back(), h.can_go_forward())
+            };
+
             if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_can_go_back(can_back);
+                app_ref.set_can_go_forward(can_fwd);
                 app_ref.set_detail_screenshots([].as_slice().into());
                 app_ref.set_detail_description_blocks([].as_slice().into());
                 app_ref.set_detail_loading(true);
@@ -1427,6 +1524,211 @@ fn main() -> Result<()> {
                 });
             }
         }
+    }
+
+    // Nav: story
+    {
+        let app_weak = app.as_weak();
+        let history = nav_history.clone();
+        app.on_nav_story(move |story| {
+            let (can_back, can_fwd) = {
+                let mut h = history.lock().unwrap();
+                h.push(NavEntry { view: "story".to_string(), ..Default::default() });
+                (h.can_go_back(), h.can_go_forward())
+            };
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_can_go_back(can_back);
+                app_ref.set_can_go_forward(can_fwd);
+                app_ref.set_current_story(story);
+                app_ref.set_current_view("story".into());
+            }
+        });
+    }
+
+    // Nav: settings
+    {
+        let app_weak = app.as_weak();
+        let history = nav_history.clone();
+        app.on_nav_settings(move || {
+            let (can_back, can_fwd) = {
+                let mut h = history.lock().unwrap();
+                h.push(NavEntry { view: "settings".to_string(), ..Default::default() });
+                (h.can_go_back(), h.can_go_forward())
+            };
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_can_go_back(can_back);
+                app_ref.set_can_go_forward(can_fwd);
+                app_ref.set_current_view("settings".into());
+            }
+        });
+    }
+
+    // Nav: installed tab
+    {
+        let app_weak = app.as_weak();
+        let history = nav_history.clone();
+        app.on_nav_installed(move || {
+            let (can_back, can_fwd) = {
+                let mut h = history.lock().unwrap();
+                h.push(NavEntry { view: "installed".to_string(), ..Default::default() });
+                (h.can_go_back(), h.can_go_forward())
+            };
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_can_go_back(can_back);
+                app_ref.set_can_go_forward(can_fwd);
+                app_ref.set_current_view("installed".into());
+                app_ref.invoke_refresh_requested();
+            }
+        });
+    }
+
+    // Nav: downloads tab
+    {
+        let app_weak = app.as_weak();
+        let history = nav_history.clone();
+        app.on_nav_downloads(move || {
+            let (can_back, can_fwd) = {
+                let mut h = history.lock().unwrap();
+                h.push(NavEntry { view: "downloads".to_string(), ..Default::default() });
+                (h.can_go_back(), h.can_go_forward())
+            };
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_can_go_back(can_back);
+                app_ref.set_can_go_forward(can_fwd);
+                app_ref.set_current_view("downloads".into());
+                app_ref.invoke_refresh_updates_requested();
+            }
+        });
+    }
+
+    // Nav: back
+    {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt_handle_global.clone();
+        let store = tx_store.clone();
+        let history = nav_history.clone();
+        app.on_nav_back(move || {
+            let entry = {
+                let mut h = history.lock().unwrap();
+                h.back()
+            };
+            let Some(entry) = entry else { return };
+            let (can_back, can_fwd) = {
+                let h = history.lock().unwrap();
+                (h.can_go_back(), h.can_go_forward())
+            };
+            let Some(app_ref) = app_weak.upgrade() else { return };
+            app_ref.set_can_go_back(can_back);
+            app_ref.set_can_go_forward(can_fwd);
+            match entry.view.as_str() {
+                "home" => {
+                    app_ref.set_current_view("home".into());
+                    let app_weak2 = app_weak.clone();
+                    let proxy2 = proxy_arc.lock().unwrap().clone();
+                    let rt2 = rt_handle.clone();
+                    rt2.spawn(async move {
+                        refresh_home_installed(app_weak2, proxy2).await;
+                    });
+                }
+                "detail" => {
+                    let id: slint::SharedString = entry.detail_id.into();
+                    let app_weak2 = app_weak.clone();
+                    let proxy2 = get_proxy(&proxy_arc);
+                    let store2 = store.clone();
+                    rt_handle.spawn(async move {
+                        load_detail(id, proxy2, store2, app_weak2).await;
+                    });
+                    app_ref.set_detail_screenshots([].as_slice().into());
+                    app_ref.set_detail_description_blocks([].as_slice().into());
+                    app_ref.set_detail_loading(true);
+                    app_ref.set_current_view("detail".into());
+                }
+                "story" => {
+                    app_ref.set_current_view("story".into());
+                }
+                "settings" => {
+                    app_ref.set_current_view("settings".into());
+                }
+                "installed" => {
+                    app_ref.set_current_view("installed".into());
+                    app_ref.invoke_refresh_requested();
+                }
+                "downloads" => {
+                    app_ref.set_current_view("downloads".into());
+                    app_ref.invoke_refresh_updates_requested();
+                }
+                "search" => {
+                    app_ref.set_current_view("search".into());
+                }
+                _ => {}
+            }
+        });
+    }
+
+    // Nav: forward
+    {
+        let app_weak = app.as_weak();
+        let proxy_arc = proxy_opt.clone();
+        let rt_handle = rt_handle_global.clone();
+        let store = tx_store.clone();
+        let history = nav_history.clone();
+        app.on_nav_forward(move || {
+            let entry = {
+                let mut h = history.lock().unwrap();
+                h.forward()
+            };
+            let Some(entry) = entry else { return };
+            let (can_back, can_fwd) = {
+                let h = history.lock().unwrap();
+                (h.can_go_back(), h.can_go_forward())
+            };
+            let Some(app_ref) = app_weak.upgrade() else { return };
+            app_ref.set_can_go_back(can_back);
+            app_ref.set_can_go_forward(can_fwd);
+            match entry.view.as_str() {
+                "home" => {
+                    app_ref.set_current_view("home".into());
+                    let app_weak2 = app_weak.clone();
+                    let proxy2 = proxy_arc.lock().unwrap().clone();
+                    let rt2 = rt_handle.clone();
+                    rt2.spawn(async move {
+                        refresh_home_installed(app_weak2, proxy2).await;
+                    });
+                }
+                "detail" => {
+                    let id: slint::SharedString = entry.detail_id.into();
+                    let app_weak2 = app_weak.clone();
+                    let proxy2 = get_proxy(&proxy_arc);
+                    let store2 = store.clone();
+                    rt_handle.spawn(async move {
+                        load_detail(id, proxy2, store2, app_weak2).await;
+                    });
+                    app_ref.set_detail_screenshots([].as_slice().into());
+                    app_ref.set_detail_description_blocks([].as_slice().into());
+                    app_ref.set_detail_loading(true);
+                    app_ref.set_current_view("detail".into());
+                }
+                "story" => {
+                    app_ref.set_current_view("story".into());
+                }
+                "settings" => {
+                    app_ref.set_current_view("settings".into());
+                }
+                "installed" => {
+                    app_ref.set_current_view("installed".into());
+                    app_ref.invoke_refresh_requested();
+                }
+                "downloads" => {
+                    app_ref.set_current_view("downloads".into());
+                    app_ref.invoke_refresh_updates_requested();
+                }
+                "search" => {
+                    app_ref.set_current_view("search".into());
+                }
+                _ => {}
+            }
+        });
     }
 
     app.on_open_url_requested(|url| {

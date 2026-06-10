@@ -208,6 +208,18 @@ export component AppWindow inherits Window {
     in-out property <image> icon-settings;
     in-out property <image> icon-trash;
     in-out property <image> icon-package;
+    in-out property <image> icon-nav-back;
+    in-out property <image> icon-nav-forward;
+
+    in property <bool> can-go-back: false;
+    in property <bool> can-go-forward: false;
+
+    callback nav-back();
+    callback nav-forward();
+    callback nav-story(StoryItem);
+    callback nav-settings();
+    callback nav-installed();
+    callback nav-downloads();
 
     callback detail-requested(string);
     callback search-requested(string);
@@ -258,29 +270,30 @@ export component AppWindow inherits Window {
             icon-home: root.icon-home;
             icon-search: root.icon-search;
             icon-settings: root.icon-settings;
+            icon-nav-back: root.icon-nav-back;
+            icon-nav-forward: root.icon-nav-forward;
+            can-go-back: root.can-go-back;
+            can-go-forward: root.can-go-forward;
             tr-search-placeholder: root.tr-search-placeholder;
             tr-installed: root.tr-installed;
             tr-downloads: root.tr-downloads;
             search-requested(text) => {
-                root.current-view = "search";
                 root.search-requested(text);
             }
             installed-clicked => {
-                root.current-view = "installed";
-                root.refresh-requested();
+                root.nav-installed();
             }
             downloads-clicked => {
-                root.current-view = "downloads";
-                root.refresh-updates-requested();
+                root.nav-downloads();
             }
             home-clicked => {
-                root.current-view = "home";
                 root.home-clicked();
             }
             settings-clicked => {
-                root.prev-view = root.current-view;
-                root.current-view = "settings";
+                root.nav-settings();
             }
+            nav-back => { root.nav-back(); }
+            nav-forward => { root.nav-forward(); }
         }
 
         Rectangle {
@@ -296,7 +309,8 @@ export component AppWindow inherits Window {
                 }
             }
 
-            if root.current-view == "home": HomeScreen {
+            HomeScreen {
+                visible: root.current-view == "home";
                 width: parent.width;
                 height: parent.height;
                 home-items: root.home-items;
@@ -308,16 +322,13 @@ export component AppWindow inherits Window {
                 tr-categories: root.tr-categories;
                 tr-recommended-apps: root.tr-recommended-apps;
                 detail-requested(id) => {
-                    root.prev-view = "home";
                     root.detail-requested(id);
                 }
                 category-selected(id) => {
                     root.category-selected(id);
                 }
                 story-selected(story) => {
-                    root.current-story = story;
-                    root.prev-view = "home";
-                    root.current-view = "story";
+                    root.nav-story(story);
                 }
                 open-url-requested(url) => {
                     root.open-url-requested(url);
@@ -331,10 +342,9 @@ export component AppWindow inherits Window {
                 tr-back: root.tr-back;
                 tr-installed: root.tr-installed;
                 back-clicked => {
-                    root.current-view = root.prev-view;
+                    root.nav-back();
                 }
                 app-clicked(id) => {
-                    root.prev-view = "story";
                     root.detail-requested(id);
                 }
             }
@@ -356,7 +366,6 @@ export component AppWindow inherits Window {
                 tr-cancel: root.tr-cancel;
                 tr-installing: root.tr-installing;
                 detail-requested(id) => {
-                    root.prev-view = root.current-view;
                     root.detail-requested(id);
                 }
                 install-requested(id) => {
@@ -400,10 +409,7 @@ export component AppWindow inherits Window {
                 tr-all-ages: root.tr-all-ages;
                 tr-pwa: root.tr-pwa;
                 back-clicked => {
-                    if root.prev-view == "home" {
-                        root.back-to-home();
-                    }
-                    root.current-view = root.prev-view;
+                    root.nav-back();
                 }
                 install-requested(id) => {
                     root.install-requested(id);
@@ -477,7 +483,6 @@ export component AppWindow inherits Window {
                     root.cancel-requested(id);
                 }
                 detail-requested(id) => {
-                    root.prev-view = "downloads";
                     root.detail-requested(id);
                 }
             }
@@ -613,7 +618,7 @@ export component AppWindow inherits Window {
                 settings-remotes <=> root.settings-remotes;
                 settings-remotes-loading <=> root.settings-remotes-loading;
                 back-clicked => {
-                    root.current-view = root.prev-view;
+                    root.nav-back();
                 }
                 save-settings(preferred, ignore, auto_upd, concur, warnings) => {
                     root.save-settings(preferred, ignore, auto_upd, concur, warnings);
