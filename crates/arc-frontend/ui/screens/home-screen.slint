@@ -247,9 +247,7 @@ export component HomeScreen inherits Rectangle {
                                 Text {
                                     text: link.text;
                                     font-size: 14px;
-                                    color: link.href != ""
-                                        ? Palette.foreground.transparentize(0.15)
-                                        : Palette.foreground;
+                                    color: link.href != "" ? Palette.foreground.transparentize(0.15) : Palette.foreground;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
                                 }
@@ -290,10 +288,11 @@ export component HomeScreen inherits Rectangle {
 
                     HorizontalLayout {
                         alignment: center;
+                        height: ((root.categories.length + 2) / 3) * 114px - 10px;
 
                         Rectangle {
                             width: min(parent.width, 750px);
-                            height: ((root.categories.length + 2) / 3) * 114px;
+                            height: ((root.categories.length + 2) / 3) * 114px - 10px;
 
                             for cat[j] in root.categories: CategoryCard {
                                 x: mod(j, 3) * (parent.width + 12px) / 3;
