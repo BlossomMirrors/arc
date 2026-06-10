@@ -2,6 +2,7 @@ import { Button } from "std-widgets.slint";
 import { Palette } from "std-widgets.slint";
 import { AppDetailData } from "../types.slint";
 import { Badge } from "badge.slint";
+import { AppIcon } from "app-icon.slint";
 
 export component DetailHeader inherits Rectangle {
     in property <AppDetailData> detail-app;
@@ -97,22 +98,9 @@ export component DetailHeader inherits Rectangle {
             spacing: 20px;
 
             // App icon
-            Rectangle {
-                width: 96px;
-                height: 96px;
-                border-radius: 16px;
-                background: #80808012;
-                border-width: 1px;
-                border-color: #80808025;
-
-                Image {
-                    source: root.detail-app.icon;
-                    width: 80px;
-                    height: 80px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    image-fit: contain;
-                }
+            AppIcon {
+                size: 96px;
+                icon: root.detail-app.icon;
             }
 
             // Name / developer / metadata chips

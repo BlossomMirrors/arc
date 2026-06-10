@@ -1,6 +1,7 @@
 import { ListView, VerticalBox } from "std-widgets.slint";
 import { Palette, HorizontalBox } from "std-widgets.slint";
 import { PackageItem } from "../types.slint";
+import { AppIcon } from "../components/app-icon.slint";
 
 export component PackageListScreen inherits Rectangle {
     in property <[PackageItem]> packages;
@@ -71,22 +72,9 @@ export component PackageListScreen inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
 
-                        Rectangle {
-                            width: 40px;
-                            height: 40px;
-                            border-radius: 8px;
-                            background: #80808015;
-                            border-width: 1px;
-                            border-color: #80808020;
-
-                            Image {
-                                source: pkg.icon;
-                                width: 32px;
-                                height: 32px;
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                                image-fit: contain;
-                            }
+                        AppIcon {
+                            size: 40px;
+                            icon: pkg.icon;
                         }
                     }
 

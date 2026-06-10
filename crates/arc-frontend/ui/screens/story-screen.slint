@@ -1,6 +1,7 @@
 import { Palette, ScrollView } from "std-widgets.slint";
 import { StoryItem } from "../types.slint";
 import { AppCard } from "../components/app-card.slint";
+import { AppIcon } from "../components/app-icon.slint";
 
 export component StoryScreen inherits Rectangle {
     in property <StoryItem> story;
@@ -167,22 +168,9 @@ export component StoryScreen inherits Rectangle {
                             spacing: 12px;
                             alignment: start;
 
-                            Rectangle {
-                                width: 48px;
-                                height: 48px;
-                                border-radius: 10px;
-                                background: #80808012;
-                                border-width: 1px;
-                                border-color: #80808025;
-
-                                Image {
-                                    source: block.app-card.icon;
-                                    width: 38px;
-                                    height: 38px;
-                                    x: (parent.width - self.width) / 2;
-                                    y: (parent.height - self.height) / 2;
-                                    image-fit: contain;
-                                }
+                            AppIcon {
+                                size: 48px;
+                                icon: block.app-card.icon;
                             }
 
                             VerticalLayout {
@@ -232,22 +220,9 @@ export component StoryScreen inherits Rectangle {
                             alignment: start;
 
                             // App icon
-                            Rectangle {
-                                width: 56px;
-                                height: 56px;
-                                border-radius: 12px;
-                                background: #80808012;
-                                border-width: 1px;
-                                border-color: #80808025;
-
-                                Image {
-                                    source: app.icon;
-                                    width: 44px;
-                                    height: 44px;
-                                    x: (parent.width - self.width) / 2;
-                                    y: (parent.height - self.height) / 2;
-                                    image-fit: contain;
-                                }
+                            AppIcon {
+                                size: 56px;
+                                icon: app.icon;
                             }
 
                             VerticalLayout {

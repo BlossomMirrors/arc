@@ -1,0 +1,19 @@
+import { Palette } from "std-widgets.slint";
+
+export component AppIcon inherits Rectangle {
+    in property <length> size: 44px;
+    in property <image> icon;
+
+    width: root.size;
+    height: root.size;
+    border-radius: root.size / 6;
+    background: Palette.foreground.transparentize(0.94);
+    clip: true;
+
+    Image {
+        source: root.icon;
+        width: parent.width;
+        height: parent.height;
+        image-fit: contain;
+    }
+}

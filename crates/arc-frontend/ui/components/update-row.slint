@@ -1,5 +1,6 @@
 import { Palette } from "std-widgets.slint";
 import { PackageItem } from "../types.slint";
+import { AppIcon } from "app-icon.slint";
 
 export component UpdateRow inherits Rectangle {
     in property <PackageItem> item;
@@ -23,22 +24,9 @@ export component UpdateRow inherits Rectangle {
         padding-bottom: 10px;
         spacing: 14px;
 
-        Rectangle {
-            width: 44px;
-            height: 44px;
-            border-radius: 8px;
-            background: #80808012;
-            border-width: 1px;
-            border-color: #80808020;
-
-            Image {
-                source: root.item.icon;
-                width: 34px;
-                height: 34px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                image-fit: contain;
-            }
+        AppIcon {
+            size: 44px;
+            icon: root.item.icon;
         }
 
         VerticalLayout {

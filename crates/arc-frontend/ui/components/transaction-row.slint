@@ -1,5 +1,6 @@
 import { Palette, HorizontalBox } from "std-widgets.slint";
 import { TransactionItem } from "../types.slint";
+import { AppIcon } from "app-icon.slint";
 
 export component TransactionRow inherits Rectangle {
     in property <TransactionItem> item;
@@ -44,23 +45,10 @@ export component TransactionRow inherits Rectangle {
             spacing: 12px;
 
             // Icon, pinned to center of the full card height (ignores asymmetric padding)
-            Rectangle {
-                width: 36px;
-                height: 36px;
+            AppIcon {
+                size: 36px;
+                icon: root.item.icon;
                 y: (parent.height - self.height) / 2;
-                border-radius: 8px;
-                background: #80808018;
-                border-width: 1px;
-                border-color: #80808020;
-
-                Image {
-                    source: root.item.icon;
-                    width: 26px;
-                    height: 26px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    image-fit: contain;
-                }
             }
 
             Text {
