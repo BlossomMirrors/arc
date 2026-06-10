@@ -7,6 +7,40 @@ use tracing::{info, warn};
 
 const FORGE_PWAS_BASE: &str = "https://forge.blossomos.org/api/pwas";
 
+const ICON_SIZE: u32 = 240;
+const CORNER_RADIUS: u32 = 45; // 45/240 ≈ 18.75%
+
+/// Decode a raster image from `bytes`, resize to ICON_SIZE×ICON_SIZE, punch out
+/// the four corners with radius CORNER_RADIUS, and re-encode as PNG.
+/// Returns None if the bytes aren't a recognised image format.
+fn round_pwa_icon(bytes: &[u8]) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(bytes).ok()?;
+    let img = img.resize_exact(ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3);
+    let mut rgba = img.into_rgba8();
+
+    let r = CORNER_RADIUS as i64;
+    let s = ICON_SIZE as i64;
+    let r2 = r * r;
+
+    for y in 0..s {
+        for x in 0..s {
+            // Distance from the nearest corner centre along each axis.
+            // Non-zero only when the pixel is within the corner band.
+            let dx = if x < r { r - x } else if x >= s - r { x - (s - r - 1) } else { 0 };
+            let dy = if y < r { r - y } else if y >= s - r { y - (s - r - 1) } else { 0 };
+            if dx > 0 && dy > 0 && dx * dx + dy * dy > r2 {
+                rgba.get_pixel_mut(x as u32, y as u32)[3] = 0;
+            }
+        }
+    }
+
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(rgba)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .ok()?;
+    Some(out.into_inner())
+}
+
 fn detect_lang() -> String {
     for var in ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"] {
         if let Ok(val) = std::env::var(var) {
@@ -113,11 +147,8 @@ impl PwaProvider {
     }
 
     async fn download_icon(&self, appid: &str, icon_url: &str) -> (String, String) {
-        let ext = if icon_url.contains(".svg") {
-            "svg"
-        } else {
-            "png"
-        };
+        let is_svg = icon_url.contains(".svg");
+        let ext = if is_svg { "svg" } else { "png" };
         let icon_name = format!("arc-pwa-{}", appid);
         let icon_path = self.icons_dir.join(format!("{}.{}", icon_name, ext));
         let icon_path_str = icon_path.to_string_lossy().to_string();
@@ -136,7 +167,12 @@ impl PwaProvider {
         {
             Ok(r) => match r.bytes().await {
                 Ok(bytes) => {
-                    if let Err(e) = std::fs::write(&icon_path, &bytes) {
+                    let to_write: Vec<u8> = if is_svg {
+                        bytes.to_vec()
+                    } else {
+                        round_pwa_icon(&bytes).unwrap_or_else(|| bytes.to_vec())
+                    };
+                    if let Err(e) = std::fs::write(&icon_path, &to_write) {
                         warn!("Could not write icon: {}", e);
                     }
                 }
