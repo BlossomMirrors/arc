@@ -786,7 +786,7 @@ pub async fn load_home(
                     hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
                 });
             }
-            FpSection::LinksSection { title, items } => {
+            FpSection::LinksSection { title, items, .. } => {
                 let story_offset = raw_stories.len();
                 let mut link_items: Vec<RawLinkItem> = Vec::new();
                 let mut story_forge: Vec<crate::forge::ForgeStory> = Vec::new();
