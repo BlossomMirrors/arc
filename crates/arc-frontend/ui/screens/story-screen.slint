@@ -93,20 +93,21 @@ export component StoryScreen inherits Rectangle {
                     color: Palette.foreground;
                 }
 
-                // Description blocks (HTML body parsed into paragraphs/headings/images)
+                // Description blocks (HTML body parsed into paragraphs/headings/images/app-links)
                 for block in root.story.description-blocks: Rectangle {
                     width: parent.width;
                     height: block.is-image
                         ? (parent.width * 9 / 16 + 20px)
-                        : (block-text.preferred-height + (block.is-heading ? 24px : 12px));
+                        : block.is-app
+                            ? (block.app-card.id != "" ? 88px : 0px)
+                            : (block-text.preferred-height + (block.is-heading ? 24px : 12px));
 
-                    // Text (always present; zero-width when this is an image block so it
-                    // contributes zero preferred-height and is invisible)
+                    // Text (zero-width/zero-text for image and app blocks)
                     block-text := Text {
                         x: 0;
                         y: block.is-heading ? 16px : 8px;
-                        width: block.is-image ? 0px : parent.width;
-                        text: block.is-image ? "" : block.text;
+                        width: (block.is-image || block.is-app) ? 0px : parent.width;
+                        text: (block.is-image || block.is-app) ? "" : block.text;
                         font-size: block.is-heading ? 16px : 14px;
                         font-weight: block.is-heading ? 700 : (block.is-bold ? 600 : 400);
                         color: block.is-heading
@@ -141,6 +142,69 @@ export component StoryScreen inherits Rectangle {
                         font-size: 11px;
                         color: Palette.foreground.transparentize(0.5);
                         horizontal-alignment: center;
+                    }
+
+                    // Inline app card
+                    if block.is-app && block.app-card.id != "": Rectangle {
+                        x: 0;
+                        y: 8px;
+                        width: parent.width;
+                        height: 72px;
+                        border-radius: 12px;
+                        background: app-link-ta.has-hover
+                            ? Palette.alternate-background.darker(0.03)
+                            : Palette.alternate-background;
+                        border-width: 1px;
+                        border-color: Palette.foreground.transparentize(0.9);
+
+                        app-link-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.app-clicked(block.app-card.id); }
+                        }
+
+                        HorizontalLayout {
+                            padding: 12px;
+                            spacing: 12px;
+                            alignment: start;
+
+                            Rectangle {
+                                width: 48px;
+                                height: 48px;
+                                border-radius: 10px;
+                                background: #80808012;
+                                border-width: 1px;
+                                border-color: #80808025;
+
+                                Image {
+                                    source: block.app-card.icon;
+                                    width: 38px;
+                                    height: 38px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    image-fit: contain;
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 3px;
+
+                                Text {
+                                    text: block.app-card.name;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                    overflow: elide;
+                                    color: Palette.foreground;
+                                }
+
+                                Text {
+                                    text: block.app-card.summary;
+                                    font-size: 12px;
+                                    color: Palette.foreground.transparentize(0.45);
+                                    overflow: elide;
+                                }
+                            }
+                        }
                     }
                 }
 

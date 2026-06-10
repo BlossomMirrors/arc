@@ -10,6 +10,14 @@ export struct PackageItem {
     transaction-id: string,
 }
 
+export struct AppCardData {
+    id: string,
+    name: string,
+    summary: string,
+    icon: image,
+    installed: bool,
+}
+
 export struct DescriptionBlock {
     text: string,
     is-list-item: bool,
@@ -17,6 +25,8 @@ export struct DescriptionBlock {
     is-bold: bool,
     is-image: bool,
     image: image,
+    is-app: bool,
+    app-card: AppCardData,
 }
 
 export struct AppDetailData {
@@ -41,14 +51,6 @@ export struct AppDetailData {
     eula-url: string,
     homepage-url: string,
     content-rating: string,
-}
-
-export struct AppCardData {
-    id: string,
-    name: string,
-    summary: string,
-    icon: image,
-    installed: bool,
 }
 
 export struct CategoryItem {

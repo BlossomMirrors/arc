@@ -44,12 +44,15 @@ pub(crate) struct DescBlock {
     is_image: bool,
     image_url: String,
     pub image: Option<RawIcon>,
+    pub is_app: bool,
+    pub app_id: String,
+    pub app_card: Option<RawCard>,
 }
 
 // Split a block's text on `**...**` markers into bold and normal segments.
 // Headings are already bold so we skip splitting them.
 fn text_block(text: String, is_list_item: bool, is_heading: bool, is_bold: bool) -> DescBlock {
-    DescBlock { text, is_list_item, is_heading, is_bold, is_image: false, image_url: String::new(), image: None }
+    DescBlock { text, is_list_item, is_heading, is_bold, is_image: false, image_url: String::new(), image: None, is_app: false, app_id: String::new(), app_card: None }
 }
 
 fn split_bold(text: String, is_list_item: bool, is_heading: bool) -> Vec<DescBlock> {
@@ -170,6 +173,29 @@ fn html_to_blocks(html: &str) -> Vec<DescBlock> {
                         }
                         current.clear();
                     }
+                    // <App id="..."> — inline app link; flush pending text then push app block
+                    (false, "app") => {
+                        let t = current.trim().to_string();
+                        if !t.is_empty() {
+                            blocks.extend(split_bold(t, false, false));
+                            current.clear();
+                        }
+                        let id = attr_from_tag(raw_tag, "id");
+                        if !id.is_empty() {
+                            blocks.push(DescBlock {
+                                text: String::new(),
+                                is_list_item: false,
+                                is_heading: false,
+                                is_bold: false,
+                                is_image: false,
+                                image_url: String::new(),
+                                image: None,
+                                is_app: true,
+                                app_id: id,
+                                app_card: None,
+                            });
+                        }
+                    }
                     // <img src="..."> — self-closing; flush pending text then push image block
                     (_, "img") => {
                         let t = current.trim().to_string();
@@ -187,6 +213,9 @@ fn html_to_blocks(html: &str) -> Vec<DescBlock> {
                                 is_image: true,
                                 image_url: src,
                                 image: None,
+                                is_app: false,
+                                app_id: String::new(),
+                                app_card: None,
                             });
                         }
                     }
@@ -217,6 +246,7 @@ use futures_util::future::join_all;
 use libarc::{ArcDaemonProxy, Package, Provider};
 use slint::{Model, SharedString};
 
+#[derive(Clone)]
 pub struct RawCard {
     pub id: String,
     pub name: String,
@@ -481,37 +511,6 @@ fn cards_to_model(cards: Vec<RawCard>) -> slint::ModelRc<crate::AppCardData> {
     slint::ModelRc::new(slint::VecModel::from(data))
 }
 
-/// Strip `<App id="...">` elements from story body HTML, returning the
-/// cleaned HTML and the collected app IDs.
-fn extract_story_apps(body: &str) -> (String, Vec<String>) {
-    let mut ids = Vec::new();
-    let mut cleaned = String::new();
-    let mut rest = body;
-    loop {
-        let lower = rest.to_ascii_lowercase();
-        let Some(pos) = lower.find("<app ").or_else(|| lower.find("<app\t")) else {
-            cleaned.push_str(rest);
-            break;
-        };
-        cleaned.push_str(&rest[..pos]);
-        rest = &rest[pos..];
-        let end = rest.find('>').unwrap_or(rest.len().saturating_sub(1));
-        let tag = &rest[..end + 1];
-        let lower_tag = tag.to_ascii_lowercase();
-        if let Some(id_pos) = lower_tag.find("id=\"") {
-            let after = &tag[id_pos + 4..];
-            if let Some(q) = after.find('"') {
-                let raw_id = after[..q].trim().to_string();
-                if !raw_id.is_empty() {
-                    ids.push(raw_id);
-                }
-            }
-        }
-        rest = &rest[end + 1..];
-    }
-    (cleaned, ids)
-}
-
 /// Load stories: download banners, parse HTML body, resolve featured apps.
 async fn load_raw_stories(
     stories: Vec<(usize, crate::forge::ForgeStory)>,
@@ -521,9 +520,19 @@ async fn load_raw_stories(
 ) -> Vec<RawStory> {
     let mut out = Vec::new();
     for (idx, s) in stories {
-        let (body_html, app_ids) = extract_story_apps(&s.body);
+        let mut description_blocks = html_to_blocks(&s.body);
 
-        let (screenshot, app_cards) = tokio::join!(
+        // Collect unique app IDs from inline <App> blocks
+        let mut seen_ids = std::collections::HashSet::new();
+        let inline_ids: Vec<String> = description_blocks
+            .iter()
+            .filter(|b| b.is_app && !b.app_id.is_empty())
+            .filter_map(|b| {
+                if seen_ids.insert(b.app_id.clone()) { Some(b.app_id.clone()) } else { None }
+            })
+            .collect();
+
+        let (screenshot, inline_cards) = tokio::join!(
             async {
                 if let Some(ref url) = s.banner_url {
                     icons::load_banner(url).await
@@ -532,14 +541,19 @@ async fn load_raw_stories(
                 }
             },
             async {
-                let entries = resolve_ids(&app_ids, proxy, pwa_map).await;
+                let entries = resolve_ids(&inline_ids, proxy, pwa_map).await;
                 entries_to_cards(entries, installed).await
             }
         );
 
-        let mut description_blocks = html_to_blocks(&body_html);
-        // Load any inline images referenced via <img> / <figure><img>
+        // Map app ID -> resolved card
+        let card_map: std::collections::HashMap<String, RawCard> =
+            inline_cards.into_iter().map(|c| (c.id.clone(), c)).collect();
+
         for block in &mut description_blocks {
+            if block.is_app && !block.app_id.is_empty() {
+                block.app_card = card_map.get(&block.app_id).cloned();
+            }
             if block.is_image && !block.image_url.is_empty() {
                 block.image = icons::load_banner(&block.image_url).await;
             }
@@ -550,7 +564,7 @@ async fn load_raw_stories(
             title: s.title,
             screenshot,
             description_blocks,
-            featured_apps: app_cards,
+            featured_apps: vec![],
         });
     }
     out
@@ -919,6 +933,8 @@ pub async fn load_home(
                         is_bold: b.is_bold,
                         is_image: b.is_image,
                         image: b.image.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+                        is_app: b.is_app,
+                        app_card: b.app_card.as_ref().map(|c| c.to_slint()).unwrap_or_default(),
                     })
                     .collect();
                 let apps: Vec<crate::AppCardData> =
@@ -1400,6 +1416,8 @@ pub async fn load_detail(
                 is_bold: b.is_bold,
                 is_image: b.is_image,
                 image: b.image.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+                is_app: b.is_app,
+                app_card: b.app_card.as_ref().map(|c| c.to_slint()).unwrap_or_default(),
             })
             .collect();
         app.set_detail_screenshots([].as_slice().into());
