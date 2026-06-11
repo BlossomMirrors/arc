@@ -40,7 +40,7 @@ fn start_job(title: &str, cancellable: bool) -> Option<krateio::Job> {
     let tracker = krateio::Tracker::new("org.blossomos.Arc")
         .ok()?
         .with_app_name("Arc")
-        .with_app_icon("system-software-install");
+        .with_app_icon("org.blossomos.Arc");
     tracker
         .job()
         .title(title)

@@ -38,7 +38,7 @@ scraper = "0.22"
 notify = "6"
 libc = "0.2"
 anvil-appimage = "1.0.1"
-krateio = { git = "https://dev.blossomos.org/blossom/krateio.git", tag = "v1.0.0", version = "0.1.0" }
+krateio = { git = "https://dev.blossomos.org/blossom/krateio.git", tag = "v1.0.0", version = "1.0.0" }
 tr = { version = "0.1", default-features = false }
 sys-locale = "0.3"
 
