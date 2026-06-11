@@ -1,0 +1,20 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: de\n"
+
+msgid "Installing application"
+msgstr "Anwendung wird installiert"
+
+msgid "Updating application"
+msgstr "Anwendung wird aktualisiert"
+
+msgid "Removing application"
+msgstr "Anwendung wird entfernt"
+
+msgid "Package"
+msgstr "Paket"
+
+msgid "Cancelled"
+msgstr "Abgebrochen"
