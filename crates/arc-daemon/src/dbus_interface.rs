@@ -30,6 +30,7 @@ fn provider_from_id(package_id: &str) -> Provider {
     }
 }
 
+use tr::tr;
 use tracing::{error, info};
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
@@ -72,6 +73,11 @@ impl ArcDaemonInterface {
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
+            let kio = crate::kio::KioJob::start(
+                &tr!("Installing application"),
+                &package_id,
+                Some(cancel_token.clone()),
+            );
 
             // Wait for a download slot; allow cancellation while queued
             let _permit = tokio::select! {
@@ -80,6 +86,7 @@ impl ArcDaemonInterface {
                 }
                 _ = cancel_token.cancelled() => {
                     tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    kio.finish(false, &tr!("Cancelled"));
                     let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
                     return;
                 }
@@ -91,6 +98,7 @@ impl ArcDaemonInterface {
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
             let cancel_token_fwd = cancel_token.clone();
+            let kio_fwd = kio.clone();
             tokio::spawn(async move {
                 loop {
                     tokio::select! {
@@ -102,6 +110,7 @@ impl ArcDaemonInterface {
                             match result {
                                 Some(pct) => {
                                     tm_fwd.update_progress(tx_id, pct).await;
+                                    kio_fwd.progress(pct);
                                     let _ =
                                         Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
                                 }
@@ -116,6 +125,7 @@ impl ArcDaemonInterface {
                 _ = cancel_token.cancelled() => {
                     info!("Transaction {} cancelled", tx_id);
                     tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    kio.finish(false, &tr!("Cancelled"));
                     let _ = Self::transaction_finished(
                         &emitter,
                         tx_id.to_string(),
@@ -130,6 +140,7 @@ impl ArcDaemonInterface {
                             provider.invalidate_package_cache().await;
                             tm.complete(tx_id, true, "Installation successful".to_string())
                                 .await;
+                            kio.finish(true, "");
                             let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
                             let _ = Self::transaction_finished(
                                 &emitter,
@@ -142,6 +153,7 @@ impl ArcDaemonInterface {
                         Err(e) => {
                             error!("Install failed: {}", e);
                             tm.complete(tx_id, false, e.to_string()).await;
+                            kio.finish(false, &e.to_string());
                             let _ = Self::transaction_finished(
                                 &emitter,
                                 tx_id.to_string(),
@@ -181,6 +193,11 @@ impl ArcDaemonInterface {
 
         tokio::spawn(async move {
             let _ = Self::transaction_started(&emitter, tx_id.to_string(), url.clone()).await;
+            let kio = crate::kio::KioJob::start(
+                &tr!("Installing application"),
+                &url,
+                Some(cancel_token.clone()),
+            );
 
             let _permit = tokio::select! {
                 result = semaphore.acquire_owned() => {
@@ -188,6 +205,7 @@ impl ArcDaemonInterface {
                 }
                 _ = cancel_token.cancelled() => {
                     tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    kio.finish(false, &tr!("Cancelled"));
                     let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
                     return;
                 }
@@ -198,6 +216,7 @@ impl ArcDaemonInterface {
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
             let cancel_token_fwd = cancel_token.clone();
+            let kio_fwd = kio.clone();
             tokio::spawn(async move {
                 loop {
                     tokio::select! {
@@ -209,6 +228,7 @@ impl ArcDaemonInterface {
                             match result {
                                 Some(pct) => {
                                     tm_fwd.update_progress(tx_id, pct).await;
+                                    kio_fwd.progress(pct);
                                     let _ =
                                         Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
                                 }
@@ -223,6 +243,7 @@ impl ArcDaemonInterface {
                 _ = cancel_token.cancelled() => {
                     info!("Transaction {} cancelled", tx_id);
                     tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    kio.finish(false, &tr!("Cancelled"));
                     let _ = Self::transaction_finished(
                         &emitter,
                         tx_id.to_string(),
@@ -237,6 +258,7 @@ impl ArcDaemonInterface {
                             provider.invalidate_package_cache().await;
                             tm.complete(tx_id, true, "Installation successful".to_string())
                                 .await;
+                            kio.finish(true, "");
                             let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
                             let _ = Self::transaction_finished(
                                 &emitter,
@@ -249,6 +271,7 @@ impl ArcDaemonInterface {
                         Err(e) => {
                             error!("InstallFlatpakref failed: {}", e);
                             tm.complete(tx_id, false, e.to_string()).await;
+                            kio.finish(false, &e.to_string());
                             let _ = Self::transaction_finished(
                                 &emitter,
                                 tx_id.to_string(),
@@ -288,8 +311,10 @@ impl ArcDaemonInterface {
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
+            let kio = crate::kio::KioJob::start(&tr!("Removing application"), &package_id, None);
 
             tm.update_progress(tx_id, 10).await;
+            kio.progress(10);
             let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 10).await;
 
             match provider.remove(&package_id).await {
@@ -297,6 +322,7 @@ impl ArcDaemonInterface {
                     provider.invalidate_package_cache().await;
                     tm.complete(tx_id, true, "Removal successful".to_string())
                         .await;
+                    kio.finish(true, "");
                     let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
                     let _ = Self::transaction_finished(
                         &emitter,
@@ -309,6 +335,7 @@ impl ArcDaemonInterface {
                 Err(e) => {
                     error!("Remove failed: {}", e);
                     tm.complete(tx_id, false, e.to_string()).await;
+                    kio.finish(false, &e.to_string());
                     let _ = Self::transaction_finished(
                         &emitter,
                         tx_id.to_string(),
@@ -347,7 +374,9 @@ impl ArcDaemonInterface {
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
+            let kio = crate::kio::KioJob::start(&tr!("Removing application"), &package_id, None);
             tm.update_progress(tx_id, 10).await;
+            kio.progress(10);
             let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 10).await;
 
             match provider.remove(&package_id).await {
@@ -371,6 +400,7 @@ impl ArcDaemonInterface {
                     }
                     provider.invalidate_package_cache().await;
                     tm.complete(tx_id, true, "Removal successful".to_string()).await;
+                    kio.finish(true, "");
                     let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
                     let _ = Self::transaction_finished(
                         &emitter,
@@ -383,6 +413,7 @@ impl ArcDaemonInterface {
                 Err(e) => {
                     error!("Remove failed: {}", e);
                     tm.complete(tx_id, false, e.to_string()).await;
+                    kio.finish(false, &e.to_string());
                     let _ = Self::transaction_finished(
                         &emitter,
                         tx_id.to_string(),
@@ -421,6 +452,11 @@ impl ArcDaemonInterface {
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
+            let kio = crate::kio::KioJob::start(
+                &tr!("Updating application"),
+                &package_id,
+                Some(cancel_token.clone()),
+            );
 
             let _permit = tokio::select! {
                 result = semaphore.acquire_owned() => {
@@ -428,6 +464,7 @@ impl ArcDaemonInterface {
                 }
                 _ = cancel_token.cancelled() => {
                     tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    kio.finish(false, &tr!("Cancelled"));
                     let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
                     return;
                 }
@@ -438,6 +475,7 @@ impl ArcDaemonInterface {
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
             let cancel_token_fwd = cancel_token.clone();
+            let kio_fwd = kio.clone();
             tokio::spawn(async move {
                 loop {
                     tokio::select! {
@@ -449,6 +487,7 @@ impl ArcDaemonInterface {
                             match result {
                                 Some(pct) => {
                                     tm_fwd.update_progress(tx_id, pct).await;
+                                    kio_fwd.progress(pct);
                                     let _ =
                                         Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
                                 }
@@ -463,6 +502,7 @@ impl ArcDaemonInterface {
                 _ = cancel_token.cancelled() => {
                     info!("Transaction {} cancelled", tx_id);
                     tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    kio.finish(false, &tr!("Cancelled"));
                     let _ = Self::transaction_finished(
                         &emitter,
                         tx_id.to_string(),
@@ -477,6 +517,7 @@ impl ArcDaemonInterface {
                             provider.invalidate_package_cache().await;
                             tm.complete(tx_id, true, "Update successful".to_string())
                                 .await;
+                            kio.finish(true, "");
                             let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
                             let _ = Self::transaction_finished(
                                 &emitter,
@@ -489,6 +530,7 @@ impl ArcDaemonInterface {
                         Err(e) => {
                             error!("Update failed: {}", e);
                             tm.complete(tx_id, false, e.to_string()).await;
+                            kio.finish(false, &e.to_string());
                             let _ = Self::transaction_finished(
                                 &emitter,
                                 tx_id.to_string(),
@@ -598,6 +640,12 @@ impl ArcDaemonInterface {
                 "[]".to_string()
             }
         }
+    }
+
+    async fn list_transactions(&self) -> String {
+        info!("ListTransactions");
+        let txs = self.transaction_manager.list().await;
+        serde_json::to_string(&txs).unwrap_or_else(|_| "[]".to_string())
     }
 
     async fn get_transaction(&self, transaction_id: String) -> String {
@@ -720,6 +768,11 @@ impl ArcDaemonInterface {
 
         tokio::spawn(async move {
             let _ = Self::transaction_started(&emitter, tx_id.to_string(), path.clone()).await;
+            let kio = crate::kio::KioJob::start(
+                &tr!("Installing application"),
+                &path,
+                Some(cancel_token.clone()),
+            );
 
             let _permit = tokio::select! {
                 result = semaphore.acquire_owned() => {
@@ -727,6 +780,7 @@ impl ArcDaemonInterface {
                 }
                 _ = cancel_token.cancelled() => {
                     tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    kio.finish(false, &tr!("Cancelled"));
                     let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
                     return;
                 }
@@ -736,6 +790,7 @@ impl ArcDaemonInterface {
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
             let cancel_token_fwd = cancel_token.clone();
+            let kio_fwd = kio.clone();
             tokio::spawn(async move {
                 loop {
                     tokio::select! {
@@ -743,6 +798,7 @@ impl ArcDaemonInterface {
                         result = progress_rx.recv() => match result {
                             Some(pct) => {
                                 tm_fwd.update_progress(tx_id, pct).await;
+                                kio_fwd.progress(pct);
                                 let _ = Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
                             }
                             None => break,
@@ -754,6 +810,7 @@ impl ArcDaemonInterface {
             tokio::select! {
                 _ = cancel_token.cancelled() => {
                     tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    kio.finish(false, &tr!("Cancelled"));
                     let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
                 }
                 result = provider.install_bundle_with_progress(&path, progress_tx, cancel_token.clone()) => {
@@ -761,12 +818,14 @@ impl ArcDaemonInterface {
                         Ok(()) => {
                             provider.invalidate_package_cache().await;
                             tm.complete(tx_id, true, "Installation successful".to_string()).await;
+                            kio.finish(true, "");
                             let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
                             let _ = Self::transaction_finished(&emitter, tx_id.to_string(), true, "Installation successful".to_string()).await;
                         }
                         Err(e) => {
                             error!("Bundle install failed: {}", e);
                             tm.complete(tx_id, false, e.to_string()).await;
+                            kio.finish(false, &e.to_string());
                             let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, e.to_string()).await;
                         }
                     }

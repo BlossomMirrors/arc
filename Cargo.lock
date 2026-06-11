@@ -322,6 +322,8 @@ dependencies = [
  "flate2",
  "futures-util",
  "image",
+ "include-po",
+ "krateio",
  "libarc",
  "libc",
  "libflatpak",
@@ -333,9 +335,11 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sys-locale",
  "tokio",
  "tokio-util",
  "tower-http",
+ "tr",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -3385,6 +3389,14 @@ checksum = "a7b65860415f949f23fa882e669f2dbd4a0f0eeb1acdd56790b30494afd7da2f"
 dependencies = [
  "bitflags 2.11.0",
  "libc",
+]
+
+[[package]]
+name = "krateio"
+version = "0.1.0"
+source = "git+https://dev.blossomos.org/blossom/krateio.git?tag=v1.0.0#62dccfb3597a8765cabd66d1c354aaece5ae9531"
+dependencies = [
+ "zbus",
 ]
 
 [[package]]

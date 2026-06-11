@@ -1,6 +1,7 @@
 mod forge;
 mod helpers;
 mod icons;
+mod launcher;
 mod packages;
 mod transactions;
 
@@ -16,8 +17,9 @@ use packages::{
 use slint::Model;
 use std::sync::{Arc, Mutex};
 use transactions::{
-    add_to_available_updates, begin_transaction, push_transactions_to_ui,
-    remove_from_available_updates, run_signal_listener, SavedPkgData, TxStatus, TxStore,
+    add_to_available_updates, begin_transaction, load_running_transactions,
+    push_transactions_to_ui, remove_from_available_updates, run_signal_listener, SavedPkgData,
+    TxStatus, TxStore,
 };
 
 slint::include_modules!();
@@ -317,6 +319,15 @@ fn main() -> Result<()> {
             .spawn(run_signal_listener(proxy, store, app_weak, cache_tx));
     }
 
+    // Recover transactions that were already running in the daemon, e.g.
+    // when the frontend was closed and reopened during an install.
+    if let Some(proxy) = get_proxy(&proxy_opt) {
+        let store = tx_store.clone();
+        let app_weak = app.as_weak();
+        rt.handle()
+            .spawn(load_running_transactions(proxy, store, app_weak));
+    }
+
     // Populate the installed cache on startup.
     {
         let cache = installed_cache.clone();
@@ -389,6 +400,7 @@ fn main() -> Result<()> {
                 let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
                 app.set_available_updates(pkgs.as_slice().into());
                 app.set_update_count(count as i32);
+                launcher::update_badge(count as i32);
             });
         });
     }
@@ -813,6 +825,7 @@ fn main() -> Result<()> {
             if let Some(a) = app_weak.upgrade() {
                 a.set_available_updates(Default::default());
                 a.set_update_count(0);
+                launcher::update_badge(0);
             }
         });
     }
@@ -976,6 +989,7 @@ fn main() -> Result<()> {
                     let count = pkgs.len() as i32;
                     app.set_available_updates(pkgs.as_slice().into());
                     app.set_update_count(count);
+                    launcher::update_badge(count);
                     app.set_updates_loading(false);
                 });
             });
@@ -1805,5 +1819,9 @@ fn main() -> Result<()> {
     }
 
     app.run()?;
+
+    // clear the taskbar badge and progress when the app exits
+    launcher::clear_blocking();
+
     Ok(())
 }

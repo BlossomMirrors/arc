@@ -33,6 +33,7 @@ pub trait ArcDaemon {
     async fn list_updates(&self) -> zbus::Result<String>;
     async fn update_package(&self, package_id: &str) -> zbus::Result<String>;
     async fn get_transaction(&self, transaction_id: &str) -> zbus::Result<String>;
+    async fn list_transactions(&self) -> zbus::Result<String>;
     async fn refresh_cache(&self) -> zbus::Result<bool>;
     async fn run_package(&self, package_id: &str) -> zbus::Result<String>;
     async fn cancel_transaction(&self, transaction_id: &str) -> zbus::Result<bool>;

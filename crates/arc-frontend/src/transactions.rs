@@ -86,6 +86,7 @@ pub fn add_to_available_updates(
         let count = items.len() as i32;
         app.set_available_updates(items.as_slice().into());
         app.set_update_count(count);
+        crate::launcher::update_badge(count);
     }
 }
 
@@ -98,6 +99,7 @@ pub fn remove_from_available_updates(app: &crate::AppWindow, pkg_id: &str) {
     let count = items.len() as i32;
     app.set_available_updates(items.as_slice().into());
     app.set_update_count(count);
+    crate::launcher::update_badge(count);
 }
 
 pub fn update_package_installed(app: &crate::AppWindow, pkg_id: &str, installed: bool) {
@@ -138,6 +140,13 @@ pub fn push_transactions_to_ui(store: TxStore, app_weak: &slint::Weak<crate::App
     };
 
     let active_count = (active.len() + pending.len()) as i32;
+    // Pending entries count as zero progress so queued work pulls the bar down
+    let overall_progress = if active_count > 0 {
+        active.iter().map(|tx| tx.progress).sum::<f32>() / active_count as f32
+    } else {
+        0.0
+    };
+    crate::launcher::update_transactions(active_count, overall_progress as f64);
 
     let _ = app_weak.upgrade_in_event_loop(move |app| {
         // Build a fallback icon map from already-loaded package list icons.
@@ -357,6 +366,107 @@ pub fn begin_transaction(
             }
         }
     });
+}
+
+// Fallback display name for transactions recovered from the daemon when the
+// package lists are not loaded yet
+fn name_from_pkg_id(pkg_id: &str) -> String {
+    let id = pkg_id
+        .strip_prefix("pwa:")
+        .or_else(|| pkg_id.strip_prefix("lutris:"))
+        .or_else(|| pkg_id.strip_prefix("appimage:"))
+        .unwrap_or(pkg_id);
+    if id.contains('/') {
+        return std::path::Path::new(id)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(id)
+            .to_string();
+    }
+    if let Some(rest) = id.strip_prefix("distrobox:") {
+        return rest.split(':').nth(1).unwrap_or(rest).to_string();
+    }
+    id.rsplit('.').next().unwrap_or(id).to_string()
+}
+
+// Picks up transactions already running in the daemon so a restarted frontend
+// shows them again in the download manager and taskbar
+pub async fn load_running_transactions(
+    proxy: ArcDaemonProxy<'static>,
+    store: TxStore,
+    app_weak: slint::Weak<crate::AppWindow>,
+) {
+    let Ok(json) = proxy.list_transactions().await else {
+        return;
+    };
+    let Ok(txs) = serde_json::from_str::<Vec<libarc::Transaction>>(&json) else {
+        return;
+    };
+
+    let mut added: Vec<(String, String)> = Vec::new();
+    {
+        let mut s = store.lock().unwrap();
+        for tx in txs {
+            let status = match tx.status {
+                libarc::TransactionStatus::Pending => TxStatus::Pending,
+                libarc::TransactionStatus::Running => TxStatus::Running,
+                _ => continue,
+            };
+            let id = tx.id.to_string();
+            if s.iter().any(|e| e.id == id) {
+                continue;
+            }
+            let tx_type = match tx.transaction_type {
+                libarc::TransactionType::Install => "install",
+                libarc::TransactionType::Remove => "remove",
+                libarc::TransactionType::Update => "update",
+            };
+            s.push(TrackedTx {
+                id: id.clone(),
+                pkg_id: tx.package_id.clone(),
+                parent_id: String::new(),
+                name: name_from_pkg_id(&tx.package_id),
+                icon: None,
+                progress: tx.progress as f32 / 100.0,
+                status,
+                tx_type: tx_type.to_string(),
+                error: String::new(),
+                installed_after: tx_type != "remove",
+                refresh_detail: false,
+                refresh_extensions: false,
+                saved_pkg: None,
+            });
+            added.push((id, tx.package_id));
+        }
+    }
+    if added.is_empty() {
+        return;
+    }
+    push_transactions_to_ui(store.clone(), &app_weak);
+
+    for (id, pkg_id) in added {
+        let real_name = proxy
+            .get_app_info(&pkg_id)
+            .await
+            .ok()
+            .and_then(|json| serde_json::from_str::<Option<libarc::Package>>(&json).ok())
+            .flatten()
+            .map(|p| p.name);
+        let fallback_name = name_from_pkg_id(&pkg_id);
+        let icon = load_icon_for_pkg(&pkg_id, real_name.as_deref().unwrap_or(&fallback_name)).await;
+        {
+            let mut s = store.lock().unwrap();
+            if let Some(e) = s.iter_mut().find(|e| e.id == id) {
+                if let Some(name) = real_name {
+                    e.name = name;
+                }
+                if icon.is_some() {
+                    e.icon = icon;
+                }
+            }
+        }
+    }
+    push_transactions_to_ui(store, &app_weak);
 }
 
 pub async fn run_signal_listener(

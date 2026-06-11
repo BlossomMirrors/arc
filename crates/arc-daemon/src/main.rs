@@ -2,6 +2,7 @@ mod appstream_db;
 mod daemon;
 mod dbus_interface;
 mod http_api;
+mod kio;
 mod providers;
 mod transaction_manager;
 
@@ -9,10 +10,15 @@ use anyhow::Result;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+include!(concat!(env!("OUT_DIR"), "/locale/translators.rs"));
+
 const HTTP_PORT: u16 = 1312;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let locale = sys_locale::get_locale().unwrap_or_else(|| "en".to_string());
+    translators::set_locale(&locale);
+
     // RUST_LOG=debug
     tracing_subscriber::fmt()
         .with_env_filter(

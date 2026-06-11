@@ -64,7 +64,6 @@ impl TransactionManager {
         map.get(&id).cloned()
     }
 
-    #[allow(dead_code)]
     pub async fn list(&self) -> Vec<Transaction> {
         let map = self.transactions.read().await;
         map.values().cloned().collect()
