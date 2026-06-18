@@ -1,6 +1,7 @@
 mod appstream_db;
 mod daemon;
 mod dbus_interface;
+mod forge_cache;
 mod http_api;
 mod kio;
 mod providers;
@@ -35,6 +36,16 @@ async fn main() -> Result<()> {
         .await
         .ok();
     info!("Appstream database ready");
+
+    info!("Pre-fetching Forge home page...");
+    forge_cache::refresh().await;
+
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+            forge_cache::refresh().await;
+        }
+    });
 
     // Allow overriding the bind host via env var so the HTTP API is reachable
     // when running inside a container (set ARC_HTTP_HOST=0.0.0.0).

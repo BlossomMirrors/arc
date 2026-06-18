@@ -23,6 +23,12 @@ pub fn router() -> Router {
         .route("/api/v1/apps/{id}", get(app_metadata))
         .route("/api/v1/apps/{id}/icon", get(app_icon))
         .route("/api/v1/image", get(proxy_image))
+        .route("/forge/api/frontpage", get(forge_frontpage))
+        .route("/forge/api/top", get(forge_top))
+        .route("/forge/api/new", get(forge_new))
+        .route("/forge/api/trending", get(forge_trending))
+        .route("/forge/api/charts", get(forge_charts))
+        .route("/forge/api/pwas", get(forge_pwas))
         .layer(cors)
 }
 
@@ -183,6 +189,49 @@ async fn proxy_image(Query(p): Query<ImageParams>) -> Response {
         return (StatusCode::BAD_REQUEST, "Only http(s) URLs are supported").into_response();
     }
     fetch_and_forward(&p.url).await
+}
+
+// ---------------------------------------------------------------------------
+// Forge cache handlers
+// ---------------------------------------------------------------------------
+
+async fn forge_frontpage() -> impl IntoResponse {
+    let xml = crate::forge_cache::frontpage().await;
+    ([(header::CONTENT_TYPE, "application/xml; charset=utf-8")], xml)
+}
+
+async fn forge_top() -> impl IntoResponse {
+    let json = crate::forge_cache::top().await;
+    ([(header::CONTENT_TYPE, "application/json")], json)
+}
+
+async fn forge_new() -> impl IntoResponse {
+    let json = crate::forge_cache::new_apps().await;
+    ([(header::CONTENT_TYPE, "application/json")], json)
+}
+
+async fn forge_trending() -> impl IntoResponse {
+    let json = crate::forge_cache::trending().await;
+    ([(header::CONTENT_TYPE, "application/json")], json)
+}
+
+async fn forge_charts() -> impl IntoResponse {
+    let json = crate::forge_cache::charts().await;
+    ([(header::CONTENT_TYPE, "application/json")], json)
+}
+
+#[derive(Deserialize)]
+struct PwasParams {
+    #[serde(default)]
+    lang: String,
+}
+
+async fn forge_pwas(Query(p): Query<PwasParams>) -> Response {
+    let url = format!(
+        "https://forge.blossomos.org/api/pwas?lang={}",
+        p.lang
+    );
+    fetch_and_forward(&url).await
 }
 
 // ---------------------------------------------------------------------------

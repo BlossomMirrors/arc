@@ -1,4 +1,5 @@
-const FORGE_BASE: &str = "https://forge.blossomos.org";
+const FORGE_BASE: &str = "http://localhost:1312/forge";
+const FORGE_DIRECT: &str = "https://forge.blossomos.org";
 
 /// Full PWA app record from `/api/pwas` — used as metadata fallback.
 #[derive(serde::Deserialize, Clone)]
@@ -142,7 +143,7 @@ pub struct ForgeStory {
 pub async fn post_install(appid: String) {
     let body = serde_json::json!({ "appid": appid });
     let _ = reqwest::Client::new()
-        .post(format!("{}/api/installs", FORGE_BASE))
+        .post(format!("{}/api/installs", FORGE_DIRECT))
         .timeout(std::time::Duration::from_secs(5))
         .json(&body)
         .send()
