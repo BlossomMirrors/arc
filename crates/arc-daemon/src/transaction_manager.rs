@@ -39,6 +39,9 @@ impl TransactionManager {
     pub async fn update_progress(&self, id: Uuid, progress: u8) {
         let mut map = self.transactions.write().await;
         if let Some(tx) = map.get_mut(&id) {
+            if matches!(tx.status, TransactionStatus::Success | TransactionStatus::Failed(_)) {
+                return;
+            }
             tx.progress = progress;
             tx.status = TransactionStatus::Running;
         }

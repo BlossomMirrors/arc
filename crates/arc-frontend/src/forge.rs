@@ -1,6 +1,32 @@
 const FORGE_BASE: &str = "http://localhost:1312/forge";
 const FORGE_DIRECT: &str = "https://forge.blossomos.org";
 
+#[derive(serde::Deserialize, Clone)]
+pub struct HomeAppMeta {
+    pub id: String,
+    pub name: String,
+    pub summary: String,
+    pub icon_url: Option<String>,
+}
+
+pub async fn fetch_home_app_metadata() -> std::collections::HashMap<String, HomeAppMeta> {
+    match reqwest::Client::new()
+        .get(&format!("{}/api/app-metadata", FORGE_BASE))
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+    {
+        Ok(r) => r
+            .json::<Vec<HomeAppMeta>>()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| (m.id.clone(), m))
+            .collect(),
+        Err(_) => Default::default(),
+    }
+}
+
 /// Full PWA app record from `/api/pwas` — used as metadata fallback.
 #[derive(serde::Deserialize, Clone)]
 pub struct PwaApp {

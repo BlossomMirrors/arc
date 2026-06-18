@@ -419,6 +419,41 @@ struct AppEntry {
     icon_url: Option<String>,
 }
 
+/// Resolve app IDs using the daemon-cached metadata map, falling back to a
+/// live D-Bus search only for IDs absent from the cache.
+async fn resolve_ids_cached(
+    ids: &[String],
+    meta_map: &std::collections::HashMap<String, crate::forge::HomeAppMeta>,
+    proxy: Option<&ArcDaemonProxy<'static>>,
+    pwa_map: &std::collections::HashMap<String, crate::forge::PwaApp>,
+) -> Vec<AppEntry> {
+    let mut result = Vec::with_capacity(ids.len());
+    let mut missing: Vec<String> = Vec::new();
+
+    for id in ids {
+        if let Some(m) = meta_map.get(id) {
+            result.push(Some(AppEntry {
+                id: m.id.clone(),
+                name: m.name.clone(),
+                summary: m.summary.clone(),
+                icon_url: m.icon_url.clone(),
+            }));
+        } else {
+            missing.push(id.clone());
+            result.push(None);
+        }
+    }
+
+    let fallbacks = resolve_ids(&missing, proxy, pwa_map).await;
+    let mut fb_iter = fallbacks.into_iter();
+    for slot in result.iter_mut() {
+        if slot.is_none() {
+            *slot = fb_iter.next();
+        }
+    }
+    result.into_iter().flatten().collect()
+}
+
 /// Resolve a list of app IDs to entries using the daemon, falling back to the
 /// forge PWA map for apps that the daemon doesn't know about.
 async fn resolve_ids(
@@ -587,8 +622,8 @@ pub async fn load_home(
     proxy: Option<ArcDaemonProxy<'static>>,
 ) {
     use crate::forge::FpSection;
+    use std::sync::Arc;
 
-    // Fetch frontpage, installed IDs and PWA metadata in parallel.
     let lang = sys_locale::get_locale()
         .unwrap_or_default()
         .split(['_', '-'])
@@ -597,7 +632,7 @@ pub async fn load_home(
         .to_string();
     let lang_ref = lang.as_str();
 
-    let (fp_sections, installed_ids, pwa_list) = tokio::join!(
+    let (fp_sections, installed_raw, pwa_list, app_meta_raw) = tokio::join!(
         crate::forge::fetch_frontpage(),
         async {
             if let Some(ref p) = proxy {
@@ -614,248 +649,328 @@ pub async fn load_home(
             }
         },
         crate::forge::fetch_pwas(lang_ref),
+        crate::forge::fetch_home_app_metadata(),
     );
 
-    let pwa_map: std::collections::HashMap<String, crate::forge::PwaApp> =
-        pwa_list.into_iter().map(|a| (a.appid.clone(), a)).collect();
+    let pwa_map: Arc<std::collections::HashMap<String, crate::forge::PwaApp>> =
+        Arc::new(pwa_list.into_iter().map(|a| (a.appid.clone(), a)).collect());
+    let installed_ids: Arc<std::collections::HashSet<String>> = Arc::new(installed_raw);
+    let app_meta_map: Arc<std::collections::HashMap<String, crate::forge::HomeAppMeta>> =
+        Arc::new(app_meta_raw);
+    let proxy: Arc<Option<ArcDaemonProxy<'static>>> = Arc::new(proxy);
 
-    // Whether any section asked for the categories grid.
-    let show_categories = fp_sections
-        .iter()
-        .any(|s| matches!(s, FpSection::Categories));
+    let show_categories = fp_sections.iter().any(|s| matches!(s, FpSection::Categories));
+
+    struct SecOut {
+        item: RawHomeItem,
+        stories: Vec<RawStory>,
+    }
+
+    let section_futs: Vec<_> = fp_sections
+        .into_iter()
+        .map(|section| {
+            let proxy = proxy.clone();
+            let pwa_map = pwa_map.clone();
+            let installed_ids = installed_ids.clone();
+            let app_meta_map = app_meta_map.clone();
+            async move {
+                let p = proxy.as_ref().as_ref();
+                let pm = &*pwa_map;
+                let inst = &*installed_ids;
+                let meta = &*app_meta_map;
+                match section {
+                    FpSection::H1(t) => SecOut {
+                        item: RawHomeItem {
+                            item_type: "h1", text: t, title: String::new(), cards: vec![],
+                            hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                        },
+                        stories: vec![],
+                    },
+                    FpSection::H2(t) => SecOut {
+                        item: RawHomeItem {
+                            item_type: "h2", text: t, title: String::new(), cards: vec![],
+                            hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                        },
+                        stories: vec![],
+                    },
+                    FpSection::H3(t) => SecOut {
+                        item: RawHomeItem {
+                            item_type: "h3", text: t, title: String::new(), cards: vec![],
+                            hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                        },
+                        stories: vec![],
+                    },
+                    FpSection::P(t) => SecOut {
+                        item: RawHomeItem {
+                            item_type: "p", text: t, title: String::new(), cards: vec![],
+                            hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                        },
+                        stories: vec![],
+                    },
+                    FpSection::Br => SecOut {
+                        item: RawHomeItem {
+                            item_type: "br", text: String::new(), title: String::new(), cards: vec![],
+                            hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                        },
+                        stories: vec![],
+                    },
+                    FpSection::Categories => SecOut {
+                        item: RawHomeItem {
+                            item_type: "categories", text: String::new(), title: String::new(), cards: vec![],
+                            hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                        },
+                        stories: vec![],
+                    },
+                    FpSection::Top => {
+                        let ids = crate::forge::fetch_app_ids("api/top", 12).await;
+                        let entries = resolve_ids_cached(&ids, meta, p, pm).await;
+                        let cards = entries_to_cards(entries, inst).await;
+                        SecOut {
+                            item: RawHomeItem {
+                                item_type: "app-grid", text: String::new(), title: "Popular".into(), cards,
+                                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            },
+                            stories: vec![],
+                        }
+                    }
+                    FpSection::New => {
+                        let ids = crate::forge::fetch_app_ids("api/new", 20).await;
+                        let entries = resolve_ids_cached(&ids, meta, p, pm).await;
+                        let cards = entries_to_cards(entries, inst).await;
+                        SecOut {
+                            item: RawHomeItem {
+                                item_type: "app-row", text: String::new(), title: tr!("Recently Added").to_string(), cards,
+                                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            },
+                            stories: vec![],
+                        }
+                    }
+                    FpSection::Trending => {
+                        let ids = crate::forge::fetch_app_ids("api/trending", 12).await;
+                        let entries = resolve_ids_cached(&ids, meta, p, pm).await;
+                        let cards = entries_to_cards(entries, inst).await;
+                        SecOut {
+                            item: RawHomeItem {
+                                item_type: "app-row", text: String::new(), title: tr!("Trending").to_string(), cards,
+                                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            },
+                            stories: vec![],
+                        }
+                    }
+                    FpSection::Charts { cards: as_cards } => {
+                        let ids = crate::forge::fetch_chart_ids(12).await;
+                        let entries = resolve_ids_cached(&ids, meta, p, pm).await;
+                        let cards = entries_to_cards(entries, inst).await;
+                        SecOut {
+                            item: RawHomeItem {
+                                item_type: if as_cards { "app-grid" } else { "app-row" },
+                                text: String::new(), title: tr!("Charts").to_string(), cards,
+                                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            },
+                            stories: vec![],
+                        }
+                    }
+                    FpSection::Custom { title, app_ids } => {
+                        let entries = resolve_ids_cached(&app_ids, meta, p, pm).await;
+                        let cards = entries_to_cards(entries, inst).await;
+                        SecOut {
+                            item: RawHomeItem {
+                                item_type: "app-row", text: String::new(), title, cards,
+                                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            },
+                            stories: vec![],
+                        }
+                    }
+                    FpSection::CarouselSection { breakpoint, items, .. } => {
+                        use crate::forge::CarouselItem;
+                        let hero_count = breakpoint.min(items.len());
+                        let mut story_positions: Vec<usize> = Vec::new();
+                        let mut story_forge: Vec<crate::forge::ForgeStory> = Vec::new();
+                        let mut app_id_list: Vec<String> = Vec::new();
+
+                        for (pos, item) in items.iter().enumerate() {
+                            match item {
+                                CarouselItem::Story(s) => {
+                                    story_positions.push(pos);
+                                    story_forge.push(s.clone());
+                                }
+                                CarouselItem::App(id) => app_id_list.push(id.clone()),
+                            }
+                        }
+
+                        let indexed = story_forge.into_iter().enumerate().collect::<Vec<_>>();
+                        let (loaded_stories, app_entries) = tokio::join!(
+                            load_raw_stories(indexed, p, pm, inst),
+                            resolve_ids_cached(&app_id_list, meta, p, pm),
+                        );
+                        let app_cards = entries_to_cards(app_entries, inst).await;
+
+                        let card_by_id: std::collections::HashMap<&str, &RawCard> =
+                            app_cards.iter().map(|c| (c.id.as_str(), c)).collect();
+                        let pos_to_story_idx: std::collections::HashMap<usize, usize> =
+                            story_positions.iter().enumerate().map(|(si, &pos)| (pos, si)).collect();
+
+                        let mut hero_items: Vec<RawHeroItem> = Vec::new();
+                        let mut editorial_items: Vec<RawHeroItem> = Vec::new();
+
+                        for (pos, carousel_item) in items.iter().enumerate() {
+                            let hero_item = match carousel_item {
+                                CarouselItem::Story(s) => {
+                                    let story_idx = pos_to_story_idx[&pos];
+                                    let rs = loaded_stories.get(story_idx);
+                                    RawHeroItem {
+                                        id: rs.map(|r| r.id.clone()).unwrap_or_else(|| format!("story-{story_idx}")),
+                                        banner: rs.and_then(|r| r.screenshot.clone()),
+                                        icon: None,
+                                        title: s.title.clone(),
+                                        body: strip_html_tags(&s.body),
+                                        is_story: true,
+                                        story_index: story_idx as i32,
+                                    }
+                                }
+                                CarouselItem::App(id) => {
+                                    let card = card_by_id.get(id.as_str()).copied();
+                                    RawHeroItem {
+                                        id: id.clone(),
+                                        banner: None,
+                                        icon: card.and_then(|c| c.icon.clone()),
+                                        title: card.map(|c| c.name.clone()).unwrap_or_default(),
+                                        body: card.map(|c| c.summary.clone()).unwrap_or_default(),
+                                        is_story: false,
+                                        story_index: -1,
+                                    }
+                                }
+                            };
+                            if pos < hero_count {
+                                hero_items.push(hero_item);
+                            } else {
+                                editorial_items.push(hero_item);
+                            }
+                        }
+
+                        SecOut {
+                            item: RawHomeItem {
+                                item_type: "carousel",
+                                text: String::new(),
+                                title: String::new(),
+                                cards: vec![],
+                                hero_items,
+                                editorial_items,
+                                link_title: String::new(),
+                                link_items: vec![],
+                            },
+                            stories: loaded_stories,
+                        }
+                    }
+                    FpSection::LinksSection { title, items, .. } => {
+                        enum LinkKind { Story(usize), App(String), Url }
+                        let mut link_kinds: Vec<LinkKind> = Vec::new();
+                        let mut link_items: Vec<RawLinkItem> = Vec::new();
+                        let mut story_forge: Vec<crate::forge::ForgeStory> = Vec::new();
+                        let mut app_ids_batch: Vec<String> = Vec::new();
+
+                        for item in &items {
+                            match item {
+                                crate::forge::FpLinksItem::Story(s) => {
+                                    let idx = story_forge.len();
+                                    story_forge.push(s.clone());
+                                    link_kinds.push(LinkKind::Story(idx));
+                                    link_items.push(RawLinkItem {
+                                        text: s.title.clone(),
+                                        href: String::new(),
+                                        story_index: -1,
+                                        app_id: String::new(),
+                                    });
+                                }
+                                crate::forge::FpLinksItem::App(id) => {
+                                    app_ids_batch.push(id.clone());
+                                    link_kinds.push(LinkKind::App(id.clone()));
+                                    link_items.push(RawLinkItem {
+                                        text: String::new(),
+                                        href: String::new(),
+                                        story_index: -1,
+                                        app_id: id.clone(),
+                                    });
+                                }
+                                crate::forge::FpLinksItem::Url { text, href } => {
+                                    link_kinds.push(LinkKind::Url);
+                                    link_items.push(RawLinkItem {
+                                        text: text.clone(),
+                                        href: href.clone(),
+                                        story_index: -1,
+                                        app_id: String::new(),
+                                    });
+                                }
+                            }
+                        }
+
+                        let indexed = story_forge.into_iter().enumerate().collect::<Vec<_>>();
+                        let (loaded_stories, app_entries) = tokio::join!(
+                            load_raw_stories(indexed, p, pm, inst),
+                            resolve_ids_cached(&app_ids_batch, meta, p, pm),
+                        );
+
+                        let app_name_map: std::collections::HashMap<String, String> =
+                            app_entries.into_iter().map(|e| (e.id, e.name)).collect();
+
+                        for (kind, item) in link_kinds.iter().zip(link_items.iter_mut()) {
+                            match kind {
+                                LinkKind::Story(idx) => {
+                                    item.story_index = *idx as i32;
+                                    if let Some(rs) = loaded_stories.get(*idx) {
+                                        item.text = rs.title.clone();
+                                    }
+                                }
+                                LinkKind::App(id) => {
+                                    item.text = app_name_map
+                                        .get(id.as_str())
+                                        .cloned()
+                                        .unwrap_or_else(|| id.clone());
+                                }
+                                LinkKind::Url => {}
+                            }
+                        }
+
+                        SecOut {
+                            item: RawHomeItem {
+                                item_type: "links",
+                                text: String::new(),
+                                title: String::new(),
+                                cards: vec![],
+                                hero_items: vec![],
+                                editorial_items: vec![],
+                                link_title: title,
+                                link_items,
+                            },
+                            stories: loaded_stories,
+                        }
+                    }
+                }
+            }
+        })
+        .collect();
+
+    let section_results = join_all(section_futs).await;
+
     let mut raw_items: Vec<RawHomeItem> = Vec::new();
     let mut raw_stories: Vec<RawStory> = Vec::new();
-
-    for section in fp_sections {
-        match section {
-            FpSection::H1(t) => raw_items.push(RawHomeItem {
-                item_type: "h1", text: t, title: String::new(), cards: vec![],
-                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
-            }),
-            FpSection::H2(t) => raw_items.push(RawHomeItem {
-                item_type: "h2", text: t, title: String::new(), cards: vec![],
-                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
-            }),
-            FpSection::H3(t) => raw_items.push(RawHomeItem {
-                item_type: "h3", text: t, title: String::new(), cards: vec![],
-                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
-            }),
-            FpSection::P(t) => raw_items.push(RawHomeItem {
-                item_type: "p", text: t, title: String::new(), cards: vec![],
-                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
-            }),
-            FpSection::Br => raw_items.push(RawHomeItem {
-                item_type: "br", text: String::new(), title: String::new(), cards: vec![],
-                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
-            }),
-            FpSection::Categories => raw_items.push(RawHomeItem {
-                item_type: "categories", text: String::new(), title: String::new(), cards: vec![],
-                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
-            }),
-            FpSection::CarouselSection { breakpoint, items, .. } => {
-                use crate::forge::CarouselItem;
-
-                let hero_count = breakpoint.min(items.len());
-                // Stories from previous carousels; new stories append after this offset.
-                let story_offset = raw_stories.len();
-
-                let mut story_positions: Vec<usize> = Vec::new();
-                let mut story_forge: Vec<crate::forge::ForgeStory> = Vec::new();
-                let mut app_id_list: Vec<String> = Vec::new();
-
-                for (pos, item) in items.iter().enumerate() {
-                    match item {
-                        CarouselItem::Story(s) => {
-                            story_positions.push(pos);
-                            story_forge.push(s.clone());
-                        }
-                        CarouselItem::App(id) => {
-                            app_id_list.push(id.clone());
-                        }
-                    }
-                }
-
-                let indexed = story_forge.into_iter().enumerate().collect::<Vec<_>>();
-                let (loaded_stories, app_entries) = tokio::join!(
-                    load_raw_stories(indexed, proxy.as_ref(), &pwa_map, &installed_ids),
-                    resolve_ids(&app_id_list, proxy.as_ref(), &pwa_map),
-                );
-                let app_cards = entries_to_cards(app_entries, &installed_ids).await;
-
-                let card_by_id: std::collections::HashMap<&str, &RawCard> =
-                    app_cards.iter().map(|c| (c.id.as_str(), c)).collect();
-
-                let pos_to_story_idx: std::collections::HashMap<usize, usize> =
-                    story_positions.iter().enumerate().map(|(si, &pos)| (pos, si)).collect();
-
-                let mut hero_items: Vec<RawHeroItem> = Vec::new();
-                let mut editorial_items: Vec<RawHeroItem> = Vec::new();
-
-                for (pos, carousel_item) in items.iter().enumerate() {
-                    let hero_item = match carousel_item {
-                        CarouselItem::Story(s) => {
-                            let story_idx = pos_to_story_idx[&pos];
-                            let global_idx = story_offset + story_idx;
-                            let rs = loaded_stories.get(story_idx);
-                            RawHeroItem {
-                                id: rs.map(|r| r.id.clone()).unwrap_or_else(|| format!("story-{global_idx}")),
-                                banner: rs.and_then(|r| r.screenshot.clone()),
-                                icon: None,
-                                title: s.title.clone(),
-                                body: strip_html_tags(&s.body),
-                                is_story: true,
-                                story_index: global_idx as i32,
-                            }
-                        }
-                        CarouselItem::App(id) => {
-                            let card = card_by_id.get(id.as_str()).copied();
-                            RawHeroItem {
-                                id: id.clone(),
-                                banner: None,
-                                icon: card.and_then(|c| c.icon.clone()),
-                                title: card.map(|c| c.name.clone()).unwrap_or_default(),
-                                body: card.map(|c| c.summary.clone()).unwrap_or_default(),
-                                is_story: false,
-                                story_index: -1,
-                            }
-                        }
-                    };
-                    if pos < hero_count {
-                        hero_items.push(hero_item);
-                    } else {
-                        editorial_items.push(hero_item);
-                    }
-                }
-
-                // Accumulate stories across all carousels; don't overwrite.
-                raw_stories.extend(loaded_stories);
-
-                raw_items.push(RawHomeItem {
-                    item_type: "carousel",
-                    text: String::new(),
-                    title: String::new(),
-                    cards: vec![],
-                    hero_items,
-                    editorial_items,
-                    link_title: String::new(),
-                    link_items: vec![],
-                });
-            }
-            FpSection::Custom { title, app_ids } => {
-                let entries = resolve_ids(&app_ids, proxy.as_ref(), &pwa_map).await;
-                let cards = entries_to_cards(entries, &installed_ids).await;
-                raw_items.push(RawHomeItem {
-                    item_type: "app-row", text: String::new(), title, cards,
-                    hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
-                });
-            }
-            FpSection::Top => {
-                let ids = crate::forge::fetch_app_ids("api/top", 12).await;
-                let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
-                let cards = entries_to_cards(entries, &installed_ids).await;
-                raw_items.push(RawHomeItem {
-                    item_type: "app-grid", text: String::new(), title: "Popular".into(), cards,
-                    hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
-                });
-            }
-            FpSection::New => {
-                let ids = crate::forge::fetch_app_ids("api/new", 20).await;
-                let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
-                let cards = entries_to_cards(entries, &installed_ids).await;
-                raw_items.push(RawHomeItem {
-                    item_type: "app-row", text: String::new(), title: tr!("Recently Added").to_string(), cards,
-                    hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
-                });
-            }
-            FpSection::Trending => {
-                let ids = crate::forge::fetch_app_ids("api/trending", 12).await;
-                let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
-                let cards = entries_to_cards(entries, &installed_ids).await;
-                raw_items.push(RawHomeItem {
-                    item_type: "app-row", text: String::new(), title: tr!("Trending").to_string(), cards,
-                    hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
-                });
-            }
-            FpSection::Charts { cards: as_cards } => {
-                let ids = crate::forge::fetch_chart_ids(12).await;
-                let entries = resolve_ids(&ids, proxy.as_ref(), &pwa_map).await;
-                let cards = entries_to_cards(entries, &installed_ids).await;
-                raw_items.push(RawHomeItem {
-                    item_type: if as_cards { "app-grid" } else { "app-row" },
-                    text: String::new(), title: tr!("Charts").to_string(), cards,
-                    hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
-                });
-            }
-            FpSection::LinksSection { title, items, .. } => {
-                let story_offset = raw_stories.len();
-                let mut link_items: Vec<RawLinkItem> = Vec::new();
-                let mut story_forge: Vec<crate::forge::ForgeStory> = Vec::new();
-
-                for item in &items {
-                    match item {
-                        crate::forge::FpLinksItem::Story(s) => {
-                            story_forge.push(s.clone());
-                            link_items.push(RawLinkItem {
-                                text: s.title.clone(),
-                                href: String::new(),
-                                story_index: -1, // filled in after loading
-                                app_id: String::new(),
-                            });
-                        }
-                        crate::forge::FpLinksItem::App(id) => {
-                            let entries = resolve_ids(&[id.clone()], proxy.as_ref(), &pwa_map).await;
-                            let name = entries.first().map(|e| e.name.clone()).unwrap_or_else(|| id.clone());
-                            link_items.push(RawLinkItem {
-                                text: name,
-                                href: String::new(),
-                                story_index: -1,
-                                app_id: id.clone(),
-                            });
-                        }
-                        crate::forge::FpLinksItem::Url { text, href } => {
-                            link_items.push(RawLinkItem {
-                                text: text.clone(),
-                                href: href.clone(),
-                                story_index: -1,
-                                app_id: String::new(),
-                            });
-                        }
-                    }
-                }
-
-                // Load stories
-                let indexed = story_forge.into_iter().enumerate().collect::<Vec<_>>();
-                let loaded_stories = load_raw_stories(indexed, proxy.as_ref(), &pwa_map, &installed_ids).await;
-
-                // Back-fill story indices
-                let mut link_story_count = 0usize;
-                for item in link_items.iter_mut() {
-                    if item.story_index == -1 && item.href.is_empty() && item.app_id.is_empty() {
-                        let global_idx = story_offset + link_story_count;
-                        item.story_index = global_idx as i32;
-                        if let Some(rs) = loaded_stories.get(link_story_count) {
-                            item.text = rs.title.clone();
-                        }
-                        link_story_count += 1;
-                    }
-                }
-                raw_stories.extend(loaded_stories);
-
-                raw_items.push(RawHomeItem {
-                    item_type: "links",
-                    text: String::new(),
-                    title: String::new(),
-                    cards: vec![],
-                    hero_items: vec![],
-                    editorial_items: vec![],
-                    link_title: title,
-                    link_items,
-                });
+    for mut so in section_results {
+        let offset = raw_stories.len() as i32;
+        for hi in so.item.hero_items.iter_mut().chain(so.item.editorial_items.iter_mut()) {
+            if hi.story_index >= 0 {
+                hi.story_index += offset;
             }
         }
+        for li in &mut so.item.link_items {
+            if li.story_index >= 0 {
+                li.story_index += offset;
+            }
+        }
+        raw_stories.extend(so.stories);
+        raw_items.push(so.item);
     }
+
     let raw_cats: Vec<RawCategoryData> = if show_categories {
-        // Predefined colors; icon is still loaded from the system for display.
         let cat_defs: &[(&str, &str, &str, (u8, u8, u8))] = &[
             ("AudioVideo",  "Multimedia",      "applications-multimedia",  (41,  128, 185)),
             ("Development", "Developer Tools", "applications-development", (142, 68,  173)),
@@ -867,21 +982,20 @@ pub async fn load_home(
             ("System",      "System",          "applications-system",      (100, 100, 110)),
             ("Utility",     "Utilities",       "applications-utilities",   (192, 57,  43)),
         ];
-        let mut out = Vec::new();
-        for (id, label, icon_name, color) in cat_defs {
+        join_all(cat_defs.iter().map(|(id, label, icon_name, color)| {
+            let id = id.to_string();
+            let label = label.to_string();
             let name = icon_name.to_string();
-            let icon = tokio::task::spawn_blocking(move || icons::load_category_icon(&name))
-                .await
-                .ok()
-                .and_then(|d| d.icon);
-            out.push(RawCategoryData {
-                id: id.to_string(),
-                label: label.to_string(),
-                icon,
-                color: *color,
-            });
-        }
-        out
+            let color = *color;
+            async move {
+                let icon = tokio::task::spawn_blocking(move || icons::load_category_icon(&name))
+                    .await
+                    .ok()
+                    .and_then(|d| d.icon);
+                RawCategoryData { id, label, icon, color }
+            }
+        }))
+        .await
     } else {
         vec![]
     };

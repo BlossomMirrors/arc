@@ -29,6 +29,8 @@ pub fn router() -> Router {
         .route("/forge/api/trending", get(forge_trending))
         .route("/forge/api/charts", get(forge_charts))
         .route("/forge/api/pwas", get(forge_pwas))
+        .route("/forge/api/app-metadata", get(forge_app_metadata))
+        .route("/forge/icon/{id}", get(forge_icon))
         .layer(cors)
 }
 
@@ -224,6 +226,18 @@ async fn forge_charts() -> impl IntoResponse {
 struct PwasParams {
     #[serde(default)]
     lang: String,
+}
+
+async fn forge_app_metadata() -> impl IntoResponse {
+    let json = crate::forge_cache::app_metadata().await;
+    ([(header::CONTENT_TYPE, "application/json")], json)
+}
+
+async fn forge_icon(Path(id): Path<String>) -> Response {
+    match crate::forge_cache::icon_bytes(&id).await {
+        Some((bytes, ct)) => ([(header::CONTENT_TYPE, ct)], bytes).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn forge_pwas(Query(p): Query<PwasParams>) -> Response {
