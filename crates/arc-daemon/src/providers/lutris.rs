@@ -88,6 +88,7 @@ impl LutrisProvider {
         let text = self
             .http_client
             .get(WHITELIST_URL)
+            .timeout(Duration::from_secs(10))
             .send()
             .await
             .map_err(|e| ArcError::ProviderError(format!("Whitelist fetch: {}", e)))?
@@ -118,6 +119,7 @@ impl LutrisProvider {
         let resp = self
             .http_client
             .get(&url)
+            .timeout(Duration::from_secs(10))
             .send()
             .await
             .map_err(|e| ArcError::ProviderError(format!("Game fetch {}: {}", game_slug, e)))?;
@@ -137,7 +139,7 @@ impl LutrisProvider {
 
     async fn scrape_screenshots(&self, game_slug: &str) -> Vec<String> {
         let url = format!("https://lutris.net/games/{}/", game_slug);
-        let html = match self.http_client.get(&url).send().await {
+        let html = match self.http_client.get(&url).timeout(Duration::from_secs(10)).send().await {
             Ok(r) => match r.text().await {
                 Ok(t) => t,
                 Err(_) => return vec![],
@@ -180,24 +182,37 @@ impl LutrisProvider {
         }
 
         info!("Fetching Lutris catalog");
-        let whitelist = self.fetch_whitelist().await?;
-
-        let mut entries = Vec::new();
-        for (installer_slug, game_slug) in whitelist {
-            match self.fetch_game(&game_slug).await {
-                Ok(game) => {
-                    let screenshots = self.scrape_screenshots(&game_slug).await;
-                    entries.push((installer_slug, game, screenshots));
-                }
-                Err(e) => {
-                    warn!("Failed to fetch game info for {}: {}", game_slug, e);
-                }
+        let whitelist = match self.fetch_whitelist().await {
+            Ok(w) => w,
+            Err(e) => {
+                warn!("Lutris whitelist unavailable, serving stale cache: {}", e);
+                let cache = self.catalog_cache.read().await;
+                return Ok(cache.as_ref().map(|(_, e)| e.clone()).unwrap_or_default());
             }
-        }
+        };
+
+        let entries: Vec<CatalogEntry> = futures_util::future::join_all(
+            whitelist.into_iter().map(|(installer_slug, game_slug)| async move {
+                match self.fetch_game(&game_slug).await {
+                    Ok(game) => {
+                        let screenshots = self.scrape_screenshots(&game_slug).await;
+                        Some((installer_slug, game, screenshots))
+                    }
+                    Err(e) => {
+                        warn!("Failed to fetch game info for {}: {}", game_slug, e);
+                        None
+                    }
+                }
+            }),
+        )
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
 
         {
             let mut cache = self.catalog_cache.write().await;
-            *cache = Some((Instant::now(), entries.to_vec()));
+            *cache = Some((Instant::now(), entries.clone()));
         }
 
         Ok(entries)
