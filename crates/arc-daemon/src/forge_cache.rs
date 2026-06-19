@@ -9,7 +9,6 @@ const DAEMON_BASE: &str = "http://localhost:1312";
 
 #[derive(Default)]
 struct Inner {
-    frontpage_xml: String,
     top_json: String,
     new_json: String,
     trending_json: String,
@@ -45,7 +44,6 @@ async fn fetch_text(client: &reqwest::Client, url: &str) -> Option<String> {
 }
 
 fn collect_home_app_ids(
-    frontpage_xml: &str,
     top_json: &str,
     new_json: &str,
     trending_json: &str,
@@ -53,18 +51,20 @@ fn collect_home_app_ids(
 ) -> Vec<String> {
     let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // Extract all <app id="..."> tags from the frontpage XML
-    let mut rest = frontpage_xml;
-    while let Some(p) = rest.find("<app") {
-        rest = &rest[p + 4..];
-        if let Some(q) = rest.find("id=\"") {
-            rest = &rest[q + 4..];
-            if let Some(e) = rest.find('"') {
-                let id = rest[..e].trim().to_string();
-                if !id.is_empty() {
-                    ids.insert(id);
+    // Extract all <app id="..."> tags from the top/new/trending/charts JSON
+    for json in [top_json, new_json, trending_json, charts_json] {
+        let mut rest = json;
+        while let Some(p) = rest.find("<app") {
+            rest = &rest[p + 4..];
+            if let Some(q) = rest.find("id=\"") {
+                rest = &rest[q + 4..];
+                if let Some(e) = rest.find('"') {
+                    let id = rest[..e].trim().to_string();
+                    if !id.is_empty() {
+                        ids.insert(id);
+                    }
+                    rest = &rest[e + 1..];
                 }
-                rest = &rest[e + 1..];
             }
         }
     }
@@ -92,69 +92,74 @@ fn collect_home_app_ids(
 
 pub async fn refresh() {
     let client = reqwest::Client::new();
-    let url_fp = format!("{}/api/frontpage", FORGE_BASE);
     let url_top = format!("{}/api/top?limit=12", FORGE_BASE);
     let url_new = format!("{}/api/new?limit=20", FORGE_BASE);
     let url_trending = format!("{}/api/trending?limit=12", FORGE_BASE);
     let url_charts = format!("{}/api/charts?limit=12", FORGE_BASE);
-    let (fp, top, new, trending, charts) = tokio::join!(
-        fetch_text(&client, &url_fp),
+    let (top, new, trending, charts) = tokio::join!(
         fetch_text(&client, &url_top),
         fetch_text(&client, &url_new),
         fetch_text(&client, &url_trending),
         fetch_text(&client, &url_charts),
     );
 
-    let fp_str = fp.as_deref().unwrap_or("");
     let top_str = top.as_deref().unwrap_or("");
     let new_str = new.as_deref().unwrap_or("");
     let trend_str = trending.as_deref().unwrap_or("");
     let chart_str = charts.as_deref().unwrap_or("");
 
-    let app_ids = collect_home_app_ids(fp_str, top_str, new_str, trend_str, chart_str);
+    let app_ids = collect_home_app_ids(top_str, new_str, trend_str, chart_str);
 
     // Resolve metadata from AppStreamDb — runs in a blocking thread since the
     // db scan is CPU-bound, and returns (metadata_json, original_icon_urls)
     let app_ids_for_db = app_ids.clone();
-    let (app_metadata_json, original_icon_urls) =
-        tokio::task::spawn_blocking(move || {
-            let db = crate::appstream_db::AppStreamDb::get_static();
-            let mut original_urls: HashMap<String, String> = HashMap::new();
-            let entries: Vec<serde_json::Value> = app_ids_for_db
-                .iter()
-                .filter_map(|id| db.find_by_id(id).map(|e| (id, e)))
-                .map(|(id, e)| {
-                    let display_url = match &e.icon_url {
-                        Some(url) if url.starts_with("http") => {
-                            original_urls.insert(id.clone(), url.clone());
-                            format!("{}/forge/icon/{}", DAEMON_BASE, id)
-                        }
-                        other => other.clone().unwrap_or_default(),
-                    };
-                    serde_json::json!({
-                        "id": e.id,
-                        "name": e.name,
-                        "summary": e.summary,
-                        "icon_url": display_url,
-                    })
+    let (app_metadata_json, original_icon_urls) = tokio::task::spawn_blocking(move || {
+        let db = crate::appstream_db::AppStreamDb::get_static();
+        let mut original_urls: HashMap<String, String> = HashMap::new();
+        let entries: Vec<serde_json::Value> = app_ids_for_db
+            .iter()
+            .filter_map(|id| db.find_by_id(id).map(|e| (id, e)))
+            .map(|(id, e)| {
+                let display_url = match &e.icon_url {
+                    Some(url) if url.starts_with("http") => {
+                        original_urls.insert(id.clone(), url.clone());
+                        format!("{}/forge/icon/{}", DAEMON_BASE, id)
+                    }
+                    other => other.clone().unwrap_or_default(),
+                };
+                serde_json::json!({
+                    "id": e.id,
+                    "name": e.name,
+                    "summary": e.summary,
+                    "icon_url": display_url,
                 })
-                .collect();
-            (
-                serde_json::to_string(&entries).unwrap_or_default(),
-                original_urls,
-            )
-        })
-        .await
-        .unwrap_or_default();
+            })
+            .collect();
+        (
+            serde_json::to_string(&entries).unwrap_or_default(),
+            original_urls,
+        )
+    })
+    .await
+    .unwrap_or_default();
 
     {
         let mut w = lock().write().await;
-        if let Some(v) = fp { w.frontpage_xml = v; }
-        if let Some(v) = top { w.top_json = v; }
-        if let Some(v) = new { w.new_json = v; }
-        if let Some(v) = trending { w.trending_json = v; }
-        if let Some(v) = charts { w.charts_json = v; }
-        if !app_metadata_json.is_empty() { w.app_metadata_json = app_metadata_json; }
+        if let Some(v) = top {
+            w.top_json = v;
+        }
+        if let Some(v) = new {
+            w.new_json = v;
+        }
+        if let Some(v) = trending {
+            w.trending_json = v;
+        }
+        if let Some(v) = charts {
+            w.charts_json = v;
+        }
+        if !app_metadata_json.is_empty() {
+            w.app_metadata_json = app_metadata_json;
+        }
         let icon_url_count = original_icon_urls.len();
         w.original_icon_urls = original_icon_urls.clone();
         info!("Forge cache refreshed ({} apps resolved)", icon_url_count);
@@ -198,12 +203,21 @@ pub async fn refresh() {
     });
 }
 
-pub async fn frontpage() -> String { lock().read().await.frontpage_xml.clone() }
-pub async fn top() -> String { lock().read().await.top_json.clone() }
-pub async fn new_apps() -> String { lock().read().await.new_json.clone() }
-pub async fn trending() -> String { lock().read().await.trending_json.clone() }
-pub async fn charts() -> String { lock().read().await.charts_json.clone() }
-pub async fn app_metadata() -> String { lock().read().await.app_metadata_json.clone() }
+pub async fn top() -> String {
+    lock().read().await.top_json.clone()
+}
+pub async fn new_apps() -> String {
+    lock().read().await.new_json.clone()
+}
+pub async fn trending() -> String {
+    lock().read().await.trending_json.clone()
+}
+pub async fn charts() -> String {
+    lock().read().await.charts_json.clone()
+}
+pub async fn app_metadata() -> String {
+    lock().read().await.app_metadata_json.clone()
+}
 
 pub async fn icon_bytes(id: &str) -> Option<(Vec<u8>, String)> {
     // Try the warm cache first
@@ -225,6 +239,10 @@ pub async fn icon_bytes(id: &str) -> Option<(Vec<u8>, String)> {
         .unwrap_or("image/png")
         .to_string();
     let bytes = resp.bytes().await.ok()?.to_vec();
-    lock().write().await.icons.insert(id.to_string(), (bytes.clone(), ct.clone()));
+    lock()
+        .write()
+        .await
+        .icons
+        .insert(id.to_string(), (bytes.clone(), ct.clone()));
     Some((bytes, ct))
 }
