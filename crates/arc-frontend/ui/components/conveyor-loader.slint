@@ -1,0 +1,110 @@
+import { Palette } from "std-widgets.slint";
+
+// A single tumbling block: positions itself via x/y/rotation-angle computed from phase.
+// phase is 0.0..1.0 representing one full pass across the track.
+// Non-slip relationship: 672px travel over 1.0 phase => 1080deg rotation (12 × 90deg).
+component RollingBlock inherits Rectangle {
+    in property <float> phase;
+    in property <color> base-color;
+    in property <color> dark-color;
+
+    // 12 bob cycles per full pass; triangle wave gives 0 at corners, -9px lift at balance point
+    private property <float> bob-t: mod(root.phase * 12.0, 1.0);
+
+    width: 56px;
+    height: 56px;
+    border-radius: 11px;
+
+    // Travel: -110px → 562px over phase 0→1 (both off-screen, so the
+    // instant phase wrap is never visible)
+    x: -110px + root.phase * 672px;
+    // Base y centres the block in 170px track; bob subtracts up to 9px upward
+    y: 57px - 9px * (1.0 - 2.0 * abs(root.bob-t - 0.5));
+    transform-rotation: root.phase * 1080deg;
+
+    background: @linear-gradient(135deg, root.base-color 0%, root.dark-color 100%);
+    drop-shadow-blur: 14px;
+    drop-shadow-color: #000dff38;
+    drop-shadow-offset-x: 0px;
+    drop-shadow-offset-y: 4px;
+
+    // Top inner highlight (white streak along the top edge)
+    Rectangle {
+        x: 3px;
+        y: 3px;
+        width: parent.width - 6px;
+        height: 7px;
+        border-radius: 4px;
+        background: #ffffff2e;
+    }
+
+    // Bottom inner shadow
+    Rectangle {
+        x: 3px;
+        y: parent.height - 10px;
+        width: parent.width - 6px;
+        height: 7px;
+        border-radius: 3px;
+        background: #0000001c;
+    }
+}
+
+export component ConveyorLoader inherits Rectangle {
+    width: 560px;
+    height: 170px;
+    clip: true;
+
+    private property <float> phase: 0.0;
+
+    Timer {
+        interval: 16ms;
+        triggered => {
+            // Advance by one frame worth of 6-second cycle (16/6000 ≈ 0.002667)
+            root.phase = mod(root.phase + 0.0026667, 1.0);
+        }
+    }
+
+    // Five blocks staggered by 1/5 of the cycle (0.2 phase each)
+    RollingBlock {
+        phase: root.phase;
+        base-color: #3e78ff;
+        dark-color: #2f5bc2;
+    }
+    RollingBlock {
+        phase: mod(root.phase + 0.2, 1.0);
+        base-color: #2f5cff;
+        dark-color: #2446c2;
+    }
+    RollingBlock {
+        phase: mod(root.phase + 0.4, 1.0);
+        base-color: #2140ff;
+        dark-color: #1931c2;
+    }
+    RollingBlock {
+        phase: mod(root.phase + 0.6, 1.0);
+        base-color: #1226ff;
+        dark-color: #0e1dc2;
+    }
+    RollingBlock {
+        phase: mod(root.phase + 0.8, 1.0);
+        base-color: #000dff;
+        dark-color: #000ac2;
+    }
+
+    // Edge fades drawn on top of the blocks, using the theme background so
+    // they work in both light and dark mode without hardcoding a colour.
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: 120px;
+        height: parent.height;
+        background: @linear-gradient(90deg, Palette.background 0%, transparent 100%);
+    }
+    Rectangle {
+        x: parent.width - 120px;
+        y: 0;
+        width: 120px;
+        height: parent.height;
+        background: @linear-gradient(270deg, Palette.background 0%, transparent 100%);
+    }
+}

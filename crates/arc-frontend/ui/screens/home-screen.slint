@@ -4,6 +4,7 @@ import {
     ScrollView,
     Palette,
 } from "std-widgets.slint";
+import { ConveyorLoader } from "../components/conveyor-loader.slint";
 import { CategoryCard } from "../components/category-card.slint";
 import { PopularCard } from "../components/popular-card.slint";
 import { Carousel } from "../components/carousel.slint";
@@ -37,12 +38,9 @@ export component HomeScreen inherits Rectangle {
 
     clip: true;
 
-    if root.home-loading: VerticalBox {
-        alignment: center;
-        Text {
-            text: root.tr-loading;
-            horizontal-alignment: center;
-        }
+    if root.home-loading: ConveyorLoader {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
     }
 
     scroller := ScrollView {

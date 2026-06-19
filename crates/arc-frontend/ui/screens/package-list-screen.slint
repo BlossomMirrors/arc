@@ -2,6 +2,7 @@ import { ListView, VerticalBox } from "std-widgets.slint";
 import { Palette, HorizontalBox } from "std-widgets.slint";
 import { PackageItem } from "../types.slint";
 import { AppIcon } from "../components/app-icon.slint";
+import { ConveyorLoader } from "../components/conveyor-loader.slint";
 
 export component PackageListScreen inherits Rectangle {
     in property <[PackageItem]> packages;
@@ -23,12 +24,9 @@ export component PackageListScreen inherits Rectangle {
     callback update-requested(string);
     callback cancel-requested(string);
 
-    if root.is-loading: VerticalBox {
-        alignment: center;
-        Text {
-            text: "Loading...";
-            horizontal-alignment: center;
-        }
+    if root.is-loading: ConveyorLoader {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
     }
 
     if !root.is-loading && root.packages.length == 0: VerticalBox {

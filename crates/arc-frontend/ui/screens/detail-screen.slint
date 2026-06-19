@@ -3,6 +3,7 @@ import { AppDetailData, ExtensionItem, DescriptionBlock } from "../types.slint";
 import { DetailHeader } from "../components/detail-header.slint";
 import { ScreenshotCarousel } from "../components/screenshot-carousel.slint";
 import { Lightbox } from "../components/lightbox.slint";
+import { ConveyorLoader } from "../components/conveyor-loader.slint";
 
 export component DetailScreen inherits Rectangle {
     in property <AppDetailData> detail-app;
@@ -44,12 +45,9 @@ export component DetailScreen inherits Rectangle {
 
     clip: true;
 
-    if root.detail-loading: Rectangle {
-        Text {
-            text: "Loading...";
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
+    if root.detail-loading: ConveyorLoader {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
     }
 
     if !root.detail-loading: ScrollView {
