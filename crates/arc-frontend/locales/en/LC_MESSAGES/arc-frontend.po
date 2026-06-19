@@ -249,3 +249,6 @@ msgstr ""
 
 msgid "Restart"
 msgstr ""
+
+msgid "Arc Runtime Libraries"
+msgstr ""

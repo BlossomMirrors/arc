@@ -1426,9 +1426,13 @@ pub async fn load_package_icons(pkgs: Vec<libarc::Package>) -> Vec<RawPackage> {
         })
         .collect();
     let icons_result: Vec<_> = join_all(icon_futures).await;
+    let default_icon = icons::load_default_icon();
     pkgs.into_iter()
         .zip(icons_result)
-        .map(|(pkg, icon)| RawPackage { pkg, icon })
+        .map(|(pkg, icon)| RawPackage {
+            pkg,
+            icon: icon.or_else(|| default_icon.clone()),
+        })
         .collect()
 }
 

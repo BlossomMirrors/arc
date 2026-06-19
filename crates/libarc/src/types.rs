@@ -35,6 +35,8 @@ pub struct Package {
     pub homepage_url: Option<String>,
     #[serde(default)]
     pub content_rating: Option<String>,
+    #[serde(default)]
+    pub is_runtime: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

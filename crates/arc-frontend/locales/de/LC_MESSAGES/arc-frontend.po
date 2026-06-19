@@ -258,3 +258,6 @@ msgstr "Beendet den laufenden arc-daemon und startet einen neuen im Hintergrund"
 
 msgid "Restart"
 msgstr "Neu starten"
+
+msgid "Arc Runtime Libraries"
+msgstr "Arc Laufzeitbibliotheken"

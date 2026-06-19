@@ -86,11 +86,14 @@ fn installation_with_ref(
 
 fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
     let id = r.name().map(|s| s.to_string()).unwrap_or_default();
+    let is_runtime = r.kind() == libflatpak::RefKind::Runtime;
     let name = r
         .appdata_name()
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| id.clone());
+        .unwrap_or_else(|| {
+            id.split('.').last().unwrap_or(&id).to_string()
+        });
     Package {
         id: id.clone(),
         name,
@@ -108,9 +111,10 @@ fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
         icon_url: None,
         remote: r.origin().map(|s| s.to_string()),
         screenshots: vec![],
-            developer_name: None,
-            homepage_url: None,
-            content_rating: None,
+        developer_name: None,
+        homepage_url: None,
+        content_rating: None,
+        is_runtime,
     }
 }
 
@@ -180,6 +184,7 @@ impl FlatpakProvider {
             developer_name: None,
             homepage_url: None,
             content_rating: None,
+            is_runtime: false,
                             });
                         Some(pkg)
                     } else {
@@ -235,10 +240,20 @@ impl FlatpakProvider {
             }
 
             fn fallback_name(suffix: &str) -> String {
-                let s = suffix.replace('_', " ").replace('-', " ").replace('.', " ");
+                const SKIP: &[&str] = &[
+                    "Utility", "CompatibilityTool", "Extension", "Plugin",
+                    "Addon", "Compat", "GL", "GL32", "Platform",
+                ];
+                let parts: Vec<&str> = suffix.split('.').collect();
+                let parts: &[&str] = if parts.len() > 1 && SKIP.contains(&parts[0]) {
+                    &parts[1..]
+                } else {
+                    &parts
+                };
+                let s = parts.join(" ").replace('_', " ").replace('-', " ");
                 let mut chars = s.chars();
                 match chars.next() {
-                    None => s,
+                    None => suffix.to_string(),
                     Some(c) => c.to_uppercase().to_string() + chars.as_str(),
                 }
             }
@@ -312,6 +327,7 @@ impl FlatpakProvider {
             developer_name: None,
             homepage_url: None,
             content_rating: None,
+            is_runtime: false,
                         });
                     }
                 }
@@ -333,6 +349,7 @@ impl FlatpakProvider {
             developer_name: None,
             homepage_url: None,
             content_rating: None,
+            is_runtime: false,
                     });
                 }
             }
@@ -592,7 +609,7 @@ impl FlatpakProvider {
         let app_id = app_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = Some(&gio_cancel);
-            let (inst, installed) = installation_with_app(&app_id)?;
+            let (inst, installed) = installation_with_ref(&app_id)?;
             let full_ref = installed
                 .format_ref()
                 .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?;
@@ -811,11 +828,7 @@ impl PackageProvider for FlatpakProvider {
                 let refs = inst
                     .list_installed_refs_for_update(cancel)
                     .unwrap_or_default();
-                packages.extend(
-                    refs.iter()
-                        .filter(|r| r.kind() == libflatpak::RefKind::App)
-                        .map(installed_ref_to_package),
-                );
+                packages.extend(refs.iter().map(installed_ref_to_package));
             }
             Ok(packages)
         })

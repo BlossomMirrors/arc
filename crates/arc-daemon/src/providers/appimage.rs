@@ -774,6 +774,7 @@ fn parse_info(content: &str) -> Option<Package> {
             developer_name: None,
             homepage_url: None,
             content_rating: None,
+            is_runtime: false,
     })
 }
 

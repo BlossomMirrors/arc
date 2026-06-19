@@ -713,5 +713,6 @@ pub fn entry_to_flatpak_package(entry: AppStreamEntry, installed: bool) -> Packa
         developer_name: entry.developer_name,
         homepage_url: entry.homepage_url,
         content_rating: Some(entry.content_rating).filter(|s| !s.is_empty()),
+        is_runtime: false,
     }
 }

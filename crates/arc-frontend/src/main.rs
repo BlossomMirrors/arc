@@ -201,6 +201,7 @@ fn apply_translations(app: &AppWindow) {
 }
 
 fn main() -> Result<()> {
+    use tr::tr;
     let locale = sys_locale::get_locale().unwrap_or_else(|| "en".to_string());
     translators::set_locale(&locale);
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -266,6 +267,8 @@ fn main() -> Result<()> {
     }
 
     let tx_store: TxStore = Arc::new(Mutex::new(Vec::new()));
+    let pending_runtime_ids: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let runtime_icon = icons::load_default_icon();
 
     type InstalledCache = Arc<Mutex<Option<Vec<packages::RawPackage>>>>;
     let installed_cache: InstalledCache = Arc::new(Mutex::new(None));
@@ -384,6 +387,8 @@ fn main() -> Result<()> {
 
     if let Some(proxy) = proxy_opt.lock().unwrap().clone() {
         let app_weak = app.as_weak();
+        let runtime_ids_init = pending_runtime_ids.clone();
+        let runtime_icon_init = runtime_icon.clone();
         rt.handle().spawn(async move {
             let updates: Vec<libarc::Package> = proxy
                 .list_updates()
@@ -391,16 +396,36 @@ fn main() -> Result<()> {
                 .ok()
                 .and_then(|json| serde_json::from_str(&json).ok())
                 .unwrap_or_default();
-            let count = updates.len();
-            if count == 0 {
+            if updates.is_empty() {
                 return;
             }
-            let raw_pkgs = load_package_icons(updates).await;
+            let (runtime_updates, app_updates): (Vec<_>, Vec<_>) =
+                updates.into_iter().partition(|p| p.is_runtime);
+            let raw_pkgs = load_package_icons(app_updates).await;
             let _ = app_weak.upgrade_in_event_loop(move |app| {
-                let pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
+                let mut pkgs: Vec<PackageItem> = raw_pkgs.iter().map(|r| r.to_slint()).collect();
+                if !runtime_updates.is_empty() {
+                    *runtime_ids_init.lock().unwrap() =
+                        runtime_updates.iter().map(|p| p.id.clone()).collect();
+                    pkgs.push(PackageItem {
+                        id: "arc-runtime-libraries".into(),
+                        name: tr!("Arc Runtime Libraries").into(),
+                        version: Default::default(),
+                        description: Default::default(),
+                        installed: true,
+                        icon: runtime_icon_init
+                            .as_ref()
+                            .map(|r| r.to_slint_image())
+                            .unwrap_or_default(),
+                        busy: false,
+                        progress: 0.0,
+                        transaction_id: Default::default(),
+                    });
+                }
+                let count = pkgs.len() as i32;
                 app.set_available_updates(pkgs.as_slice().into());
-                app.set_update_count(count as i32);
-                launcher::update_badge(count as i32);
+                app.set_update_count(count);
+                launcher::update_badge(count);
             });
         });
     }
@@ -512,6 +537,7 @@ fn main() -> Result<()> {
                     pkg_id_str,
                     String::new(),
                     display_name,
+                    None,
                     "install".to_string(),
                     true,
                     true,
@@ -571,10 +597,24 @@ fn main() -> Result<()> {
                         app.set_current_view("eula".into());
                     });
                 } else {
+                    let icon_url = if pkg_id_str.starts_with("pwa:") {
+                        if let Some(ref p) = proxy {
+                            p.get_app_info(&pkg_id_str)
+                                .await
+                                .ok()
+                                .and_then(|j| serde_json::from_str::<libarc::Package>(&j).ok())
+                                .and_then(|pkg| pkg.icon_url)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
                     begin_transaction(
                         pkg_id_str,
                         String::new(),
                         display_name,
+                        icon_url,
                         "install".to_string(),
                         true,
                         false,
@@ -611,6 +651,7 @@ fn main() -> Result<()> {
                 pkg_id_str,
                 parent_id,
                 display_name,
+                None,
                 "install".to_string(),
                 true,
                 false, // don't reload the detail page
@@ -645,6 +686,7 @@ fn main() -> Result<()> {
                 pkg_id_str,
                 parent_id,
                 display_name,
+                None,
                 "remove".to_string(),
                 false,
                 false, // don't reload the detail page
@@ -711,6 +753,7 @@ fn main() -> Result<()> {
                 pkg_id_str,
                 String::new(),
                 display_name,
+                None,
                 tx_type,
                 false,
                 in_detail,
@@ -729,9 +772,37 @@ fn main() -> Result<()> {
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
         let store = tx_store.clone();
+        let runtime_ids_upd = pending_runtime_ids.clone();
 
         app.on_update_requested(move |pkg_id| {
             let pkg_id_str = pkg_id.to_string();
+
+            if pkg_id_str == "arc-runtime-libraries" {
+                let ids: Vec<String> = runtime_ids_upd.lock().unwrap().drain(..).collect();
+                let label = tr!("Arc Runtime Libraries").to_string();
+                for runtime_id in ids {
+                    begin_transaction(
+                        runtime_id,
+                        String::new(),
+                        label.clone(),
+                        None,
+                        "update".to_string(),
+                        true,
+                        false,
+                        false,
+                        None,
+                        store.clone(),
+                        proxy_arc.clone(),
+                        app_weak.clone(),
+                        rt_handle.clone(),
+                    );
+                }
+                if let Some(a) = app_weak.upgrade() {
+                    remove_from_available_updates(&a, "arc-runtime-libraries");
+                }
+                return;
+            }
+
             let in_detail = app_weak
                 .upgrade()
                 .map(|a| a.get_current_view() == "detail")
@@ -758,6 +829,7 @@ fn main() -> Result<()> {
                 pkg_id_str.clone(),
                 String::new(),
                 display_name,
+                None,
                 "update".to_string(),
                 true,
                 in_detail,
@@ -779,6 +851,7 @@ fn main() -> Result<()> {
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
         let store = tx_store.clone();
+        let runtime_ids_all = pending_runtime_ids.clone();
 
         app.on_update_all_requested(move || {
             let updates: Vec<SavedPkgData> = app_weak
@@ -804,23 +877,46 @@ fn main() -> Result<()> {
                 }
             }
 
+            let label = tr!("Arc Runtime Libraries").to_string();
             for pkg in updates {
-                let pkg_id = pkg.id.clone();
-                let name = pkg.name.clone();
-                begin_transaction(
-                    pkg_id,
-                    String::new(),
-                    name,
-                    "update".to_string(),
-                    true,
-                    false,
-                    false,
-                    Some(pkg),
-                    store.clone(),
-                    proxy_arc.clone(),
-                    app_weak.clone(),
-                    rt_handle.clone(),
-                );
+                if pkg.id == "arc-runtime-libraries" {
+                    let ids: Vec<String> = runtime_ids_all.lock().unwrap().drain(..).collect();
+                    for runtime_id in ids {
+                        begin_transaction(
+                            runtime_id,
+                            String::new(),
+                            label.clone(),
+                            None,
+                            "update".to_string(),
+                            true,
+                            false,
+                            false,
+                            None,
+                            store.clone(),
+                            proxy_arc.clone(),
+                            app_weak.clone(),
+                            rt_handle.clone(),
+                        );
+                    }
+                } else {
+                    let pkg_id = pkg.id.clone();
+                    let name = pkg.name.clone();
+                    begin_transaction(
+                        pkg_id,
+                        String::new(),
+                        name,
+                        None,
+                        "update".to_string(),
+                        true,
+                        false,
+                        false,
+                        Some(pkg),
+                        store.clone(),
+                        proxy_arc.clone(),
+                        app_weak.clone(),
+                        rt_handle.clone(),
+                    );
+                }
             }
             if let Some(a) = app_weak.upgrade() {
                 a.set_available_updates(Default::default());
@@ -931,11 +1027,15 @@ fn main() -> Result<()> {
         let proxy_arc = proxy_opt.clone();
         let rt_handle = rt.handle().clone();
         let store = tx_store.clone();
+        let runtime_ids_refresh = pending_runtime_ids.clone();
+        let runtime_icon_refresh = runtime_icon.clone();
 
         app.on_refresh_updates_requested(move || {
             let app_weak2 = app_weak.clone();
             let proxy = get_proxy(&proxy_arc);
             let store2 = store.clone();
+            let runtime_ids2 = runtime_ids_refresh.clone();
+            let runtime_icon2 = runtime_icon_refresh.clone();
 
             rt_handle.spawn(async move {
                 let updates: Vec<libarc::Package> = if let Some(p) = &proxy {
@@ -948,13 +1048,36 @@ fn main() -> Result<()> {
                     vec![]
                 };
 
-                let raw_pkgs = load_package_icons(updates).await;
+                let (runtime_updates, app_updates): (Vec<_>, Vec<_>) =
+                    updates.into_iter().partition(|p| p.is_runtime);
+                let raw_pkgs = load_package_icons(app_updates).await;
 
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
                     let mut pkgs: Vec<PackageItem> =
                         raw_pkgs.iter().map(|r| r.to_slint()).collect();
 
-                    // Re-add packages whose update transactions are still in flight
+                    if !runtime_updates.is_empty() {
+                        *runtime_ids2.lock().unwrap() =
+                            runtime_updates.iter().map(|p| p.id.clone()).collect();
+                        pkgs.push(PackageItem {
+                            id: "arc-runtime-libraries".into(),
+                            name: tr!("Arc Runtime Libraries").into(),
+                            version: Default::default(),
+                            description: Default::default(),
+                            installed: true,
+                            icon: runtime_icon2
+                                .as_ref()
+                                .map(|r| r.to_slint_image())
+                                .unwrap_or_default(),
+                            busy: false,
+                            progress: 0.0,
+                            transaction_id: Default::default(),
+                        });
+                    } else {
+                        runtime_ids2.lock().unwrap().clear();
+                    }
+
+                    // Re-add app packages whose update transactions are still in flight
                     // but were not returned by the daemon in this refresh.
                     {
                         let s = store2.lock().unwrap();
@@ -1105,6 +1228,7 @@ fn main() -> Result<()> {
                 pkg_id,
                 String::new(),
                 display_name,
+                None,
                 "install".to_string(),
                 true,
                 in_detail,
@@ -1346,6 +1470,7 @@ fn main() -> Result<()> {
                         url3,
                         String::new(),
                         title,
+                        None,
                         "flatpakref".to_string(),
                         true,
                         false,
@@ -1485,6 +1610,7 @@ fn main() -> Result<()> {
                         fp.clone(),
                         String::new(),
                         pn_distrobox.clone(),
+                        None,
                         "install".to_string(),
                         true,
                         false,
@@ -1513,6 +1639,7 @@ fn main() -> Result<()> {
                         fp.clone(),
                         String::new(),
                         pn.clone(),
+                        None,
                         "install".to_string(),
                         true,
                         false,
@@ -1541,6 +1668,7 @@ fn main() -> Result<()> {
                         fp.clone(),
                         String::new(),
                         fn_.clone(),
+                        None,
                         "bundle".to_string(),
                         true,
                         false,

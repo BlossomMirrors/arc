@@ -466,6 +466,10 @@ pub fn load_appimage_icon(icon_url: Option<&str>, stem: &str) -> Option<RawIcon>
     None
 }
 
+pub fn load_default_icon() -> Option<RawIcon> {
+    render_svg(include_bytes!("../assets/default.svg"), 64)
+}
+
 pub fn load_ui_icon(icon_name: &str) -> Option<RawIcon> {
     find_system_icon(icon_name, 16).and_then(|path| load_icon_from_path(&path, 16))
 }

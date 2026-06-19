@@ -339,6 +339,7 @@ impl LutrisProvider {
             developer_name: None,
             homepage_url: None,
             content_rating: None,
+            is_runtime: false,
         }
     }
 

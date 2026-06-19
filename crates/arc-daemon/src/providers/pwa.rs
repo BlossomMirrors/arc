@@ -143,6 +143,7 @@ impl PwaProvider {
             developer_name: pwa.developer_name.clone(),
             homepage_url: pwa.homepage_url.clone(),
             content_rating: pwa.content_rating.clone(),
+            is_runtime: false,
         }
     }
 
@@ -337,6 +338,7 @@ impl PackageProvider for PwaProvider {
                         developer_name: None,
                         homepage_url: None,
                         content_rating: None,
+                        is_runtime: false,
                     })
             })
             .collect();

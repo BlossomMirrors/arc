@@ -246,21 +246,55 @@ pub fn push_transactions_to_ui(store: TxStore, app_weak: &slint::Weak<crate::App
     });
 }
 
-pub async fn load_icon_for_pkg(pkg_id: &str, name: &str) -> Option<RawIcon> {
+pub async fn load_icon_for_pkg(
+    pkg_id: &str,
+    name: &str,
+    icon_url: Option<&str>,
+) -> Option<RawIcon> {
     if pkg_id.starts_with("lutris:") {
-        return None;
+        return icons::load_default_icon();
+    }
+    if pkg_id.starts_with("pwa:") {
+        let appid = pkg_id.trim_start_matches("pwa:").to_string();
+        let local = tokio::task::spawn_blocking(move || {
+            let home = std::path::PathBuf::from(
+                std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()),
+            );
+            let icons_dir = home.join(".local/share/icons/hicolor/256x256/apps");
+            for ext in ["png", "svg", "webp"] {
+                let p = icons_dir.join(format!("arc-pwa-{}.{}", appid, ext));
+                if p.exists() {
+                    if let Some(icon) = icons::load_local_pwa_icon(&p) {
+                        return Some(icon);
+                    }
+                }
+            }
+            None
+        })
+        .await
+        .unwrap_or(None);
+        if local.is_some() {
+            return local;
+        }
+        if let Some(url) = icon_url {
+            if let Some(icon) = icons::load_icon(url).await {
+                return Some(icon);
+            }
+        }
+        return icons::load_default_icon();
     }
     if pkg_id.starts_with("appimage:") {
         let stem = pkg_id.trim_start_matches("appimage:").to_string();
         return tokio::task::spawn_blocking(move || icons::load_appimage_icon(None, &stem))
             .await
-            .unwrap_or(None);
+            .unwrap_or(None)
+            .or_else(icons::load_default_icon);
     }
     let is_flatpak = !pkg_id.contains('/')
         && !pkg_id.contains(';')
         && !pkg_id.starts_with("distrobox:")
         && pkg_id.matches('.').count() >= 2;
-    if is_flatpak {
+    let icon = if is_flatpak {
         let id = pkg_id.to_string();
         tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
             .await
@@ -270,13 +304,15 @@ pub async fn load_icon_for_pkg(pkg_id: &str, name: &str) -> Option<RawIcon> {
         tokio::task::spawn_blocking(move || icons::load_native_package_icon(&n))
             .await
             .unwrap_or(None)
-    }
+    };
+    icon.or_else(icons::load_default_icon)
 }
 
 pub fn begin_transaction(
     pkg_id: String,
     parent_id: String,
     display_name: String,
+    icon_url: Option<String>,
     tx_type: String,
     installed_after: bool,
     refresh_detail: bool,
@@ -319,6 +355,7 @@ pub fn begin_transaction(
 
     let name_for_icon = display_name.clone();
     let pkg_id_for_icon = pkg_id.clone();
+    let icon_url_cap = icon_url;
 
     rt_handle.spawn(async move {
         let tx_id_result = match crate::helpers::get_or_connect(&proxy_arc).await {
@@ -345,7 +382,12 @@ pub fn begin_transaction(
                 }
                 push_transactions_to_ui(store.clone(), &app_weak);
 
-                let icon = load_icon_for_pkg(&pkg_id_for_icon, &name_for_icon).await;
+                let icon = load_icon_for_pkg(
+                    &pkg_id_for_icon,
+                    &name_for_icon,
+                    icon_url_cap.as_deref(),
+                )
+                .await;
                 {
                     let mut s = store.lock().unwrap();
                     if let Some(e) = s.get_mut(entry_idx) {
@@ -453,7 +495,7 @@ pub async fn load_running_transactions(
             .flatten()
             .map(|p| p.name);
         let fallback_name = name_from_pkg_id(&pkg_id);
-        let icon = load_icon_for_pkg(&pkg_id, real_name.as_deref().unwrap_or(&fallback_name)).await;
+        let icon = load_icon_for_pkg(&pkg_id, real_name.as_deref().unwrap_or(&fallback_name), None).await;
         {
             let mut s = store.lock().unwrap();
             if let Some(e) = s.iter_mut().find(|e| e.id == id) {
