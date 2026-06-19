@@ -52,7 +52,18 @@ pub(crate) struct DescBlock {
 // Split a block's text on `**...**` markers into bold and normal segments.
 // Headings are already bold so we skip splitting them.
 fn text_block(text: String, is_list_item: bool, is_heading: bool, is_bold: bool) -> DescBlock {
-    DescBlock { text, is_list_item, is_heading, is_bold, is_image: false, image_url: String::new(), image: None, is_app: false, app_id: String::new(), app_card: None }
+    DescBlock {
+        text,
+        is_list_item,
+        is_heading,
+        is_bold,
+        is_image: false,
+        image_url: String::new(),
+        image: None,
+        is_app: false,
+        app_id: String::new(),
+        app_card: None,
+    }
 }
 
 fn split_bold(text: String, is_list_item: bool, is_heading: bool) -> Vec<DescBlock> {
@@ -64,23 +75,43 @@ fn split_bold(text: String, is_list_item: bool, is_heading: bool) -> Vec<DescBlo
     while !remaining.is_empty() {
         match remaining.find("**") {
             None => {
-                result.push(text_block(remaining.to_string(), is_list_item, is_heading, false));
+                result.push(text_block(
+                    remaining.to_string(),
+                    is_list_item,
+                    is_heading,
+                    false,
+                ));
                 break;
             }
             Some(start) => {
                 if start > 0 {
-                    result.push(text_block(remaining[..start].to_string(), is_list_item, is_heading, false));
+                    result.push(text_block(
+                        remaining[..start].to_string(),
+                        is_list_item,
+                        is_heading,
+                        false,
+                    ));
                 }
                 remaining = &remaining[start + 2..];
                 match remaining.find("**") {
                     None => {
-                        result.push(text_block(remaining.to_string(), is_list_item, is_heading, false));
+                        result.push(text_block(
+                            remaining.to_string(),
+                            is_list_item,
+                            is_heading,
+                            false,
+                        ));
                         break;
                     }
                     Some(end) => {
                         let bold = &remaining[..end];
                         if !bold.is_empty() {
-                            result.push(text_block(bold.to_string(), is_list_item, is_heading, true));
+                            result.push(text_block(
+                                bold.to_string(),
+                                is_list_item,
+                                is_heading,
+                                true,
+                            ));
                         }
                         remaining = &remaining[end + 2..];
                     }
@@ -305,8 +336,16 @@ impl RawHeroItem {
     fn to_slint(&self) -> crate::HeroItem {
         crate::HeroItem {
             id: SharedString::from(self.id.as_str()),
-            banner: self.banner.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
-            icon: self.icon.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+            banner: self
+                .banner
+                .as_ref()
+                .map(|r| r.to_slint_image())
+                .unwrap_or_default(),
+            icon: self
+                .icon
+                .as_ref()
+                .map(|r| r.to_slint_image())
+                .unwrap_or_default(),
             title: SharedString::from(self.title.as_str()),
             body: SharedString::from(self.body.as_str()),
             is_story: self.is_story,
@@ -563,7 +602,11 @@ async fn load_raw_stories(
             .iter()
             .filter(|b| b.is_app && !b.app_id.is_empty())
             .filter_map(|b| {
-                if seen_ids.insert(b.app_id.clone()) { Some(b.app_id.clone()) } else { None }
+                if seen_ids.insert(b.app_id.clone()) {
+                    Some(b.app_id.clone())
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -582,8 +625,10 @@ async fn load_raw_stories(
         );
 
         // Map app ID -> resolved card
-        let card_map: std::collections::HashMap<String, RawCard> =
-            inline_cards.into_iter().map(|c| (c.id.clone(), c)).collect();
+        let card_map: std::collections::HashMap<String, RawCard> = inline_cards
+            .into_iter()
+            .map(|c| (c.id.clone(), c))
+            .collect();
 
         for block in &mut description_blocks {
             if block.is_app && !block.app_id.is_empty() {
@@ -660,7 +705,9 @@ pub async fn load_home(
         Arc::new(app_meta_raw);
     let proxy: Arc<Option<ArcDaemonProxy<'static>>> = Arc::new(proxy);
 
-    let show_categories = fp_sections.iter().any(|s| matches!(s, FpSection::Categories));
+    let show_categories = fp_sections
+        .iter()
+        .any(|s| matches!(s, FpSection::Categories));
 
     struct SecOut {
         item: RawHomeItem,
@@ -682,48 +729,84 @@ pub async fn load_home(
                 match section {
                     FpSection::H1(t) => SecOut {
                         item: RawHomeItem {
-                            item_type: "h1", text: t, title: String::new(), cards: vec![],
-                            hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            item_type: "h1",
+                            text: t,
+                            title: String::new(),
+                            cards: vec![],
+                            hero_items: vec![],
+                            editorial_items: vec![],
+                            link_title: String::new(),
+                            link_items: vec![],
                             app_cloud_overlay: false,
                         },
                         stories: vec![],
                     },
                     FpSection::H2(t) => SecOut {
                         item: RawHomeItem {
-                            item_type: "h2", text: t, title: String::new(), cards: vec![],
-                            hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            item_type: "h2",
+                            text: t,
+                            title: String::new(),
+                            cards: vec![],
+                            hero_items: vec![],
+                            editorial_items: vec![],
+                            link_title: String::new(),
+                            link_items: vec![],
                             app_cloud_overlay: false,
                         },
                         stories: vec![],
                     },
                     FpSection::H3(t) => SecOut {
                         item: RawHomeItem {
-                            item_type: "h3", text: t, title: String::new(), cards: vec![],
-                            hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            item_type: "h3",
+                            text: t,
+                            title: String::new(),
+                            cards: vec![],
+                            hero_items: vec![],
+                            editorial_items: vec![],
+                            link_title: String::new(),
+                            link_items: vec![],
                             app_cloud_overlay: false,
                         },
                         stories: vec![],
                     },
                     FpSection::P(t) => SecOut {
                         item: RawHomeItem {
-                            item_type: "p", text: t, title: String::new(), cards: vec![],
-                            hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            item_type: "p",
+                            text: t,
+                            title: String::new(),
+                            cards: vec![],
+                            hero_items: vec![],
+                            editorial_items: vec![],
+                            link_title: String::new(),
+                            link_items: vec![],
                             app_cloud_overlay: false,
                         },
                         stories: vec![],
                     },
                     FpSection::Br => SecOut {
                         item: RawHomeItem {
-                            item_type: "br", text: String::new(), title: String::new(), cards: vec![],
-                            hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            item_type: "br",
+                            text: String::new(),
+                            title: String::new(),
+                            cards: vec![],
+                            hero_items: vec![],
+                            editorial_items: vec![],
+                            link_title: String::new(),
+                            link_items: vec![],
                             app_cloud_overlay: false,
                         },
                         stories: vec![],
                     },
                     FpSection::Categories => SecOut {
                         item: RawHomeItem {
-                            item_type: "categories", text: String::new(), title: String::new(), cards: vec![],
-                            hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            item_type: "categories",
+                            text: String::new(),
+                            title: String::new(),
+                            cards: vec![],
+                            hero_items: vec![],
+                            editorial_items: vec![],
+                            link_title: String::new(),
+                            link_items: vec![],
                             app_cloud_overlay: false,
                         },
                         stories: vec![],
@@ -734,8 +817,14 @@ pub async fn load_home(
                         let cards = entries_to_cards(entries, inst).await;
                         SecOut {
                             item: RawHomeItem {
-                                item_type: "app-grid", text: String::new(), title: "Popular".into(), cards,
-                                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                                item_type: "app-grid",
+                                text: String::new(),
+                                title: "Popular".into(),
+                                cards,
+                                hero_items: vec![],
+                                editorial_items: vec![],
+                                link_title: String::new(),
+                                link_items: vec![],
                                 app_cloud_overlay: false,
                             },
                             stories: vec![],
@@ -747,8 +836,14 @@ pub async fn load_home(
                         let cards = entries_to_cards(entries, inst).await;
                         SecOut {
                             item: RawHomeItem {
-                                item_type: "app-row", text: String::new(), title: tr!("Recently Added").to_string(), cards,
-                                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                                item_type: "app-row",
+                                text: String::new(),
+                                title: tr!("Recently Added").to_string(),
+                                cards,
+                                hero_items: vec![],
+                                editorial_items: vec![],
+                                link_title: String::new(),
+                                link_items: vec![],
                                 app_cloud_overlay: false,
                             },
                             stories: vec![],
@@ -760,8 +855,14 @@ pub async fn load_home(
                         let cards = entries_to_cards(entries, inst).await;
                         SecOut {
                             item: RawHomeItem {
-                                item_type: "app-row", text: String::new(), title: tr!("Trending").to_string(), cards,
-                                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                                item_type: "app-row",
+                                text: String::new(),
+                                title: tr!("Trending").to_string(),
+                                cards,
+                                hero_items: vec![],
+                                editorial_items: vec![],
+                                link_title: String::new(),
+                                link_items: vec![],
                                 app_cloud_overlay: false,
                             },
                             stories: vec![],
@@ -774,8 +875,13 @@ pub async fn load_home(
                         SecOut {
                             item: RawHomeItem {
                                 item_type: if as_cards { "app-grid" } else { "app-row" },
-                                text: String::new(), title: tr!("Charts").to_string(), cards,
-                                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                                text: String::new(),
+                                title: tr!("Charts").to_string(),
+                                cards,
+                                hero_items: vec![],
+                                editorial_items: vec![],
+                                link_title: String::new(),
+                                link_items: vec![],
                                 app_cloud_overlay: false,
                             },
                             stories: vec![],
@@ -786,14 +892,24 @@ pub async fn load_home(
                         let cards = entries_to_cards(entries, inst).await;
                         SecOut {
                             item: RawHomeItem {
-                                item_type: "app-row", text: String::new(), title, cards,
-                                hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                                item_type: "app-row",
+                                text: String::new(),
+                                title,
+                                cards,
+                                hero_items: vec![],
+                                editorial_items: vec![],
+                                link_title: String::new(),
+                                link_items: vec![],
                                 app_cloud_overlay: false,
                             },
                             stories: vec![],
                         }
                     }
-                    FpSection::CarouselSection { breakpoint, items, app_cloud_overlay } => {
+                    FpSection::CarouselSection {
+                        breakpoint,
+                        items,
+                        app_cloud_overlay,
+                    } => {
                         use crate::forge::CarouselItem;
                         let hero_count = breakpoint.min(items.len());
                         let mut story_positions: Vec<usize> = Vec::new();
@@ -820,7 +936,11 @@ pub async fn load_home(
                         let card_by_id: std::collections::HashMap<&str, &RawCard> =
                             app_cards.iter().map(|c| (c.id.as_str(), c)).collect();
                         let pos_to_story_idx: std::collections::HashMap<usize, usize> =
-                            story_positions.iter().enumerate().map(|(si, &pos)| (pos, si)).collect();
+                            story_positions
+                                .iter()
+                                .enumerate()
+                                .map(|(si, &pos)| (pos, si))
+                                .collect();
 
                         let mut hero_items: Vec<RawHeroItem> = Vec::new();
                         let mut editorial_items: Vec<RawHeroItem> = Vec::new();
@@ -832,7 +952,9 @@ pub async fn load_home(
                                     let story_idx = pos_to_story_idx[&pos];
                                     let rs = loaded_stories.get(story_idx);
                                     let hero_item = RawHeroItem {
-                                        id: rs.map(|r| r.id.clone()).unwrap_or_else(|| format!("story-{story_idx}")),
+                                        id: rs
+                                            .map(|r| r.id.clone())
+                                            .unwrap_or_else(|| format!("story-{story_idx}")),
                                         banner: rs.and_then(|r| r.screenshot.clone()),
                                         icon: None,
                                         title: s.title.clone(),
@@ -854,7 +976,9 @@ pub async fn load_home(
                                             banner: None,
                                             icon: card.and_then(|c| c.icon.clone()),
                                             title: card.map(|c| c.name.clone()).unwrap_or_default(),
-                                            body: card.map(|c| c.summary.clone()).unwrap_or_default(),
+                                            body: card
+                                                .map(|c| c.summary.clone())
+                                                .unwrap_or_default(),
                                             is_story: false,
                                             story_index: -1,
                                         });
@@ -881,7 +1005,11 @@ pub async fn load_home(
                         }
                     }
                     FpSection::LinksSection { title, items, .. } => {
-                        enum LinkKind { Story(usize), App(String), Url }
+                        enum LinkKind {
+                            Story(usize),
+                            App(String),
+                            Url,
+                        }
                         let mut link_kinds: Vec<LinkKind> = Vec::new();
                         let mut link_items: Vec<RawLinkItem> = Vec::new();
                         let mut story_forge: Vec<crate::forge::ForgeStory> = Vec::new();
@@ -975,7 +1103,12 @@ pub async fn load_home(
     let mut raw_stories: Vec<RawStory> = Vec::new();
     for mut so in section_results {
         let offset = raw_stories.len() as i32;
-        for hi in so.item.hero_items.iter_mut().chain(so.item.editorial_items.iter_mut()) {
+        for hi in so
+            .item
+            .hero_items
+            .iter_mut()
+            .chain(so.item.editorial_items.iter_mut())
+        {
             if hi.story_index >= 0 {
                 hi.story_index += offset;
             }
@@ -991,15 +1124,45 @@ pub async fn load_home(
 
     let raw_cats: Vec<RawCategoryData> = if show_categories {
         let cat_defs: &[(&str, &str, &str, (u8, u8, u8))] = &[
-            ("AudioVideo",  "Multimedia",      "applications-multimedia",  (41,  128, 185)),
-            ("Development", "Developer Tools", "applications-development", (142, 68,  173)),
-            ("Education",   "Education",       "applications-education",   (39,  174, 96)),
-            ("Graphics",    "Graphics",        "applications-graphics",    (192, 57,  43)),
-            ("Network",     "Internet",        "applications-internet",    (22,  160, 133)),
-            ("Office",      "Office",          "applications-office",      (211, 84,  0)),
-            ("Science",     "Science",         "applications-science",     (41,  128, 185)),
-            ("System",      "System",          "applications-system",      (100, 100, 110)),
-            ("Utility",     "Utilities",       "applications-utilities",   (192, 57,  43)),
+            (
+                "AudioVideo",
+                "Multimedia",
+                "applications-multimedia",
+                (41, 128, 185),
+            ),
+            (
+                "Development",
+                "Developer Tools",
+                "applications-development",
+                (142, 68, 173),
+            ),
+            (
+                "Education",
+                "Education",
+                "applications-education",
+                (39, 174, 96),
+            ),
+            (
+                "Graphics",
+                "Graphics",
+                "applications-graphics",
+                (192, 57, 43),
+            ),
+            (
+                "Network",
+                "Internet",
+                "applications-internet",
+                (22, 160, 133),
+            ),
+            ("Office", "Office", "applications-office", (211, 84, 0)),
+            ("Science", "Science", "applications-science", (41, 128, 185)),
+            ("System", "System", "applications-system", (100, 100, 110)),
+            (
+                "Utility",
+                "Utilities",
+                "applications-utilities",
+                (192, 57, 43),
+            ),
         ];
         join_all(cat_defs.iter().map(|(id, label, icon_name, color)| {
             let id = id.to_string();
@@ -1011,7 +1174,12 @@ pub async fn load_home(
                     .await
                     .ok()
                     .and_then(|d| d.icon);
-                RawCategoryData { id, label, icon, color }
+                RawCategoryData {
+                    id,
+                    label,
+                    icon,
+                    color,
+                }
             }
         }))
         .await
@@ -1027,14 +1195,23 @@ pub async fn load_home(
                 title: item.title.into(),
                 apps: cards_to_model(item.cards),
                 hero_items: slint::ModelRc::new(slint::VecModel::from(
-                    item.hero_items.iter().map(|h| h.to_slint()).collect::<Vec<_>>(),
+                    item.hero_items
+                        .iter()
+                        .map(|h| h.to_slint())
+                        .collect::<Vec<_>>(),
                 )),
                 editorial_items: slint::ModelRc::new(slint::VecModel::from(
-                    item.editorial_items.iter().map(|h| h.to_slint()).collect::<Vec<_>>(),
+                    item.editorial_items
+                        .iter()
+                        .map(|h| h.to_slint())
+                        .collect::<Vec<_>>(),
                 )),
                 link_title: item.link_title.into(),
                 link_items: slint::ModelRc::new(slint::VecModel::from(
-                    item.link_items.iter().map(|l| l.to_slint()).collect::<Vec<_>>(),
+                    item.link_items
+                        .iter()
+                        .map(|l| l.to_slint())
+                        .collect::<Vec<_>>(),
                 )),
                 app_cloud_overlay: item.app_cloud_overlay,
             })
@@ -1066,9 +1243,17 @@ pub async fn load_home(
                         is_heading: b.is_heading,
                         is_bold: b.is_bold,
                         is_image: b.is_image,
-                        image: b.image.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+                        image: b
+                            .image
+                            .as_ref()
+                            .map(|r| r.to_slint_image())
+                            .unwrap_or_default(),
                         is_app: b.is_app,
-                        app_card: b.app_card.as_ref().map(|c| c.to_slint()).unwrap_or_default(),
+                        app_card: b
+                            .app_card
+                            .as_ref()
+                            .map(|c| c.to_slint())
+                            .unwrap_or_default(),
                     })
                     .collect();
                 let apps: Vec<crate::AppCardData> =
@@ -1076,7 +1261,11 @@ pub async fn load_home(
                 crate::StoryItem {
                     id: SharedString::from(s.id.as_str()),
                     title: SharedString::from(s.title.as_str()),
-                    screenshot: s.screenshot.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+                    screenshot: s
+                        .screenshot
+                        .as_ref()
+                        .map(|r| r.to_slint_image())
+                        .unwrap_or_default(),
                     description_blocks: slint::ModelRc::new(slint::VecModel::from(blocks)),
                     featured_apps: slint::ModelRc::new(slint::VecModel::from(apps)),
                 }
@@ -1337,10 +1526,7 @@ pub async fn load_detail(
             (dev_name, false)
         }
     } else {
-        let dev_name = metadata
-            .as_ref()
-            .and_then(|m| m.developer_name.clone())
-            .unwrap_or_else(|| app_name.clone());
+        let dev_name = "".to_string();
         (dev_name, false)
     };
 
@@ -1382,9 +1568,8 @@ pub async fn load_detail(
     let icon = if let Some(pwa) = pwa_pkg {
         // Try local icon written by the PWA provider, fall back to remote URL.
         let appid = pwa.id.strip_prefix("pwa:").unwrap_or(&pwa.id).to_string();
-        let home = std::path::PathBuf::from(
-            std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()),
-        );
+        let home =
+            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()));
         let icons_dir = home.join(".local/share/icons/hicolor/256x256/apps");
         let local = tokio::task::spawn_blocking(move || {
             for ext in ["png", "svg", "webp"] {
@@ -1549,9 +1734,17 @@ pub async fn load_detail(
                 is_heading: b.is_heading,
                 is_bold: b.is_bold,
                 is_image: b.is_image,
-                image: b.image.as_ref().map(|r| r.to_slint_image()).unwrap_or_default(),
+                image: b
+                    .image
+                    .as_ref()
+                    .map(|r| r.to_slint_image())
+                    .unwrap_or_default(),
                 is_app: b.is_app,
-                app_card: b.app_card.as_ref().map(|c| c.to_slint()).unwrap_or_default(),
+                app_card: b
+                    .app_card
+                    .as_ref()
+                    .map(|c| c.to_slint())
+                    .unwrap_or_default(),
             })
             .collect();
         app.set_detail_screenshots([].as_slice().into());
