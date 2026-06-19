@@ -69,6 +69,7 @@ pub enum FpSection {
     CarouselSection {
         breakpoint: usize,
         items: Vec<CarouselItem>,
+        app_cloud_overlay: bool,
     },
     Custom {
         title: String,
@@ -273,6 +274,7 @@ fn parse_frontpage(xml: &str) -> Vec<FpSection> {
                             .and_then(|e| after[..e].parse::<usize>().ok())
                     })
                     .unwrap_or(usize::MAX);
+                let app_cloud_overlay = tag.contains("app-cloud=\"true\"");
                 const CLOSE: &str = "</carousel>";
                 let body_start = gt + 1;
                 let body_end = xml[body_start..]
@@ -281,7 +283,7 @@ fn parse_frontpage(xml: &str) -> Vec<FpSection> {
                     .unwrap_or(xml.len());
                 let items = extract_carousel_items(&xml[body_start..body_end]);
                 if !items.is_empty() {
-                    sections.push(FpSection::CarouselSection { breakpoint, items });
+                    sections.push(FpSection::CarouselSection { breakpoint, items, app_cloud_overlay });
                 }
                 pos = body_end + CLOSE.len();
             }

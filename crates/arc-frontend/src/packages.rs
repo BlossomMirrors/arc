@@ -615,6 +615,7 @@ struct RawHomeItem {
     editorial_items: Vec<RawHeroItem>,
     link_title: String,
     link_items: Vec<RawLinkItem>,
+    app_cloud_overlay: bool,
 }
 
 pub async fn load_home(
@@ -683,6 +684,7 @@ pub async fn load_home(
                         item: RawHomeItem {
                             item_type: "h1", text: t, title: String::new(), cards: vec![],
                             hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            app_cloud_overlay: false,
                         },
                         stories: vec![],
                     },
@@ -690,6 +692,7 @@ pub async fn load_home(
                         item: RawHomeItem {
                             item_type: "h2", text: t, title: String::new(), cards: vec![],
                             hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            app_cloud_overlay: false,
                         },
                         stories: vec![],
                     },
@@ -697,6 +700,7 @@ pub async fn load_home(
                         item: RawHomeItem {
                             item_type: "h3", text: t, title: String::new(), cards: vec![],
                             hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            app_cloud_overlay: false,
                         },
                         stories: vec![],
                     },
@@ -704,6 +708,7 @@ pub async fn load_home(
                         item: RawHomeItem {
                             item_type: "p", text: t, title: String::new(), cards: vec![],
                             hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            app_cloud_overlay: false,
                         },
                         stories: vec![],
                     },
@@ -711,6 +716,7 @@ pub async fn load_home(
                         item: RawHomeItem {
                             item_type: "br", text: String::new(), title: String::new(), cards: vec![],
                             hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            app_cloud_overlay: false,
                         },
                         stories: vec![],
                     },
@@ -718,6 +724,7 @@ pub async fn load_home(
                         item: RawHomeItem {
                             item_type: "categories", text: String::new(), title: String::new(), cards: vec![],
                             hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                            app_cloud_overlay: false,
                         },
                         stories: vec![],
                     },
@@ -729,6 +736,7 @@ pub async fn load_home(
                             item: RawHomeItem {
                                 item_type: "app-grid", text: String::new(), title: "Popular".into(), cards,
                                 hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                                app_cloud_overlay: false,
                             },
                             stories: vec![],
                         }
@@ -741,6 +749,7 @@ pub async fn load_home(
                             item: RawHomeItem {
                                 item_type: "app-row", text: String::new(), title: tr!("Recently Added").to_string(), cards,
                                 hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                                app_cloud_overlay: false,
                             },
                             stories: vec![],
                         }
@@ -753,6 +762,7 @@ pub async fn load_home(
                             item: RawHomeItem {
                                 item_type: "app-row", text: String::new(), title: tr!("Trending").to_string(), cards,
                                 hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                                app_cloud_overlay: false,
                             },
                             stories: vec![],
                         }
@@ -766,6 +776,7 @@ pub async fn load_home(
                                 item_type: if as_cards { "app-grid" } else { "app-row" },
                                 text: String::new(), title: tr!("Charts").to_string(), cards,
                                 hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                                app_cloud_overlay: false,
                             },
                             stories: vec![],
                         }
@@ -777,11 +788,12 @@ pub async fn load_home(
                             item: RawHomeItem {
                                 item_type: "app-row", text: String::new(), title, cards,
                                 hero_items: vec![], editorial_items: vec![], link_title: String::new(), link_items: vec![],
+                                app_cloud_overlay: false,
                             },
                             stories: vec![],
                         }
                     }
-                    FpSection::CarouselSection { breakpoint, items, .. } => {
+                    FpSection::CarouselSection { breakpoint, items, app_cloud_overlay } => {
                         use crate::forge::CarouselItem;
                         let hero_count = breakpoint.min(items.len());
                         let mut story_positions: Vec<usize> = Vec::new();
@@ -863,6 +875,7 @@ pub async fn load_home(
                                 editorial_items,
                                 link_title: String::new(),
                                 link_items: vec![],
+                                app_cloud_overlay,
                             },
                             stories: loaded_stories,
                         }
@@ -946,6 +959,7 @@ pub async fn load_home(
                                 editorial_items: vec![],
                                 link_title: title,
                                 link_items,
+                                app_cloud_overlay: false,
                             },
                             stories: loaded_stories,
                         }
@@ -1022,6 +1036,7 @@ pub async fn load_home(
                 link_items: slint::ModelRc::new(slint::VecModel::from(
                     item.link_items.iter().map(|l| l.to_slint()).collect::<Vec<_>>(),
                 )),
+                app_cloud_overlay: item.app_cloud_overlay,
             })
             .collect();
 

@@ -68,17 +68,32 @@ export component HomeScreen inherits Rectangle {
                 if item.item-type == "carousel": VerticalLayout {
                     spacing: 12px;
 
-                    if item.hero-items.length > 0: HeroCarousel {
-                        width: parent.width;
-                        items: item.hero-items;
-                        tr-installed: root.tr-installed;
-                        story-clicked(idx) => {
-                            if idx >= 0 && idx < root.home-stories.length {
-                                root.story-selected(root.home-stories[idx]);
+                    if item.hero-items.length > 0: Rectangle {
+                        clip: false;
+                        height: 400px;
+
+                        HeroCarousel {
+                            width: parent.width;
+                            height: parent.height;
+                            items: item.hero-items;
+                            tr-installed: root.tr-installed;
+                            story-clicked(idx) => {
+                                if idx >= 0 && idx < root.home-stories.length {
+                                    root.story-selected(root.home-stories[idx]);
+                                }
+                            }
+                            app-clicked(id) => {
+                                root.detail-requested(id);
                             }
                         }
-                        app-clicked(id) => {
-                            root.detail-requested(id);
+
+                        if item.app-cloud-overlay && item.apps.length > 0: AppCloud {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: 200px;
+                            items: item.apps;
+                            item-clicked(id) => { root.detail-requested(id); }
                         }
                     }
 
@@ -105,7 +120,7 @@ export component HomeScreen inherits Rectangle {
                         }
                     }
 
-                    if item.apps.length > 0: AppCloud {
+                    if item.apps.length > 0 && !item.app-cloud-overlay: AppCloud {
                         items: item.apps;
                         item-clicked(id) => { root.detail-requested(id); }
                     }
