@@ -43,9 +43,9 @@ export component PackageListScreen inherits Rectangle {
             height: i == 0 ? 84px : 72px;
 
             card := Rectangle {
-                x: 16px;
+                width: min(parent.width - 32px, 860px);
+                x: (parent.width - self.width) / 2;
                 y: i == 0 ? 17px : 5px;
-                width: parent.width - 32px;
                 height: 62px;
                 border-radius: 10px;
                 background: row-ta.has-hover ? #80808028 : #80808016;

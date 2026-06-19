@@ -53,10 +53,12 @@ export component DetailScreen inherits Rectangle {
     if !root.detail-loading: ScrollView {
         width: parent.width;
         height: parent.height;
+        viewport-width: self.visible-width;
 
         VerticalLayout {
             spacing: 0px;
-            width: parent.width;
+            width: min(parent.width, 880px);
+            x: (parent.width - self.width) / 2;
             padding-top: 20px;
 
             DetailHeader {

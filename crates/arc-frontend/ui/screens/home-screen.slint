@@ -7,6 +7,7 @@ import {
 import { ConveyorLoader } from "../components/conveyor-loader.slint";
 import { CategoryCard } from "../components/category-card.slint";
 import { PopularCard } from "../components/popular-card.slint";
+import { AppCloud } from "../components/app-cloud.slint";
 import { Carousel } from "../components/carousel.slint";
 import { HeroCarousel } from "../components/hero-carousel.slint";
 import { EditorialCard } from "../components/editorial-card.slint";
@@ -56,11 +57,12 @@ export component HomeScreen inherits Rectangle {
             padding-top: 16px;
             padding-bottom: 40px;
             spacing: 0px;
-            width: scroller.visible-width;
+            width: min(scroller.visible-width, 1400px);
+            x: (scroller.visible-width - self.width) / 2;
 
             for item[i] in root.home-items: VerticalLayout {
                 // No top padding for the very first item; otherwise separate sections clearly
-                padding-top: i == 0 ? 0px : item.item-type == "app-row" || item.item-type == "app-grid" || item.item-type == "categories" || item.item-type == "carousel" ? 28px : 8px;
+                padding-top: i == 0 ? 0px : item.item-type == "app-row" || item.item-type == "app-grid" || item.item-type == "app-cloud" || item.item-type == "categories" || item.item-type == "carousel" ? 28px : 8px;
 
                 // Carousel section (hero + editorial)
                 if item.item-type == "carousel": VerticalLayout {
@@ -101,6 +103,11 @@ export component HomeScreen inherits Rectangle {
                                 }
                             }
                         }
+                    }
+
+                    if item.apps.length > 0: AppCloud {
+                        items: item.apps;
+                        item-clicked(id) => { root.detail-requested(id); }
                     }
                 }
 
@@ -199,6 +206,12 @@ export component HomeScreen inherits Rectangle {
                             }
                         }
                     }
+                }
+
+                // Custom editorial app collection — floating icon cloud
+                if item.item-type == "app-cloud" && item.apps.length > 0: AppCloud {
+                    items: item.apps;
+                    item-clicked(id) => { root.detail-requested(id); }
                 }
 
                 // Links section (Mac App Store "More Information" style)

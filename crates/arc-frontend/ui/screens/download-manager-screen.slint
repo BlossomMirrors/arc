@@ -45,10 +45,12 @@ export component DownloadManagerScreen inherits Rectangle {
     ScrollView {
         width: parent.width;
         height: parent.height;
+        viewport-width: self.visible-width;
 
         VerticalLayout {
             spacing: 0px;
-            width: parent.width;
+            width: min(parent.width, 900px);
+            x: (parent.width - self.width) / 2;
             alignment: start;
 
             // Page header

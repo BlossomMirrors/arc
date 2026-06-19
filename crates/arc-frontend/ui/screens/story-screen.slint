@@ -58,7 +58,8 @@ export component StoryScreen inherits Rectangle {
                 padding: 24px;
                 spacing: 0px;
                 alignment: start;
-                width: scroller.visible-width;
+                width: min(scroller.visible-width, 740px);
+                x: (scroller.visible-width - self.width) / 2;
 
                 // Story title
                 Text {

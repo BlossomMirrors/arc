@@ -78,9 +78,11 @@ export component SettingsScreen inherits Rectangle {
     ScrollView {
         width: parent.width;
         height: parent.height;
+        viewport-width: self.visible-width;
 
         VerticalBox {
-            width: parent.width;
+            width: min(parent.width, 740px);
+            x: (parent.width - self.width) / 2;
             padding: 20px;
             spacing: 0px;
 

@@ -812,13 +812,14 @@ pub async fn load_home(
 
                         let mut hero_items: Vec<RawHeroItem> = Vec::new();
                         let mut editorial_items: Vec<RawHeroItem> = Vec::new();
+                        let mut editorial_app_cards: Vec<RawCard> = Vec::new();
 
                         for (pos, carousel_item) in items.iter().enumerate() {
-                            let hero_item = match carousel_item {
+                            match carousel_item {
                                 CarouselItem::Story(s) => {
                                     let story_idx = pos_to_story_idx[&pos];
                                     let rs = loaded_stories.get(story_idx);
-                                    RawHeroItem {
+                                    let hero_item = RawHeroItem {
                                         id: rs.map(|r| r.id.clone()).unwrap_or_else(|| format!("story-{story_idx}")),
                                         banner: rs.and_then(|r| r.screenshot.clone()),
                                         icon: None,
@@ -826,25 +827,29 @@ pub async fn load_home(
                                         body: strip_html_tags(&s.body),
                                         is_story: true,
                                         story_index: story_idx as i32,
+                                    };
+                                    if pos < hero_count {
+                                        hero_items.push(hero_item);
+                                    } else {
+                                        editorial_items.push(hero_item);
                                     }
                                 }
                                 CarouselItem::App(id) => {
                                     let card = card_by_id.get(id.as_str()).copied();
-                                    RawHeroItem {
-                                        id: id.clone(),
-                                        banner: None,
-                                        icon: card.and_then(|c| c.icon.clone()),
-                                        title: card.map(|c| c.name.clone()).unwrap_or_default(),
-                                        body: card.map(|c| c.summary.clone()).unwrap_or_default(),
-                                        is_story: false,
-                                        story_index: -1,
+                                    if pos < hero_count {
+                                        hero_items.push(RawHeroItem {
+                                            id: id.clone(),
+                                            banner: None,
+                                            icon: card.and_then(|c| c.icon.clone()),
+                                            title: card.map(|c| c.name.clone()).unwrap_or_default(),
+                                            body: card.map(|c| c.summary.clone()).unwrap_or_default(),
+                                            is_story: false,
+                                            story_index: -1,
+                                        });
+                                    } else if let Some(c) = card {
+                                        editorial_app_cards.push(c.clone());
                                     }
                                 }
-                            };
-                            if pos < hero_count {
-                                hero_items.push(hero_item);
-                            } else {
-                                editorial_items.push(hero_item);
                             }
                         }
 
@@ -853,7 +858,7 @@ pub async fn load_home(
                                 item_type: "carousel",
                                 text: String::new(),
                                 title: String::new(),
-                                cards: vec![],
+                                cards: editorial_app_cards,
                                 hero_items,
                                 editorial_items,
                                 link_title: String::new(),

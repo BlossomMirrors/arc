@@ -1,0 +1,92 @@
+import { Palette } from "std-widgets.slint";
+import { AppCardData } from "../types.slint";
+
+component CloudIcon inherits Rectangle {
+    in property <image> icon;
+    in property <string> app-id;
+    in property <angle> tilt: 0deg;
+    callback clicked(string);
+
+    border-radius: self.width * 0.22;
+    clip: true;
+    background: Palette.alternate-background;
+    border-width: 1.5px;
+    border-color: Palette.foreground.transparentize(0.82);
+    drop-shadow-blur: 24px;
+    drop-shadow-color: #00000055;
+    drop-shadow-offset-x: 2px;
+    drop-shadow-offset-y: 7px;
+    transform-rotation: root.tilt;
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(root.app-id); }
+    }
+
+    Image {
+        source: root.icon;
+        width: parent.width;
+        height: parent.height;
+        image-fit: contain;
+    }
+}
+
+export component AppCloud inherits Rectangle {
+    in property <[AppCardData]> items;
+    callback item-clicked(string);
+
+    height: 200px;
+    clip: false;
+
+    // Render in back-to-front order so item 0 (largest) sits on top.
+
+    if root.items.length > 5: CloudIcon {
+        app-id: root.items[5].id; icon: root.items[5].icon;
+        width: 44px; height: 44px;
+        x: parent.width * 0.06 - 22px; y: 12px;
+        tilt: 16deg;
+        clicked(id) => { root.item-clicked(id); }
+    }
+    if root.items.length > 6: CloudIcon {
+        app-id: root.items[6].id; icon: root.items[6].icon;
+        width: 44px; height: 44px;
+        x: parent.width * 0.86 - 22px; y: 20px;
+        tilt: -11deg;
+        clicked(id) => { root.item-clicked(id); }
+    }
+    if root.items.length > 3: CloudIcon {
+        app-id: root.items[3].id; icon: root.items[3].icon;
+        width: 56px; height: 56px;
+        x: parent.width * 0.72 - 28px; y: 108px;
+        tilt: 7deg;
+        clicked(id) => { root.item-clicked(id); }
+    }
+    if root.items.length > 4: CloudIcon {
+        app-id: root.items[4].id; icon: root.items[4].icon;
+        width: 50px; height: 50px;
+        x: parent.width * 0.46 - 25px; y: 136px;
+        tilt: -4deg;
+        clicked(id) => { root.item-clicked(id); }
+    }
+    if root.items.length > 2: CloudIcon {
+        app-id: root.items[2].id; icon: root.items[2].icon;
+        width: 52px; height: 52px;
+        x: parent.width * 0.14 - 26px; y: 70px;
+        tilt: -13deg;
+        clicked(id) => { root.item-clicked(id); }
+    }
+    if root.items.length > 1: CloudIcon {
+        app-id: root.items[1].id; icon: root.items[1].icon;
+        width: 60px; height: 60px;
+        x: parent.width * 0.62 - 30px; y: 28px;
+        tilt: 9deg;
+        clicked(id) => { root.item-clicked(id); }
+    }
+    if root.items.length > 0: CloudIcon {
+        app-id: root.items[0].id; icon: root.items[0].icon;
+        width: 68px; height: 68px;
+        x: parent.width * 0.36 - 34px; y: 46px;
+        tilt: -6deg;
+        clicked(id) => { root.item-clicked(id); }
+    }
+}
