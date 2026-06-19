@@ -71,7 +71,7 @@ msgid "Trending"
 msgstr "Beliebt"
 
 msgid "Charts"
-msgstr "Charts"
+msgstr "Trending"
 
 msgid "Recommended Apps"
 msgstr "Vorgestellte Apps"
