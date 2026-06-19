@@ -112,12 +112,12 @@ export component DetailScreen inherits Rectangle {
                 }
             }
 
-            HorizontalBox {
+            if root.detail-screenshots.length > 0: HorizontalBox {
                 padding-left: 30px;
                 padding-right: 30px;
                 padding-top: 8px;
                 padding-bottom: 8px;
-                if root.detail-screenshots.length > 0: ScreenshotCarousel {
+                ScreenshotCarousel {
                     screenshots: root.detail-screenshots;
                     screenshot-clicked(i) => {
                         root.lightbox-index = i;

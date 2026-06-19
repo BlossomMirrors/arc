@@ -1031,6 +1031,7 @@ fn main() -> Result<()> {
                 app_ref.set_can_go_back(can_back);
                 app_ref.set_can_go_forward(can_fwd);
                 app_ref.set_detail_screenshots([].as_slice().into());
+                app_ref.set_detail_screenshots_loading(false);
                 app_ref.set_detail_description_blocks([].as_slice().into());
                 app_ref.set_detail_loading(true);
                 app_ref.set_current_view("detail".into());
@@ -1705,6 +1706,7 @@ fn main() -> Result<()> {
                         load_detail(id, proxy2, store2, app_weak2).await;
                     });
                     app_ref.set_detail_screenshots([].as_slice().into());
+                    app_ref.set_detail_screenshots_loading(false);
                     app_ref.set_detail_description_blocks([].as_slice().into());
                     app_ref.set_detail_loading(true);
                     app_ref.set_current_view("detail".into());
@@ -1772,6 +1774,7 @@ fn main() -> Result<()> {
                         load_detail(id, proxy2, store2, app_weak2).await;
                     });
                     app_ref.set_detail_screenshots([].as_slice().into());
+                    app_ref.set_detail_screenshots_loading(false);
                     app_ref.set_detail_description_blocks([].as_slice().into());
                     app_ref.set_detail_loading(true);
                     app_ref.set_current_view("detail".into());

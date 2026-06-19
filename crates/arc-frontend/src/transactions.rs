@@ -586,7 +586,26 @@ pub async fn run_signal_listener(
                                 update_package_installed(&app, &pkg_id, installed_after);
                             }
                             if refresh_detail && app.get_current_view() == "detail" {
-                                app.invoke_detail_requested(pkg_id.clone().into());
+                                let mut d = app.get_detail_app();
+                                let matched = if !d.flatpak_id.is_empty() && d.flatpak_id == pkg_id.as_str() {
+                                    d.flatpak_installed = installed_after;
+                                    true
+                                } else if !d.appimage_id.is_empty() && d.appimage_id == pkg_id.as_str() {
+                                    d.appimage_installed = installed_after;
+                                    true
+                                } else if !d.native_id.is_empty() && d.native_id == pkg_id.as_str() {
+                                    d.native_installed = installed_after;
+                                    true
+                                } else if !d.lutris_id.is_empty() && d.lutris_id == pkg_id.as_str() {
+                                    d.lutris_installed = installed_after;
+                                    true
+                                } else {
+                                    false
+                                };
+                                if matched {
+                                    d.installed = installed_after;
+                                    app.set_detail_app(d);
+                                }
                             }
                             if refresh_extensions && app.get_current_view() == "detail" {
                                 app.invoke_refresh_extensions_requested();

@@ -1604,6 +1604,10 @@ pub async fn load_detail(
 
     if !screenshot_urls.is_empty() {
         let app_weak2 = app_weak.clone();
+        let app_weak3 = app_weak.clone();
+        let _ = app_weak2.upgrade_in_event_loop(|app| {
+            app.set_detail_screenshots_loading(true);
+        });
         tokio::spawn(async move {
             let futs: Vec<_> = screenshot_urls
                 .iter()
@@ -1617,13 +1621,14 @@ pub async fn load_detail(
                 .into_iter()
                 .filter_map(|r| r.ok().flatten())
                 .collect();
-            if !raw_shots.is_empty() {
-                let _ = app_weak2.upgrade_in_event_loop(move |app| {
+            let _ = app_weak3.upgrade_in_event_loop(move |app| {
+                if !raw_shots.is_empty() {
                     let shots: Vec<slint::Image> =
                         raw_shots.iter().map(|r| r.to_slint_image()).collect();
                     app.set_detail_screenshots(shots.as_slice().into());
-                });
-            }
+                }
+                app.set_detail_screenshots_loading(false);
+            });
         });
     }
 }

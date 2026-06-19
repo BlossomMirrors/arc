@@ -65,6 +65,7 @@ export component AppWindow inherits Window {
     in-out property <string> eula-source-view: "";
     in-out property <AppDetailData> detail-app;
     in-out property <bool> detail-loading: false;
+    in-out property <bool> detail-screenshots-loading: false;
     in-out property <string> settings-preferred: "Flatpak";
     in-out property <bool> settings-ignore-native-pref: false;
     in-out property <bool> settings-auto-updates: true;
@@ -386,7 +387,7 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 detail-app: root.detail-app;
-                detail-loading: root.detail-loading;
+                detail-loading: root.detail-loading || root.detail-screenshots-loading;
                 detail-busy: root.detail-busy;
                 detail-progress: root.detail-progress;
                 detail-transaction-id: root.detail-transaction-id;
