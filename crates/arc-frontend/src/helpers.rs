@@ -41,6 +41,10 @@ pub fn is_flatpakrepo(path: &str) -> bool {
     path.to_lowercase().ends_with(".flatpakrepo")
 }
 
+pub fn is_flatpakref(path: &str) -> bool {
+    path.to_lowercase().ends_with(".flatpakref")
+}
+
 pub fn parse_flatpakrepo(content: &str) -> (String, String) {
     let mut title = String::new();
     let mut url = String::new();

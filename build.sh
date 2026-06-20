@@ -100,27 +100,36 @@ install -Dm 644 completions/arc.fish          %{buildroot}/usr/share/fish/vendor
 update-mime-database /usr/share/mime &>/dev/null || :
 update-desktop-database /usr/share/applications &>/dev/null || :
 gtk-update-icon-cache /usr/share/icons/hicolor &>/dev/null || :
-MIMEAPPS=/usr/share/applications/mimeapps.list
-if [ ! -f "\$MIMEAPPS" ]; then
-    printf '[Default Applications]\n' > "\$MIMEAPPS"
-elif ! grep -q "^\[Default Applications\]" "\$MIMEAPPS"; then
-    printf '\n[Default Applications]\n' >> "\$MIMEAPPS"
-fi
-for ENTRY in \
-    "x-scheme-handler/appstream=org.blossomos.Arc.Handler.desktop" \
-    "x-scheme-handler/flatpak+https=org.blossomos.Arc.Handler.desktop"
-do
-    KEY=\$(echo "\$ENTRY" | cut -d= -f1)
-    sed -i "/^\${KEY}=/d" "\$MIMEAPPS"
-    sed -i "/^\[Default Applications\]/a \$ENTRY" "\$MIMEAPPS"
+for MIMEAPPS in /usr/share/applications/mimeapps.list /etc/xdg/mimeapps.list; do
+    if [ ! -f "\$MIMEAPPS" ]; then
+        printf '[Default Applications]\n' > "\$MIMEAPPS"
+    elif ! grep -q "^\[Default Applications\]" "\$MIMEAPPS"; then
+        printf '\n[Default Applications]\n' >> "\$MIMEAPPS"
+    fi
+    for ENTRY in \
+        "x-scheme-handler/appstream=org.blossomos.Arc.Handler.desktop" \
+        "x-scheme-handler/flatpak+https=org.blossomos.Arc.Handler.desktop" \
+        "application/vnd.flatpak.ref=org.blossomos.Arc.desktop" \
+        "application/vnd.flatpak=org.blossomos.Arc.desktop"
+    do
+        KEY=\$(echo "\$ENTRY" | cut -d= -f1)
+        sed -i "\|^\${KEY}=|d" "\$MIMEAPPS"
+        sed -i "\|^\[Default Applications\]|a \$ENTRY" "\$MIMEAPPS"
+    done
 done
 
 %postun
 update-mime-database /usr/share/mime &>/dev/null || :
 update-desktop-database /usr/share/applications &>/dev/null || :
 gtk-update-icon-cache /usr/share/icons/hicolor &>/dev/null || :
-sed -i '/x-scheme-handler\/appstream=org\.blossomos\.Arc\.Handler\.desktop/d;/x-scheme-handler\/flatpak+https=org\.blossomos\.Arc\.Handler\.desktop/d' \
-    /usr/share/applications/mimeapps.list 2>/dev/null || :
+for MIMEAPPS in /usr/share/applications/mimeapps.list /etc/xdg/mimeapps.list; do
+    sed -i \
+        '\|x-scheme-handler/appstream=org\.blossomos\.Arc\.Handler\.desktop|d
+         \|x-scheme-handler/flatpak+https=org\.blossomos\.Arc\.Handler\.desktop|d
+         \|application/vnd\.flatpak\.ref=org\.blossomos\.Arc\.desktop|d
+         \|application/vnd\.flatpak=org\.blossomos\.Arc\.desktop|d' \
+        "\$MIMEAPPS" 2>/dev/null || :
+done
 
 %files
 /usr/bin/arc-frontend

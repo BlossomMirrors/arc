@@ -7,8 +7,8 @@ mod transactions;
 
 use anyhow::Result;
 use helpers::{
-    get_display_name, get_proxy, is_appimage, is_flatpak_bundle, is_flatpakrepo, is_pkg_file,
-    parse_flatpakref, parse_flatpakrepo, pkg_name_from_filename,
+    get_display_name, get_proxy, is_appimage, is_flatpak_bundle, is_flatpakref, is_flatpakrepo,
+    is_pkg_file, parse_flatpakref, parse_flatpakrepo, pkg_name_from_filename,
 };
 use libarc::{ArcDaemonProxy, Provider, Settings};
 use packages::{
@@ -1413,16 +1413,21 @@ fn main() -> Result<()> {
         let initial_app = std::env::args()
             .find(|a| a.starts_with("appstream://") || a.starts_with("appstream:"))
             .map(|a| {
-                a.trim_start_matches("appstream://")
+                let id = a.trim_start_matches("appstream://")
                     .trim_start_matches("appstream:")
                     .trim_start_matches("//")
-                    .trim_start_matches('/')
-                    .to_string()
+                    .trim_start_matches('/');
+                id.strip_suffix(".desktop").unwrap_or(id).to_string()
             });
         let flatpakref_url = std::env::args()
             .find(|a| a.starts_with("flatpak+https://") || a.starts_with("flatpak+http://"))
             .map(|a| a.trim_start_matches("flatpak+").to_string());
-        let flatpakrepo_file = std::env::args().skip(1).find(|a| is_flatpakrepo(a));
+        let flatpakref_file = std::env::args().skip(1)
+            .map(|a| a.strip_prefix("file://").map(str::to_string).unwrap_or(a))
+            .find(|a| is_flatpakref(a));
+        let flatpakrepo_file = std::env::args().skip(1)
+            .map(|a| a.strip_prefix("file://").map(str::to_string).unwrap_or(a))
+            .find(|a| is_flatpakrepo(a));
 
         if manage_extensions || initial_app.as_deref() == Some("") {
             if let Some(app_ref) = app_weak.upgrade() {
@@ -1465,6 +1470,59 @@ fn main() -> Result<()> {
                         .upgrade()
                         .map(|a| a.get_install_flatpakref_name().to_string())
                         .unwrap_or_else(|| url.clone());
+
+                    begin_transaction(
+                        url3,
+                        String::new(),
+                        title,
+                        None,
+                        "flatpakref".to_string(),
+                        true,
+                        false,
+                        false,
+                        None,
+                        store2.clone(),
+                        proxy_arc2.clone(),
+                        app_weak3.clone(),
+                        rt_handle2.clone(),
+                    );
+
+                    if let Some(app_ref) = app_weak3.upgrade() {
+                        app_ref.set_current_view("downloads".into());
+                    }
+                });
+            }
+
+            {
+                let app_weak3 = app_weak.clone();
+                app.on_install_flatpakref_cancelled(move || {
+                    if let Some(app_ref) = app_weak3.upgrade() {
+                        app_ref.set_current_view("home".into());
+                    }
+                });
+            }
+        } else if let Some(file_path) = flatpakref_file {
+            let content = std::fs::read_to_string(&file_path).unwrap_or_default();
+            let (title, app_id, repo_url) = parse_flatpakref(&content);
+            if let Some(app_ref) = app_weak.upgrade() {
+                app_ref.set_install_flatpakref_name(title.into());
+                app_ref.set_install_flatpakref_app_id(app_id.into());
+                app_ref.set_install_flatpakref_repo_url(repo_url.into());
+                app_ref.set_current_view("install-flatpakref".into());
+            }
+
+            {
+                let app_weak3 = app_weak.clone();
+                let proxy_arc2 = proxy_arc.clone();
+                let rt_handle2 = rt_handle.clone();
+                let store2 = store.clone();
+                let file_url = format!("file://{}", file_path);
+                app.on_install_flatpakref_confirmed(move || {
+                    let url3 = file_url.clone();
+                    let title = app_weak3
+                        .upgrade()
+                        .map(|a| a.get_install_flatpakref_name().to_string())
+                        .unwrap_or_default();
 
                     begin_transaction(
                         url3,
@@ -1542,7 +1600,9 @@ fn main() -> Result<()> {
         let proxy_arc = proxy_opt.clone();
         let store = tx_store.clone();
 
-        let pkg_file = std::env::args().skip(1).find(|a| is_pkg_file(a));
+        let pkg_file = std::env::args().skip(1)
+            .map(|a| a.strip_prefix("file://").map(str::to_string).unwrap_or(a))
+            .find(|a| is_pkg_file(a));
 
         if let Some(file_path) = pkg_file {
             let file_name = std::path::Path::new(&file_path)

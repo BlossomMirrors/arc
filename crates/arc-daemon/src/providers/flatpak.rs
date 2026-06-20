@@ -523,13 +523,20 @@ impl FlatpakProvider {
         let url = url.to_string();
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
             let rt = tokio::runtime::Handle::current();
-            let bytes = rt.block_on(async {
-                reqwest::get(&url)
-                    .await
-                    .map_err(|e| ArcError::ProviderError(e.to_string()))?
-                    .bytes()
-                    .await
-                    .map_err(|e| ArcError::ProviderError(e.to_string()))
+            let bytes: Vec<u8> = rt.block_on(async {
+                if let Some(path) = url.strip_prefix("file://") {
+                    tokio::fs::read(path)
+                        .await
+                        .map_err(|e| ArcError::ProviderError(e.to_string()))
+                } else {
+                    reqwest::get(&url)
+                        .await
+                        .map_err(|e| ArcError::ProviderError(e.to_string()))?
+                        .bytes()
+                        .await
+                        .map(|b| b.to_vec())
+                        .map_err(|e| ArcError::ProviderError(e.to_string()))
+                }
             })?;
 
             // Parse the flatpakref INI to extract the repository fields so we can
@@ -584,7 +591,7 @@ impl FlatpakProvider {
 
             // Run the install transaction, add_install_flatpakref resolves the
             // exact ref (name + branch) and handles the RuntimeRepo if needed.
-            let glib_bytes = glib::Bytes::from(bytes.as_ref());
+            let glib_bytes = glib::Bytes::from(bytes.as_slice());
             let tx = libflatpak::Transaction::for_installation(&inst, cancel)
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
             tx.set_no_interaction(true);
