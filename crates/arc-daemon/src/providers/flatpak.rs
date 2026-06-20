@@ -4,13 +4,18 @@ use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider, RemoteInfo};
 use libflatpak::glib;
 use libflatpak::prelude::*;
-use tokio::sync::mpsc::UnboundedSender;
+use std::sync::Arc;
+use tokio::sync::{mpsc::UnboundedSender, Semaphore};
 
-pub struct FlatpakProvider;
+pub struct FlatpakProvider {
+    network_sem: Arc<Semaphore>,
+}
 
 impl FlatpakProvider {
     pub fn new() -> Self {
-        Self
+        Self {
+            network_sem: Arc::new(Semaphore::new(1)),
+        }
     }
 }
 
@@ -120,8 +125,8 @@ fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
 
 impl FlatpakProvider {
     pub async fn fetch_all(&self) -> Result<Vec<Package>, ArcError> {
-        // libflatpak uses glib under the hood which is not tokio aware, so all (we hate glib btw)
-        // calls to it have to go through spawn_blocking or they'll block the runtime
+        let _permit = self.network_sem.acquire().await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
         tokio::task::spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
             let db = AppStreamDb::get_static();
@@ -230,6 +235,8 @@ impl FlatpakProvider {
 
     pub async fn list_extensions(&self, app_id: &str) -> Result<Vec<Package>, ArcError> {
         let app_id = app_id.to_string();
+        let _permit = self.network_sem.acquire().await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
         tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
             let prefix = format!("{}.", app_id);
@@ -821,6 +828,8 @@ impl PackageProvider for FlatpakProvider {
     }
 
     async fn list_updates(&self) -> Result<Vec<Package>, ArcError> {
+        let _permit = self.network_sem.acquire().await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
         tokio::task::spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
             let mut packages = Vec::new();

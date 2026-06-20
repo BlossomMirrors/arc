@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use libarc::{ArcError, Package};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc::UnboundedSender, RwLock};
+use tokio::sync::{mpsc::UnboundedSender, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use libflatpak::gio::prelude::CancellableExt;
@@ -37,6 +37,7 @@ pub struct MultiProvider {
     pub appimage: Arc<appimage::AppImageProvider>,
     pub pwa: Arc<pwa::PwaProvider>,
     package_cache: RwLock<Option<(Instant, Vec<Package>)>>,
+    fetch_lock: Mutex<()>,
 }
 
 impl MultiProvider {
@@ -54,6 +55,7 @@ impl MultiProvider {
             appimage: Arc::new(appimage),
             pwa: Arc::new(pwa),
             package_cache: RwLock::new(None),
+            fetch_lock: Mutex::new(()),
         }
     }
 
@@ -222,6 +224,15 @@ impl MultiProvider {
     }
 
     async fn all_packages(&self) -> Result<Vec<Package>, ArcError> {
+        {
+            let cache = self.package_cache.read().await;
+            if let Some((cached_at, packages)) = cache.as_ref() {
+                if cached_at.elapsed() < PACKAGE_CACHE_TTL {
+                    return Ok(packages.clone());
+                }
+            }
+        }
+        let _lock = self.fetch_lock.lock().await;
         {
             let cache = self.package_cache.read().await;
             if let Some((cached_at, packages)) = cache.as_ref() {
