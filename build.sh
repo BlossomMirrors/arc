@@ -101,20 +101,18 @@ update-mime-database /usr/share/mime &>/dev/null || :
 update-desktop-database /usr/share/applications &>/dev/null || :
 gtk-update-icon-cache /usr/share/icons/hicolor &>/dev/null || :
 MIMEAPPS=/usr/share/applications/mimeapps.list
+if [ ! -f "\$MIMEAPPS" ]; then
+    printf '[Default Applications]\n' > "\$MIMEAPPS"
+elif ! grep -q "^\[Default Applications\]" "\$MIMEAPPS"; then
+    printf '\n[Default Applications]\n' >> "\$MIMEAPPS"
+fi
 for ENTRY in \
     "x-scheme-handler/appstream=org.blossomos.Arc.Handler.desktop" \
     "x-scheme-handler/flatpak+https=org.blossomos.Arc.Handler.desktop"
 do
     KEY=\$(echo "\$ENTRY" | cut -d= -f1)
-    if [ -f "\$MIMEAPPS" ]; then
-        if ! grep -q "\$KEY" "\$MIMEAPPS"; then
-            grep -q "^\[Default Applications\]" "\$MIMEAPPS" \
-                && sed -i "/^\[Default Applications\]/a \$ENTRY" "\$MIMEAPPS" \
-                || printf '\n[Default Applications]\n%s\n' "\$ENTRY" >> "\$MIMEAPPS"
-        fi
-    else
-        printf '[Default Applications]\n%s\n' "\$ENTRY" > "\$MIMEAPPS"
-    fi
+    sed -i "/^\${KEY}=/d" "\$MIMEAPPS"
+    sed -i "/^\[Default Applications\]/a \$ENTRY" "\$MIMEAPPS"
 done
 
 %postun
