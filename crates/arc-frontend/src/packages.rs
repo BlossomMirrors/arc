@@ -1517,6 +1517,7 @@ pub async fn load_detail(
         let dev_name = metadata
             .as_ref()
             .and_then(|m| m.developer_name.clone())
+            .or_else(|| fp_pkg.developer_name.clone())
             .or_else(|| fp_pkg.id.split('.').last().map(|s| s.to_string()))
             .unwrap_or_else(|| fp_pkg.name.clone());
 
@@ -1678,18 +1679,31 @@ pub async fn load_detail(
         .map(|p| p.screenshots.clone())
         .unwrap_or_default();
 
+    let pkg_summary = flatpak_pkg
+        .filter(|_| pwa_pkg.is_none())
+        .map(|p| p.description.clone())
+        .filter(|s| !s.is_empty());
+
+    let meta_summary = metadata.as_ref().map(|m| m.summary.clone()).filter(|s| !s.is_empty());
+    let resolved_summary = meta_summary.or(pkg_summary.clone()).unwrap_or_default();
+
+    let meta_description = metadata
+        .as_ref()
+        .map(|m| html_to_blocks(&m.description))
+        .filter(|b| !b.is_empty());
+
+    let description_blocks = meta_description
+        .or_else(|| plain_description.map(|t| split_bold(t, false, false)))
+        .or_else(|| {
+            pkg_summary.clone().map(|s| split_bold(s, false, false))
+        })
+        .unwrap_or_default();
+
     let raw = RawDetailData {
         name,
         developer,
-        description_blocks: metadata
-            .as_ref()
-            .map(|m| html_to_blocks(&m.description))
-            .or_else(|| plain_description.map(|t| split_bold(t, false, false)))
-            .unwrap_or_default(),
-        summary: metadata
-            .as_ref()
-            .map(|m| m.summary.clone())
-            .unwrap_or_default(),
+        description_blocks,
+        summary: resolved_summary,
         version,
         icon,
         flatpak_id,
@@ -1714,11 +1728,14 @@ pub async fn load_detail(
             .as_ref()
             .and_then(|m| m.homepage_url.clone())
             .or_else(|| pwa_pkg.and_then(|p| p.homepage_url.clone()))
+            .or_else(|| flatpak_pkg.and_then(|p| p.homepage_url.clone()))
             .unwrap_or_default(),
         content_rating: metadata
             .as_ref()
             .map(|m| m.content_rating.clone())
+            .filter(|s| !s.is_empty())
             .or_else(|| pwa_pkg.and_then(|p| p.content_rating.clone()))
+            .or_else(|| flatpak_pkg.and_then(|p| p.content_rating.clone()))
             .unwrap_or_default(),
     };
 
