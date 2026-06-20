@@ -1442,14 +1442,10 @@ fn main() -> Result<()> {
             let app_weak2 = app_weak.clone();
             let url2 = url.clone();
             rt_handle.spawn(async move {
-                let content = reqwest::get(&url2)
-                    .await
-                    .ok()
-                    .and_then(|r| {
-                        let rt = tokio::runtime::Handle::current();
-                        rt.block_on(r.text()).ok()
-                    })
-                    .unwrap_or_default();
+                let content = match reqwest::get(&url2).await {
+                    Ok(r) => r.text().await.unwrap_or_default(),
+                    Err(_) => String::new(),
+                };
                 let (title, app_id, repo_url) = parse_flatpakref(&content);
                 let _ = app_weak2.upgrade_in_event_loop(move |app| {
                     app.set_install_flatpakref_name(title.into());
