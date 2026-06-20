@@ -4,7 +4,7 @@ use crate::providers::distrobox::DistroboxProvider;
 use crate::providers::flatpak::FlatpakProvider;
 use crate::providers::lutris::LutrisProvider;
 use crate::providers::pwa::PwaProvider;
-use crate::providers::MultiProvider;
+use crate::providers::{MultiProvider, PackageProvider};
 use crate::transaction_manager::TransactionManager;
 use anyhow::Result;
 use std::sync::Arc;
@@ -55,6 +55,32 @@ impl Daemon {
                 } else {
                     info!("Package cache refreshed");
                 }
+            }
+        });
+
+        let au_provider = Arc::clone(&provider);
+        tokio::spawn(async move {
+            loop {
+                if libarc::Settings::load().auto_updates {
+                    info!("Auto-update: checking for updates...");
+                    match au_provider.list_updates().await {
+                        Err(e) => warn!("Auto-update: list_updates failed: {}", e),
+                        Ok(updates) if updates.is_empty() => {
+                            info!("Auto-update: nothing to update");
+                        }
+                        Ok(updates) => {
+                            info!("Auto-update: updating {} package(s)", updates.len());
+                            for pkg in updates {
+                                info!("Auto-update: updating {}", pkg.id);
+                                if let Err(e) = au_provider.update(&pkg.id).await {
+                                    warn!("Auto-update: failed to update {}: {}", pkg.id, e);
+                                }
+                            }
+                            info!("Auto-update: done");
+                        }
+                    }
+                }
+                tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
             }
         });
 
