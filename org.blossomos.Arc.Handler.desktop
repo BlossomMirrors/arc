@@ -6,6 +6,5 @@ Icon=org.blossomos.Arc
 Terminal=false
 NoDisplay=true
 StartupNotify=true
-StartupWMClass=arc-frontend
 MimeType=x-scheme-handler/appstream;x-scheme-handler/flatpak+https;
 X-KDE-Protocols=appstream;flatpak+https
