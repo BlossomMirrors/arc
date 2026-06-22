@@ -547,12 +547,14 @@ export component AppWindow inherits Window {
             if root.current-view == "install-flatpakref": InstallFlatpakrefScreen {
                 width: parent.width;
                 height: parent.height;
+                icon-package: root.icon-package;
+                show-security-warning: root.settings-show-security-warnings;
                 app-name: root.install-flatpakref-name;
                 app-id: root.install-flatpakref-app-id;
                 repo-url: root.install-flatpakref-repo-url;
                 tr-install-application: root.tr-install-application;
-                tr-contains-repo: root.tr-contains-repo;
                 tr-install: root.tr-install;
+                tr-repo-warning: root.tr-repo-warning;
                 confirmed => {
                     root.install-flatpakref-confirmed();
                 }

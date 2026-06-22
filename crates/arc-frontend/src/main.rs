@@ -1439,6 +1439,18 @@ fn main() -> Result<()> {
                 app_ref.invoke_detail_requested(app_id.into());
             }
         } else if let Some(url) = flatpakref_url {
+            let flathub_app_id = url
+                .strip_prefix("https://dl.flathub.org/repo/appstream/")
+                .or_else(|| url.strip_prefix("http://dl.flathub.org/repo/appstream/"))
+                .and_then(|s| s.strip_suffix(".flatpakref"))
+                .map(str::to_string);
+
+            if let Some(app_id) = flathub_app_id {
+                if let Some(app_ref) = app_weak.upgrade() {
+                    app_ref.invoke_detail_requested(app_id.into());
+                }
+            } else {
+
             let app_weak2 = app_weak.clone();
             let url2 = url.clone();
             rt_handle.spawn(async move {
@@ -1497,9 +1509,18 @@ fn main() -> Result<()> {
                     }
                 });
             }
+
+            } // end non-flathub flatpakref branch
         } else if let Some(file_path) = flatpakref_file {
             let content = std::fs::read_to_string(&file_path).unwrap_or_default();
             let (title, app_id, repo_url) = parse_flatpakref(&content);
+            let is_flathub = repo_url.contains("dl.flathub.org") || repo_url.contains("flathub.org");
+
+            if is_flathub {
+                if let Some(app_ref) = app_weak.upgrade() {
+                    app_ref.invoke_detail_requested(app_id.into());
+                }
+            } else {
             if let Some(app_ref) = app_weak.upgrade() {
                 app_ref.set_install_flatpakref_name(title.into());
                 app_ref.set_install_flatpakref_app_id(app_id.into());
@@ -1550,6 +1571,8 @@ fn main() -> Result<()> {
                     }
                 });
             }
+
+            } // end non-flathub flatpakref file branch
         } else if let Some(repo_path) = flatpakrepo_file {
             let content = std::fs::read_to_string(&repo_path).unwrap_or_default();
             let (title, url) = parse_flatpakrepo(&content);

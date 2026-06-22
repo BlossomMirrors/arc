@@ -1,35 +1,50 @@
-import { VerticalBox, Button } from "std-widgets.slint";
 import { Palette } from "std-widgets.slint";
-import { Badge } from "../components/badge.slint";
 
 export component InstallFlatpakrefScreen inherits Rectangle {
+    in property <image> icon-package;
     in property <string> app-name;
     in property <string> app-id;
     in property <string> repo-url;
+    in property <bool> show-security-warning: true;
 
     in property <string> tr-install-application: "Install Application";
-    in property <string> tr-contains-repo: "Contains repository";
     in property <string> tr-install: "Install";
+    in property <string> tr-repo-warning: "Adding a third-party repository gives it the ability to distribute software to your system. Only add repositories from sources you trust.";
 
     callback confirmed();
     callback cancelled();
 
-    VerticalBox {
+    VerticalLayout {
         alignment: center;
         padding: 48px;
         spacing: 20px;
 
-        Text {
-            text: root.tr-install-application;
-            font-size: 22px;
-            font-weight: 700;
-            horizontal-alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 80px;
+                height: 80px;
+                border-radius: 16px;
+                background: #80808012;
+                border-width: 1px;
+                border-color: #80808025;
+
+                Image {
+                    source: root.icon-package;
+                    width: 44px;
+                    height: 44px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    image-fit: contain;
+                    colorize: Palette.foreground.transparentize(0.15);
+                }
+            }
         }
 
         Text {
-            text: root.app-name;
-            font-size: 15px;
-            font-weight: 600;
+            text: root.app-name != "" ? root.app-name : root.tr-install-application;
+            font-size: 20px;
+            font-weight: 700;
             horizontal-alignment: center;
         }
 
@@ -41,29 +56,71 @@ export component InstallFlatpakrefScreen inherits Rectangle {
             overflow: elide;
         }
 
-        HorizontalLayout {
-            alignment: center;
-
-            Badge {
-                has-icon: true;
-                icon: @image-url("../../assets/warning.svg");
-                label: root.tr-contains-repo;
-                accent: #eab308;
-            }
-        }
-
         Text {
             text: root.repo-url;
             font-size: 11px;
-            color: Palette.foreground.transparentize(0.45);
+            color: Palette.foreground.transparentize(0.55);
             horizontal-alignment: center;
             overflow: elide;
         }
 
-        Button {
-            text: root.tr-install;
-            clicked => {
-                root.confirmed();
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 280px;
+                height: 40px;
+                border-radius: 10px;
+                background: btn-install-ta.has-hover ? #2563eb : #3b82f6;
+
+                btn-install-ta := TouchArea {
+                    clicked => {
+                        root.confirmed();
+                    }
+                }
+
+                Text {
+                    text: root.tr-install;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: white;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        if root.show-security-warning: HorizontalLayout {
+            alignment: center;
+
+            Rectangle {
+                width: 320px;
+                border-radius: 10px;
+                background: #f9731610;
+                border-width: 1px;
+                border-color: #f9731630;
+
+                HorizontalLayout {
+                    padding: 12px;
+                    spacing: 10px;
+
+                    Image {
+                        source: @image-url("../../assets/warning.svg");
+                        width: 16px;
+                        height: 16px;
+                        colorize: #f97316;
+                        image-fit: contain;
+                        vertical-alignment: top;
+                    }
+
+                    Text {
+                        text: root.tr-repo-warning;
+                        font-size: 11px;
+                        color: #f97316;
+                        wrap: word-wrap;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                }
             }
         }
     }
