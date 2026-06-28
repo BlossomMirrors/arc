@@ -783,7 +783,7 @@ fn main() -> Result<()> {
                 for runtime_id in ids {
                     begin_transaction(
                         runtime_id,
-                        String::new(),
+                        "arc-runtime-libraries".to_string(),
                         label.clone(),
                         None,
                         "update".to_string(),
@@ -884,7 +884,7 @@ fn main() -> Result<()> {
                     for runtime_id in ids {
                         begin_transaction(
                             runtime_id,
-                            String::new(),
+                            "arc-runtime-libraries".to_string(),
                             label.clone(),
                             None,
                             "update".to_string(),
@@ -1057,22 +1057,33 @@ fn main() -> Result<()> {
                         raw_pkgs.iter().map(|r| r.to_slint()).collect();
 
                     if !runtime_updates.is_empty() {
-                        *runtime_ids2.lock().unwrap() =
-                            runtime_updates.iter().map(|p| p.id.clone()).collect();
-                        pkgs.push(PackageItem {
-                            id: "arc-runtime-libraries".into(),
-                            name: tr!("Arc Runtime Libraries").into(),
-                            version: Default::default(),
-                            description: Default::default(),
-                            installed: true,
-                            icon: runtime_icon2
-                                .as_ref()
-                                .map(|r| r.to_slint_image())
-                                .unwrap_or_default(),
-                            busy: false,
-                            progress: 0.0,
-                            transaction_id: Default::default(),
-                        });
+                        let has_inflight_runtime = {
+                            let s = store2.lock().unwrap();
+                            s.iter().any(|tx| {
+                                tx.tx_type == "update"
+                                    && (tx.status == TxStatus::Pending
+                                        || tx.status == TxStatus::Running)
+                                    && tx.parent_id == "arc-runtime-libraries"
+                            })
+                        };
+                        if !has_inflight_runtime {
+                            *runtime_ids2.lock().unwrap() =
+                                runtime_updates.iter().map(|p| p.id.clone()).collect();
+                            pkgs.push(PackageItem {
+                                id: "arc-runtime-libraries".into(),
+                                name: tr!("Arc Runtime Libraries").into(),
+                                version: Default::default(),
+                                description: Default::default(),
+                                installed: true,
+                                icon: runtime_icon2
+                                    .as_ref()
+                                    .map(|r| r.to_slint_image())
+                                    .unwrap_or_default(),
+                                busy: false,
+                                progress: 0.0,
+                                transaction_id: Default::default(),
+                            });
+                        }
                     } else {
                         runtime_ids2.lock().unwrap().clear();
                     }

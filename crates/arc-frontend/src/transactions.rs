@@ -562,6 +562,7 @@ pub async fn run_signal_listener(
                         }
                         Some((
                             e.pkg_id.clone(),
+                            e.parent_id.clone(),
                             e.installed_after,
                             e.refresh_detail,
                             e.refresh_extensions,
@@ -577,7 +578,7 @@ pub async fn run_signal_listener(
                 push_transactions_to_ui(store.clone(), &app_weak);
                 let _ = cache_invalidate_tx.try_send(());
 
-                if let Some((pkg_id, installed_after, refresh_detail, refresh_extensions, ok, name, tx_type)) =
+                if let Some((pkg_id, parent_id, installed_after, refresh_detail, refresh_extensions, ok, name, tx_type)) =
                     side_effect
                 {
                     // Track successful Flatpak installs in forge.
@@ -654,6 +655,9 @@ pub async fn run_signal_listener(
                             }
                             if tx_type == "update" {
                                 remove_from_available_updates(&app, &pkg_id);
+                                if !parent_id.is_empty() {
+                                    remove_from_available_updates(&app, &parent_id);
+                                }
                             }
                         } else {
 
