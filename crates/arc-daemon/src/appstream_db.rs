@@ -18,6 +18,9 @@ pub struct AppStreamDb {
     // (dropping the language tag), so we extract them ourselves.
     // Keyed by app-id → locale-code → HTML string.
     descriptions: HashMap<String, HashMap<String, String>>,
+    // Verified app IDs extracted from <custom><value key="flathub::verification::verified">
+    // The appstream crate only parses <metadata> tags, not <custom>, so we do this ourselves.
+    verifications: HashMap<String, bool>,
 }
 
 #[derive(serde::Serialize)]
@@ -122,19 +125,22 @@ impl AppStreamDb {
         let locales = detect_locales();
         let mut components = Vec::new();
         let mut descriptions: HashMap<String, HashMap<String, String>> = HashMap::new();
+        let mut verifications: HashMap<String, bool> = HashMap::new();
         load_flatpak_root(
             "/var/lib/flatpak/appstream",
             &mut components,
             &mut descriptions,
+            &mut verifications,
         );
         if let Some(home) = std::env::var_os("HOME") {
             let path = PathBuf::from(home).join(".local/share/flatpak/appstream");
-            load_flatpak_root(&path, &mut components, &mut descriptions);
+            load_flatpak_root(&path, &mut components, &mut descriptions, &mut verifications);
         }
         Self {
             components,
             locales,
             descriptions,
+            verifications,
         }
     }
 
@@ -147,7 +153,7 @@ impl AppStreamDb {
             .iter()
             .filter(|(c, _)| matches!(c.kind, ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication))
             .take(limit)
-            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions))
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications))
             .collect()
     }
 
@@ -161,7 +167,7 @@ impl AppStreamDb {
             .filter(|(c, _)| matches!(c.kind, ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication))
             .rev()
             .take(limit)
-            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions))
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications))
             .collect()
     }
 
@@ -182,7 +188,7 @@ impl AppStreamDb {
                 let summary_localized = c.summary.as_ref().and_then(|s| locales.iter().find_map(|l| s.get_for_locale(l))).map(|s| s.to_lowercase()).unwrap_or_default();
                 id.contains(&q) || name_default.contains(&q) || name_localized.contains(&q) || summary_default.contains(&q) || summary_localized.contains(&q)
             })
-            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions))
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications))
             .collect()
     }
 
@@ -195,7 +201,7 @@ impl AppStreamDb {
         self.components
             .iter()
             .find(|(c, _)| { let cid = c.id.to_string(); cid == id || cid == with_desktop })
-            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions))
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications))
     }
 
     // Fallback for installed apps absent from any AppStream catalog.
@@ -236,7 +242,7 @@ impl AppStreamDb {
             .iter()
             .filter(|(c, _)| matches!(c.kind, ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication))
             .filter(|(c, _)| c.categories.iter().any(|cat| format!("{:?}", cat).to_lowercase() == category.to_lowercase()))
-            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions))
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications))
             .collect()
     }
 }
@@ -507,6 +513,7 @@ fn component_to_entry(
     remote: Option<String>,
     locales: &[String],
     descriptions: &HashMap<String, HashMap<String, String>>,
+    verifications: &HashMap<String, bool>,
 ) -> AppStreamEntry {
     // Prefer a remote 128×128 URL — local cached files may not be downloaded yet.
     // Fall back to the first available icon (cached → local → stock) otherwise.
@@ -601,10 +608,7 @@ fn component_to_entry(
     }).unwrap_or_else(|| c.id.to_string());
 
     let verified = remote.as_deref() == Some("blossomos")
-        || c.metadata
-            .get("flathub::verification::verified")
-            .and_then(|v| v.as_deref())
-            == Some("true");
+        || verifications.get(c.id.to_string().as_str()).copied().unwrap_or(false);
 
     AppStreamEntry {
         id: canonical_id,
@@ -648,10 +652,65 @@ pub fn score_entry(entry: &AppStreamEntry, q: &str) -> Option<u32> {
 }
 
 // Flatpak lays out appstream data as <root>/<remote>/<arch>/active/appstream.xml.gz
+fn extract_verifications(xml_bytes: &[u8], out: &mut HashMap<String, bool>) {
+    let Ok(root) = xmltree::Element::parse(xml_bytes) else {
+        return;
+    };
+    let components: Vec<&xmltree::Element> =
+        if root.name == "components" || root.name == "collection" {
+            root.children
+                .iter()
+                .filter_map(|n| n.as_element())
+                .filter(|e| e.name == "component")
+                .collect()
+        } else if root.name == "component" {
+            vec![&root]
+        } else {
+            return;
+        };
+    for comp in components {
+        let Some(id) = comp
+            .children
+            .iter()
+            .filter_map(|n| n.as_element())
+            .find(|e| e.name == "id")
+            .and_then(|e| e.get_text())
+            .map(|t| t.trim().to_string())
+        else {
+            continue;
+        };
+        let verified = comp
+            .children
+            .iter()
+            .filter_map(|n| n.as_element())
+            .find(|e| e.name == "custom")
+            .and_then(|custom| {
+                custom
+                    .children
+                    .iter()
+                    .filter_map(|n| n.as_element())
+                    .find(|e| {
+                        e.name == "value"
+                            && e.attributes
+                                .get("key")
+                                .map(|k| k == "flathub::verification::verified")
+                                .unwrap_or(false)
+                    })
+                    .and_then(|e| e.get_text())
+                    .map(|t| t.trim() == "true")
+            })
+            .unwrap_or(false);
+        if verified {
+            out.insert(id, true);
+        }
+    }
+}
+
 fn load_flatpak_root(
     root: impl AsRef<Path>,
     out: &mut Vec<(Component, Option<String>)>,
     out_descriptions: &mut HashMap<String, HashMap<String, String>>,
+    out_verifications: &mut HashMap<String, bool>,
 ) {
     let Ok(remotes) = std::fs::read_dir(root.as_ref()) else {
         return;
@@ -674,9 +733,9 @@ fn load_flatpak_root(
                             .map(|c| (c, Some(remote_name.clone()))),
                     );
                 }
-                // Second pass with xmltree to capture per-paragraph xml:lang descriptions.
                 if let Ok(bytes) = read_gz_bytes(&gz) {
                     extract_descriptions(&bytes, out_descriptions);
+                    extract_verifications(&bytes, out_verifications);
                 }
             } else if xml.exists() {
                 if let Ok(col) = Collection::from_path(xml.clone()) {
@@ -688,6 +747,7 @@ fn load_flatpak_root(
                 }
                 if let Ok(bytes) = std::fs::read(&xml) {
                     extract_descriptions(&bytes, out_descriptions);
+                    extract_verifications(&bytes, out_verifications);
                 }
             }
         }
