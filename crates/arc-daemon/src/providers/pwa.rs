@@ -26,8 +26,20 @@ fn round_pwa_icon(bytes: &[u8]) -> Option<Vec<u8>> {
         for x in 0..s {
             // Distance from the nearest corner centre along each axis.
             // Non-zero only when the pixel is within the corner band.
-            let dx = if x < r { r - x } else if x >= s - r { x - (s - r - 1) } else { 0 };
-            let dy = if y < r { r - y } else if y >= s - r { y - (s - r - 1) } else { 0 };
+            let dx = if x < r {
+                r - x
+            } else if x >= s - r {
+                x - (s - r - 1)
+            } else {
+                0
+            };
+            let dy = if y < r {
+                r - y
+            } else if y >= s - r {
+                y - (s - r - 1)
+            } else {
+                0
+            };
             if dx > 0 && dy > 0 && dx * dx + dy * dy > r2 {
                 rgba.get_pixel_mut(x as u32, y as u32)[3] = 0;
             }
@@ -405,7 +417,9 @@ impl PackageProvider for PwaProvider {
 
         info!("Running PWA {}: {}", appid, exec);
         let mut parts = exec.split_whitespace();
-        let bin = parts.next().unwrap_or("blossomos-webapps");
+        let bin = parts
+            .next()
+            .unwrap_or("/usr/lib/opt/blossomos-webapps/blossomos-webapps");
         tokio::process::Command::new(bin)
             .args(parts)
             .spawn()
