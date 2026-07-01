@@ -96,9 +96,7 @@ fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
         .appdata_name()
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| {
-            id.split('.').last().unwrap_or(&id).to_string()
-        });
+        .unwrap_or_else(|| id.split('.').last().unwrap_or(&id).to_string());
     Package {
         id: id.clone(),
         name,
@@ -125,7 +123,10 @@ fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
 
 impl FlatpakProvider {
     pub async fn fetch_all(&self) -> Result<Vec<Package>, ArcError> {
-        let _permit = self.network_sem.acquire().await
+        let _permit = self
+            .network_sem
+            .acquire()
+            .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
         tokio::task::spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
@@ -174,7 +175,8 @@ impl FlatpakProvider {
                         Some(entry_to_flatpak_package(entry, is_installed))
                     } else if is_installed {
                         // Installed but absent from any catalog — try the exported metainfo.
-                        let pkg = db.load_from_exported_metainfo(&id)
+                        let pkg = db
+                            .load_from_exported_metainfo(&id)
                             .map(|e| entry_to_flatpak_package(e, true))
                             .unwrap_or_else(|| Package {
                                 name: id.clone(),
@@ -186,10 +188,10 @@ impl FlatpakProvider {
                                 icon_url: None,
                                 remote: None,
                                 screenshots: vec![],
-            developer_name: None,
-            homepage_url: None,
-            content_rating: None,
-            is_runtime: false,
+                                developer_name: None,
+                                homepage_url: None,
+                                content_rating: None,
+                                is_runtime: false,
                             });
                         Some(pkg)
                     } else {
@@ -235,7 +237,10 @@ impl FlatpakProvider {
 
     pub async fn list_extensions(&self, app_id: &str) -> Result<Vec<Package>, ArcError> {
         let app_id = app_id.to_string();
-        let _permit = self.network_sem.acquire().await
+        let _permit = self
+            .network_sem
+            .acquire()
+            .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
         tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
@@ -248,8 +253,15 @@ impl FlatpakProvider {
 
             fn fallback_name(suffix: &str) -> String {
                 const SKIP: &[&str] = &[
-                    "Utility", "CompatibilityTool", "Extension", "Plugin",
-                    "Addon", "Compat", "GL", "GL32", "Platform",
+                    "Utility",
+                    "CompatibilityTool",
+                    "Extension",
+                    "Plugin",
+                    "Addon",
+                    "Compat",
+                    "GL",
+                    "GL32",
+                    "Platform",
                 ];
                 let parts: Vec<&str> = suffix.split('.').collect();
                 let parts: &[&str] = if parts.len() > 1 && SKIP.contains(&parts[0]) {
@@ -296,7 +308,9 @@ impl FlatpakProvider {
 
             for inst in all_installations() {
                 for remote in inst.list_remotes(cancel).unwrap_or_default() {
-                    let Some(remote_name) = remote.name() else { continue };
+                    let Some(remote_name) = remote.name() else {
+                        continue;
+                    };
                     for r in inst
                         .list_remote_refs_sync(remote_name.as_str(), cancel)
                         .unwrap_or_default()
@@ -331,10 +345,10 @@ impl FlatpakProvider {
                             icon_url: None,
                             remote: Some(remote_name.to_string()),
                             screenshots: vec![],
-            developer_name: None,
-            homepage_url: None,
-            content_rating: None,
-            is_runtime: false,
+                            developer_name: None,
+                            homepage_url: None,
+                            content_rating: None,
+                            is_runtime: false,
                         });
                     }
                 }
@@ -353,10 +367,10 @@ impl FlatpakProvider {
                         icon_url: None,
                         remote: None,
                         screenshots: vec![],
-            developer_name: None,
-            homepage_url: None,
-            content_rating: None,
-            is_runtime: false,
+                        developer_name: None,
+                        homepage_url: None,
+                        content_rating: None,
+                        is_runtime: false,
                     });
                 }
             }
@@ -398,7 +412,10 @@ impl FlatpakProvider {
                 remotes_to_try.push(r.clone());
             }
             for inst in all_installations() {
-                for remote in inst.list_remotes(libflatpak::gio::Cancellable::NONE).unwrap_or_default() {
+                for remote in inst
+                    .list_remotes(libflatpak::gio::Cancellable::NONE)
+                    .unwrap_or_default()
+                {
                     if let Some(name) = remote.name() {
                         let n = name.to_string();
                         if !remotes_to_try.contains(&n) {
@@ -626,7 +643,28 @@ impl FlatpakProvider {
             let (inst, installed) = installation_with_ref(&app_id)?;
             let full_ref = installed
                 .format_ref()
-                .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?;
+                .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?
+                .to_string();
+
+            // Runtime refs live in the system installation and need flatpak-system-helper
+            // for privilege elevation. Delegate to subprocess so polkit handles it.
+            if full_ref.starts_with("runtime/") {
+                let _ = progress_tx.send(10);
+                let status = std::process::Command::new("flatpak")
+                    .args(["update", "-y", "--noninteractive", &full_ref])
+                    .status()
+                    .map_err(|e| ArcError::TransactionFailed(e.to_string()))?;
+                let _ = progress_tx.send(100);
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err(ArcError::TransactionFailed(format!(
+                        "flatpak update failed for {}",
+                        app_id
+                    )))
+                };
+            }
+
             let tx = libflatpak::Transaction::for_installation(&inst, cancel)
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
             tx.set_no_interaction(true);
@@ -835,7 +873,10 @@ impl PackageProvider for FlatpakProvider {
     }
 
     async fn list_updates(&self) -> Result<Vec<Package>, ArcError> {
-        let _permit = self.network_sem.acquire().await
+        let _permit = self
+            .network_sem
+            .acquire()
+            .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
         tokio::task::spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
