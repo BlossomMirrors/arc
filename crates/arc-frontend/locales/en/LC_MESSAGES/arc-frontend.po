@@ -3,252 +3,268 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Language: en\n"
+"PO-Revision-Date: 2026-07-05 03:39+0000\n"
+"Last-Translator: Leonie Ain <me@koyu.space>\n"
+"Language-Team: English <https://translate.blossomos.org/projects/arc/arc-"
+"software/en/>\n"
+"Plural-Forms: nplurals=2; plural=n != 1;\n"
+"X-Generator: Weblate 2026.7\n"
 
 msgid "Loading..."
-msgstr ""
+msgstr "Loading..."
 
 msgid "Loading…"
-msgstr ""
+msgstr "Loading…"
 
 msgid "Back"
-msgstr ""
+msgstr "Back"
 
 msgid "Install"
-msgstr ""
+msgstr "Install"
 
 msgid "Remove"
-msgstr ""
+msgstr "Remove"
 
 msgid "Update"
-msgstr ""
+msgstr "Update"
 
 msgid "Cancel"
-msgstr ""
+msgstr "Cancel"
 
 msgid "Run"
-msgstr ""
+msgstr "Run"
 
 msgid "Working..."
-msgstr ""
+msgstr "Working..."
 
 msgid "Verified developer"
-msgstr ""
+msgstr "Verified developer"
 
 msgid "Extensions"
-msgstr ""
+msgstr "Extensions"
 
 msgid "Website"
-msgstr ""
+msgstr "Website"
 
 msgid "Installed"
-msgstr ""
+msgstr "Installed"
 
 msgid "Search for applications..."
-msgstr ""
+msgstr "Search for applications..."
 
 msgid "No packages found.\nSearch for an application to get started."
 msgstr ""
+"No packages found.\n"
+"Search for an application to get started."
 
 msgid "Everything is up to date."
-msgstr ""
+msgstr "Everything is up to date."
 
 msgid "No applications installed."
-msgstr ""
+msgstr "No applications installed."
 
 msgid "Discover Great Software"
-msgstr ""
+msgstr "Discover Great Software"
 
 msgid "Install apps from Flathub and your system repositories"
-msgstr ""
+msgstr "Install apps from Flathub and your system repositories"
 
 msgid "Popular"
-msgstr ""
+msgstr "Popular"
 
 msgid "Recently Added"
-msgstr ""
+msgstr "Recently Added"
 
 msgid "Categories"
-msgstr ""
+msgstr "Categories"
 
 msgid "Downloads & Updates"
-msgstr ""
+msgstr "Downloads & Updates"
 
 msgid "Checking..."
-msgstr ""
+msgstr "Checking..."
 
 msgid "Check for Updates"
-msgstr ""
+msgstr "Check for Updates"
 
 msgid "Active ({0})"
-msgstr ""
+msgstr "Active ({0})"
 
 msgid "Pending ({0})"
-msgstr ""
+msgstr "Pending ({0})"
 
 msgid "Completed ({0})"
-msgstr ""
+msgstr "Completed ({0})"
 
 msgid "Clear All"
-msgstr ""
+msgstr "Clear All"
 
 msgid "Updates Available ({0})"
-msgstr ""
+msgstr "Updates Available ({0})"
 
 msgid "Update All"
-msgstr ""
+msgstr "Update All"
 
 msgid "No active downloads"
-msgstr ""
+msgstr "No active downloads"
 
 msgid "Installs and updates will appear here"
-msgstr ""
+msgstr "Installs and updates will appear here"
 
 msgid "Removed"
-msgstr ""
+msgstr "Removed"
 
 msgid "Failed"
-msgstr ""
+msgstr "Failed"
 
 msgid "Queued"
-msgstr ""
+msgstr "Queued"
 
 msgid "Removing"
-msgstr ""
+msgstr "Removing"
 
 msgid "Updating"
-msgstr ""
+msgstr "Updating"
 
 msgid "Installing"
-msgstr ""
+msgstr "Installing"
 
 msgid "License Agreement"
-msgstr ""
+msgstr "License Agreement"
 
 msgid "{0} requires you to accept its End User License Agreement before installing."
 msgstr ""
+"{0} requires you to accept its End User License Agreement before installing."
 
 msgid "Read License Agreement →"
-msgstr ""
+msgstr "Read License Agreement →"
 
 msgid "Accept & Install"
-msgstr ""
+msgstr "Accept & Install"
 
 msgid "Install Flatpak Bundle"
-msgstr ""
+msgstr "Install Flatpak Bundle"
 
 msgid "This will install the bundled Flatpak application on your system."
-msgstr ""
+msgstr "This will install the bundled Flatpak application on your system."
 
 msgid "Install AppImage"
-msgstr ""
+msgstr "Install AppImage"
 
 msgid "This will register the AppImage so it appears in your app launcher."
-msgstr ""
+msgstr "This will register the AppImage so it appears in your app launcher."
 
 msgid "Install Package"
-msgstr ""
+msgstr "Install Package"
 
 msgid "Choose how you'd like to install this package file."
-msgstr ""
+msgstr "Choose how you'd like to install this package file."
 
 msgid "Install Bundle"
-msgstr ""
+msgstr "Install Bundle"
 
 msgid "Install as AppImage"
-msgstr ""
+msgstr "Install as AppImage"
 
 msgid "Install via Distrobox"
-msgstr ""
+msgstr "Install via Distrobox"
 
 msgid "Install {0} from Arc Software instead"
-msgstr ""
+msgstr "Install {0} from Arc Software instead"
 
 msgid "Searching Flathub for an alternative..."
-msgstr ""
+msgstr "Searching Flathub for an alternative..."
 
 msgid "Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust."
 msgstr ""
+"Third-party software has broad access to system resources and may pose a "
+"security risk. Only install files from sources you trust."
 
 msgid "Add Repository"
-msgstr ""
+msgstr "Add Repository"
 
 msgid "Unknown repository"
-msgstr ""
+msgstr "Unknown repository"
 
 msgid "This will add the repository to your Flatpak user installation and make its applications available to install."
 msgstr ""
+"This will add the repository to your Flatpak user installation and make its "
+"applications available to install."
 
 msgid "Adding a third-party repository gives it the ability to distribute software to your system. Only add repositories from sources you trust."
 msgstr ""
+"Adding a third-party repository gives it the ability to distribute software "
+"to your system. Only add repositories from sources you trust."
 
 msgid "Contains repository"
-msgstr ""
+msgstr "Contains repository"
 
 msgid "Install Application"
-msgstr ""
+msgstr "Install Application"
 
 msgid "Settings"
-msgstr ""
+msgstr "Settings"
 
 msgid "GENERAL"
-msgstr ""
+msgstr "GENERAL"
 
 msgid "Auto-updates"
-msgstr ""
+msgstr "Auto-updates"
 
 msgid "Automatically update installed apps in the background"
-msgstr ""
+msgstr "Automatically update installed apps in the background"
 
 msgid "Security warnings"
-msgstr ""
+msgstr "Security warnings"
 
 msgid "Show warnings when installing third-party software or adding repositories"
 msgstr ""
+"Show warnings when installing third-party software or adding repositories"
 
 msgid "DOWNLOADS"
-msgstr ""
+msgstr "DOWNLOADS"
 
 msgid "Concurrent downloads"
-msgstr ""
+msgstr "Concurrent downloads"
 
 msgid "Maximum number of simultaneous downloads (1-16)"
-msgstr ""
+msgstr "Maximum number of simultaneous downloads (1-16)"
 
 msgid "REPOSITORIES"
-msgstr ""
+msgstr "REPOSITORIES"
 
 msgid "Protected"
-msgstr ""
+msgstr "Protected"
 
 msgid "ADD REPOSITORY"
-msgstr ""
+msgstr "ADD REPOSITORY"
 
 msgid "Name"
-msgstr ""
+msgstr "Name"
 
 msgid "URL"
-msgstr ""
+msgstr "URL"
 
 msgid "DANGER ZONE"
-msgstr ""
+msgstr "DANGER ZONE"
 
 msgid "Force updates"
-msgstr ""
+msgstr "Force updates"
 
 msgid "Runs flatpak update -y directly, bypassing the daemon"
-msgstr ""
+msgstr "Runs flatpak update -y directly, bypassing the daemon"
 
 msgid "Force Update"
-msgstr ""
+msgstr "Force Update"
 
 msgid "Restart daemon"
-msgstr ""
+msgstr "Restart daemon"
 
 msgid "Kills the running arc-daemon and starts a fresh one in the background"
-msgstr ""
+msgstr "Kills the running arc-daemon and starts a fresh one in the background"
 
 msgid "Restart"
-msgstr ""
+msgstr "Restart"
 
 msgid "Arc Runtime Libraries"
-msgstr ""
+msgstr "Arc Runtime Libraries"
