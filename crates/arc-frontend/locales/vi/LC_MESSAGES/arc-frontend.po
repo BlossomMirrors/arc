@@ -1,2 +1,270 @@
 msgid ""
-msgstr "X-Generator: Weblate\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit"
+msgstr ""
+"X-Generator: Weblate 2026.7\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"PO-Revision-Date: 2026-07-06 10:14+0000\n"
+"Last-Translator: Mizuki Nguyen <pridefulmizuki@gmail.com>\n"
+"Language-Team: Vietnamese <https://translate.blossomos.org/projects/arc/arc-"
+"software/vi/>\n"
+"Language: vi\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Loading..."
+msgstr "Đang tải..."
+
+msgid "Loading…"
+msgstr "Đang tải…"
+
+msgid "Back"
+msgstr "Quay lại"
+
+msgid "Install"
+msgstr "Cài đặt"
+
+msgid "Remove"
+msgstr "Gỡ cài đặt"
+
+msgid "Update"
+msgstr "Cập nhật"
+
+msgid "Cancel"
+msgstr "Huỷ"
+
+msgid "Run"
+msgstr "Chạy"
+
+msgid "Working..."
+msgstr "Đang làm việc..."
+
+msgid "Verified developer"
+msgstr "Nhà phát triển được xác minh"
+
+msgid "Extensions"
+msgstr "Tiện ích mở rộng"
+
+msgid "Website"
+msgstr "Trang chủ"
+
+msgid "Installed"
+msgstr "Đã cài đặt"
+
+msgid "Search for applications..."
+msgstr "Tìm kiếm ứng dụng..."
+
+msgid "No packages found.\nSearch for an application to get started."
+msgstr ""
+"Không tìm thấy gói phần mềm nào.\n"
+"Tìm kiếm một ứng dụng để bắt đầu."
+
+msgid "Everything is up to date."
+msgstr "Mọi ứng dụng đã được cập nhật."
+
+msgid "No applications installed."
+msgstr "Không có ứng dụng nào được cài đặt."
+
+msgid "Discover Great Software"
+msgstr "Khám phá những ứng dụng hay"
+
+msgid "Install apps from Flathub and your system repositories"
+msgstr "Cài đặt ứng dụng từ Flathub và các kho ứng dụng trên hệ thống"
+
+msgid "Popular"
+msgstr "Phổ biến"
+
+msgid "Recently Added"
+msgstr "Mới thêm vào"
+
+msgid "Categories"
+msgstr "Thể loại"
+
+msgid "Downloads & Updates"
+msgstr "Tải về & Cập nhật"
+
+msgid "Checking..."
+msgstr "Đang kiểm tra..."
+
+msgid "Check for Updates"
+msgstr "Kiểm tra cập nhật mới"
+
+msgid "Active ({0})"
+msgstr "Đang hoạt động ({0})"
+
+msgid "Pending ({0})"
+msgstr "Đang chuẩn bị ({0})"
+
+msgid "Completed ({0})"
+msgstr "Hoàn thành ({0})"
+
+msgid "Clear All"
+msgstr "Xoá toàn bộ"
+
+msgid "Updates Available ({0})"
+msgstr "Đã có bản cập nhật ({0})"
+
+msgid "Update All"
+msgstr "Cập nhật tất cả"
+
+msgid "No active downloads"
+msgstr "Không có phiên tải về"
+
+msgid "Installs and updates will appear here"
+msgstr "Phiên cài đặt và cập nhật sẽ xuất hiện ở đây"
+
+msgid "Removed"
+msgstr "Đã xoá"
+
+msgid "Failed"
+msgstr "Thất bại"
+
+msgid "Queued"
+msgstr "Chờ đến lượt"
+
+msgid "Removing"
+msgstr "Đang xoá"
+
+msgid "Updating"
+msgstr "Đang cập nhật"
+
+msgid "Installing"
+msgstr "Đang cài đặt"
+
+msgid "License Agreement"
+msgstr "Thỏa thuận giấy phép"
+
+msgid "{0} requires you to accept its End User License Agreement before installing."
+msgstr "{0} cần bạn phải chấp nhận Thoả thuận người dùng cuối để cài đặt."
+
+msgid "Read License Agreement →"
+msgstr "Xem giấy phép thoả thuận →"
+
+msgid "Accept & Install"
+msgstr "Chấp nhận & cài đặt"
+
+msgid "Install Flatpak Bundle"
+msgstr "Cài đặt gói Flatpak"
+
+msgid "This will install the bundled Flatpak application on your system."
+msgstr "Gói ứng dụng Flatpak sẽ được cài đặt vào hệ thống."
+
+msgid "Install AppImage"
+msgstr "Cài đặt AppImage"
+
+msgid "This will register the AppImage so it appears in your app launcher."
+msgstr "AppImage sẽ được đăng ký để hiển thị trong trình chạy ứng dụng."
+
+msgid "Install Package"
+msgstr "Cài đặt gói phần mềm"
+
+msgid "Choose how you'd like to install this package file."
+msgstr "Lựa chọn cách cài đặt gói ứng dụng mà bạn muốn."
+
+msgid "Install Bundle"
+msgstr "Cài đặt gói phần mềm"
+
+msgid "Install as AppImage"
+msgstr "Cài đặt như AppImage"
+
+msgid "Install via Distrobox"
+msgstr "Cài đặt từ Distrobox"
+
+msgid "Install {0} from Arc Software instead"
+msgstr "Cài đặt {0} từ cửa hàng Arc thay vì"
+
+msgid "Searching Flathub for an alternative..."
+msgstr "Tím kiếm ứng dụng thay thế từ Flathub..."
+
+msgid "Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust."
+msgstr ""
+"Phần mềm bên thứ ba có khả năng truy cập rộng vào hệ thống và có thể gây "
+"nguy cơ bảo mật. Chỉ cài đặt từ nguồn uy tín."
+
+msgid "Add Repository"
+msgstr "Thêm kho ứng dụng"
+
+msgid "Unknown repository"
+msgstr "Kho ứng dụng không rõ"
+
+msgid "This will add the repository to your Flatpak user installation and make its applications available to install."
+msgstr ""
+"Kho ứng dụng này sẽ được thêm vào Flatpak của riêng người dùng và cho phép "
+"cài đặt ứng dụng từ nó."
+
+msgid "Adding a third-party repository gives it the ability to distribute software to your system. Only add repositories from sources you trust."
+msgstr ""
+"Thêm kho ứng dụng của bên thứ ba sẽ cho phép nó cài đặt ứng dụng vào hệ "
+"thống. Chỉ thêm kho ứng dụng từ nguồn uy tín."
+
+msgid "Contains repository"
+msgstr "Chứa kho ứng dụng"
+
+msgid "Install Application"
+msgstr "Cài đặt ứng dụng"
+
+msgid "Settings"
+msgstr "Tùy chọn"
+
+msgid "GENERAL"
+msgstr "TỔNG QUAN"
+
+msgid "Auto-updates"
+msgstr "Tự động cập nhật"
+
+msgid "Automatically update installed apps in the background"
+msgstr "Tự động cập nhật ứng dụng trong nền"
+
+msgid "Security warnings"
+msgstr "Cảnh báo bảo mật"
+
+msgid "Show warnings when installing third-party software or adding repositories"
+msgstr ""
+"Hiển thị cảnh báo khi cài đặt ứng dụng hoặc thêm kho ứng dụng từ bên thứ ba"
+
+msgid "DOWNLOADS"
+msgstr "TẢI VỀ"
+
+msgid "Concurrent downloads"
+msgstr "Tải về đồng thời"
+
+msgid "Maximum number of simultaneous downloads (1-16)"
+msgstr "Lượng phiên tải về cùng một lúc tối đa (1-16)"
+
+msgid "REPOSITORIES"
+msgstr "KHO ỨNG DỤNG"
+
+msgid "Protected"
+msgstr "Được bảo vệ"
+
+msgid "ADD REPOSITORY"
+msgstr "THÊM KHO ỨNG DỤNG"
+
+msgid "Name"
+msgstr "Tên"
+
+msgid "URL"
+msgstr "URL"
+
+msgid "DANGER ZONE"
+msgstr "KHU VỰC NGUY HIỂM"
+
+msgid "Force updates"
+msgstr "Buộc cập nhật"
+
+msgid "Runs flatpak update -y directly, bypassing the daemon"
+msgstr "Chạy trực tiếp flatpak update -y, không thông qua daemon"
+
+msgid "Force Update"
+msgstr "Buộc cập nhật"
+
+msgid "Restart daemon"
+msgstr "Khởi động lại daemon"
+
+msgid "Kills the running arc-daemon and starts a fresh one in the background"
+msgstr "Đóng arc-daemon đang chạy và khởi động lại trong nền"
+
+msgid "Restart"
+msgstr "Khởi động lại"
+
+msgid "Arc Runtime Libraries"
+msgstr "Thư viện thời gian chạy của Arc"
