@@ -4,93 +4,74 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language: de\n"
 "PO-Revision-Date: 2026-07-05 03:39+0000\n"
-"Last-Translator: Anonymous <noreply@weblate.org>\n"
+"Last-Translator: Leonie Ain <me@koyu.space>\n"
 "Language-Team: German <https://translate.blossomos.org/projects/arc/arc-"
 "software/de/>\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
 "X-Generator: Weblate 2026.7\n"
 
-#, fuzzy
 msgid "Loading..."
 msgstr "Laden..."
 
-#, fuzzy
 msgid "Loading…"
 msgstr "Laden…"
 
-#, fuzzy
 msgid "Back"
 msgstr "Zurück"
 
-#, fuzzy
 msgid "Install"
 msgstr "Installieren"
 
-#, fuzzy
 msgid "Remove"
 msgstr "Entfernen"
 
-#, fuzzy
 msgid "Update"
 msgstr "Aktualisieren"
 
-#, fuzzy
 msgid "Cancel"
 msgstr "Abbrechen"
 
-#, fuzzy
 msgid "Run"
 msgstr "Starten"
 
-#, fuzzy
 msgid "Working..."
 msgstr "Bitte warten..."
 
-#, fuzzy
 msgid "Verified developer"
 msgstr "Verifizierter Entwickler"
 
-#, fuzzy
 msgid "Extensions"
 msgstr "Erweiterungen"
 
 msgid "Website"
 msgstr "Webseite"
 
-#, fuzzy
 msgid "Installed"
 msgstr "Installiert"
 
-#, fuzzy
 msgid "Search for applications..."
 msgstr "Anwendungen suchen..."
 
-#, fuzzy
 msgid "No packages found.\nSearch for an application to get started."
 msgstr ""
 "Keine Pakete gefunden.\n"
 "Suche nach einer Anwendung, um zu beginnen."
 
-#, fuzzy
 msgid "Everything is up to date."
 msgstr "Alles ist auf dem neuesten Stand."
 
-#, fuzzy
 msgid "No applications installed."
 msgstr "Keine Anwendungen installiert."
 
-#, fuzzy
 msgid "Discover Great Software"
 msgstr "Tolle Software entdecken"
 
 msgid "Install apps from Flathub and your system repositories"
 msgstr "Apps aus Flathub und Ihren Systemrepositorys installieren"
 
-#, fuzzy
 msgid "Popular"
 msgstr "Beliebt"
 
-#, fuzzy
 msgid "Recently Added"
 msgstr "Kürzlich hinzugefügt"
 
@@ -103,14 +84,12 @@ msgstr "Trending"
 msgid "Recommended Apps"
 msgstr "Vorgestellte Apps"
 
-#, fuzzy
 msgid "Categories"
 msgstr "Kategorien"
 
 msgid "Downloads & Updates"
 msgstr "Downloads und Aktualisierungen"
 
-#, fuzzy
 msgid "Checking..."
 msgstr "Prüfen..."
 
@@ -126,211 +105,178 @@ msgstr "Ausstehend ({0})"
 msgid "Completed ({0})"
 msgstr "Abgeschlossen ({0})"
 
-#, fuzzy
 msgid "Clear All"
 msgstr "Alle löschen"
 
 msgid "Updates Available ({0})"
 msgstr "Aktualisierungen verfügbar ({0})"
 
-#, fuzzy
 msgid "Update All"
 msgstr "Alle aktualisieren"
 
-#, fuzzy
 msgid "No active downloads"
 msgstr "Keine aktiven Downloads"
 
-#, fuzzy
 msgid "Installs and updates will appear here"
 msgstr "Installationen und Aktualisierungen erscheinen hier"
 
-#, fuzzy
 msgid "Removed"
 msgstr "Entfernt"
 
-#, fuzzy
 msgid "Failed"
 msgstr "Fehlgeschlagen"
 
-#, fuzzy
 msgid "Queued"
 msgstr "Warteschlange"
 
-#, fuzzy
 msgid "Removing"
 msgstr "Wird entfernt"
 
-#, fuzzy
 msgid "Updating"
 msgstr "Wird aktualisiert"
 
-#, fuzzy
 msgid "Installing"
 msgstr "Wird installiert"
 
-#, fuzzy
 msgid "License Agreement"
 msgstr "Lizenzvereinbarung"
 
 msgid "{0} requires you to accept its End User License Agreement before installing."
-msgstr "{0} erfordert die Akzeptanz der Endbenutzer-Lizenzvereinbarung vor der Installation."
+msgstr ""
+"{0} erfordert die Akzeptanz der Endbenutzer-Lizenzvereinbarung vor der "
+"Installation."
 
-#, fuzzy
 msgid "Read License Agreement →"
 msgstr "Lizenzvereinbarung lesen →"
 
-#, fuzzy
 msgid "Accept & Install"
 msgstr "Akzeptieren & Installieren"
 
-#, fuzzy
 msgid "Install Flatpak Bundle"
 msgstr "Flatpak-Paket installieren"
 
 msgid "This will install the bundled Flatpak application on your system."
-msgstr "Damit wird die gebündelte Flatpak-Anwendung auf Ihrem System installiert."
+msgstr ""
+"Damit wird die gebündelte Flatpak-Anwendung auf Ihrem System installiert."
 
-#, fuzzy
 msgid "Install AppImage"
 msgstr "AppImage installieren"
 
 msgid "This will register the AppImage so it appears in your app launcher."
 msgstr "Damit wird das AppImage registriert und erscheint in Ihrem App-Starter."
 
-#, fuzzy
 msgid "Install Package"
 msgstr "Paket installieren"
 
 msgid "Choose how you'd like to install this package file."
 msgstr "Wählen Sie, wie Sie diese Paketdatei installieren möchten."
 
-#, fuzzy
 msgid "Install Bundle"
 msgstr "Paket installieren"
 
-#, fuzzy
 msgid "Install as AppImage"
 msgstr "Als AppImage installieren"
 
-#, fuzzy
 msgid "Install via Distrobox"
 msgstr "Über Distrobox installieren"
 
 msgid "Install {0} from Arc Software instead"
 msgstr "{0} stattdessen aus Arc Software installieren"
 
-#, fuzzy
 msgid "Searching Flathub for an alternative..."
 msgstr "Suche nach einer Alternative auf Flathub..."
 
 msgid "Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust."
-msgstr "Drittanbietersoftware hat breiten Zugriff auf Systemressourcen und kann ein Sicherheitsrisiko darstellen. Installieren Sie nur Dateien aus vertrauenswürdigen Quellen."
+msgstr ""
+"Drittanbietersoftware hat breiten Zugriff auf Systemressourcen und kann ein "
+"Sicherheitsrisiko darstellen. Installieren Sie nur Dateien aus "
+"vertrauenswürdigen Quellen."
 
-#, fuzzy
 msgid "Add Repository"
 msgstr "Repository hinzufügen"
 
-#, fuzzy
 msgid "Unknown repository"
 msgstr "Unbekanntes Repository"
 
 msgid "This will add the repository to your Flatpak user installation and make its applications available to install."
-msgstr "Damit wird das Repository zu Ihrer Flatpak-Benutzerinstallation hinzugefügt und seine Anwendungen stehen zur Installation bereit."
+msgstr ""
+"Damit wird das Repository zu Ihrer Flatpak-Benutzerinstallation hinzugefügt "
+"und seine Anwendungen stehen zur Installation bereit."
 
 msgid "Adding a third-party repository gives it the ability to distribute software to your system. Only add repositories from sources you trust."
-msgstr "Das Hinzufügen eines Drittanbieter-Repositorys erlaubt die Verteilung von Software auf Ihrem System. Fügen Sie nur Repositorys aus vertrauenswürdigen Quellen hinzu."
+msgstr ""
+"Das Hinzufügen eines Drittanbieter-Repositorys erlaubt die Verteilung von "
+"Software auf Ihrem System. Fügen Sie nur Repositorys aus vertrauenswürdigen "
+"Quellen hinzu."
 
-#, fuzzy
 msgid "Contains repository"
 msgstr "Enthält Repository"
 
-#, fuzzy
 msgid "Install Application"
 msgstr "Anwendung installieren"
 
-#, fuzzy
 msgid "Settings"
 msgstr "Einstellungen"
 
-#, fuzzy
 msgid "GENERAL"
 msgstr "ALLGEMEIN"
 
-#, fuzzy
 msgid "Auto-updates"
 msgstr "Automatische Aktualisierungen"
 
-#, fuzzy
 msgid "Automatically update installed apps in the background"
 msgstr "Installierte Apps automatisch im Hintergrund aktualisieren"
 
-#, fuzzy
 msgid "Security warnings"
 msgstr "Sicherheitswarnungen"
 
-#, fuzzy
 msgid "Show warnings when installing third-party software or adding repositories"
 msgstr ""
 "Warnungen beim Installieren von Drittanbietersoftware oder beim Hinzufügen "
 "von Repositorys anzeigen"
 
-#, fuzzy
 msgid "DOWNLOADS"
 msgstr "DOWNLOADS"
 
-#, fuzzy
 msgid "Concurrent downloads"
 msgstr "Gleichzeitige Downloads"
 
-#, fuzzy
 msgid "Maximum number of simultaneous downloads (1-16)"
 msgstr "Maximale Anzahl gleichzeitiger Downloads (1-16)"
 
-#, fuzzy
 msgid "REPOSITORIES"
 msgstr "REPOSITORYS"
 
-#, fuzzy
 msgid "Protected"
 msgstr "Geschützt"
 
-#, fuzzy
 msgid "ADD REPOSITORY"
 msgstr "REPOSITORY HINZUFÜGEN"
 
-#, fuzzy
 msgid "Name"
 msgstr "Name"
 
-#, fuzzy
 msgid "URL"
 msgstr "URL"
 
-#, fuzzy
 msgid "DANGER ZONE"
 msgstr "GEFAHRENBEREICH"
 
-#, fuzzy
 msgid "Force updates"
 msgstr "Aktualisierungen erzwingen"
 
-#, fuzzy
 msgid "Runs flatpak update -y directly, bypassing the daemon"
 msgstr "Führt flatpak update -y direkt aus und umgeht den Daemon"
 
 msgid "Force Update"
 msgstr "Aktualisierung erzwingen"
 
-#, fuzzy
 msgid "Restart daemon"
 msgstr "Daemon neu starten"
 
-#, fuzzy
 msgid "Kills the running arc-daemon and starts a fresh one in the background"
 msgstr "Beendet den laufenden arc-daemon und startet einen neuen im Hintergrund"
 
-#, fuzzy
 msgid "Restart"
 msgstr "Neu starten"
 
