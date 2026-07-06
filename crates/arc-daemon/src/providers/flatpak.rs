@@ -89,6 +89,51 @@ fn installation_with_ref(
     )))
 }
 
+// Extensions often live on branches named after the extension point version,
+// so when branch guessing fails we scan the full remote ref list by name
+fn find_remote_refs_by_name(
+    inst: &libflatpak::Installation,
+    remote_name: &str,
+    name: &str,
+    cancel: Option<&libflatpak::gio::Cancellable>,
+) -> Vec<libflatpak::RemoteRef> {
+    let default_arch = libflatpak::functions::default_arch();
+    let mut refs: Vec<libflatpak::RemoteRef> = inst
+        .list_remote_refs_sync(remote_name, cancel)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| r.name().map(|n| n == name).unwrap_or(false))
+        .collect();
+    refs.sort_by_key(|r| r.arch() != default_arch);
+    refs
+}
+
+fn run_install_transaction(
+    inst: &libflatpak::Installation,
+    remote_name: &str,
+    full_ref: &str,
+    progress_tx: Option<&UnboundedSender<u8>>,
+    cancel: Option<&libflatpak::gio::Cancellable>,
+) -> Result<(), ArcError> {
+    let tx = libflatpak::Transaction::for_installation(inst, cancel)
+        .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+    tx.set_no_interaction(true);
+    tx.add_install(remote_name, full_ref, &[])
+        .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+    if let Some(sender) = progress_tx {
+        let sender = sender.clone();
+        tx.connect_new_operation(move |_, _op, progress| {
+            progress.set_update_frequency(1500);
+            let sender = sender.clone();
+            progress.connect_changed(move |p| {
+                let _ = sender.send(p.progress().clamp(0, 100) as u8);
+            });
+        });
+    }
+    tx.run(cancel)
+        .map_err(|e| ArcError::TransactionFailed(e.to_string()))
+}
+
 fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
     let id = r.name().map(|s| s.to_string()).unwrap_or_default();
     let is_runtime = r.kind() == libflatpak::RefKind::Runtime;
@@ -458,9 +503,8 @@ impl FlatpakProvider {
                     }
                 }
 
-                let mut branch_tried = false;
-                for branch in branch_candidates {
-                    branch_tried = true;
+                let mut refs_to_try: Vec<String> = Vec::new();
+                for branch in &branch_candidates {
                     // Try App kind first (normal apps), then Runtime (extensions/addons)
                     let remote_ref = [libflatpak::RefKind::App, libflatpak::RefKind::Runtime]
                         .into_iter()
@@ -475,48 +519,45 @@ impl FlatpakProvider {
                             )
                             .ok()
                         });
-                    let remote_ref = match remote_ref {
-                        Some(r) => r,
-                        None => {
-                            last_error = Some(ArcError::TransactionFailed(format!(
-                                "ref not found in {}/{}",
-                                remote_name, branch
-                            )));
-                            continue;
-                        }
-                    };
-
-                    let full_ref = remote_ref.format_ref().ok_or_else(|| {
-                        ArcError::TransactionFailed("could not format ref".into())
-                    })?;
-                    let tx = libflatpak::Transaction::for_installation(&inst, cancel)
-                        .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
-                    tx.set_no_interaction(true);
-                    tx.add_install(&remote_name, &full_ref, &[])
-                        .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
-                    let progress_tx_for_tx = progress_tx.clone();
-                    tx.connect_new_operation(move |_, _op, progress| {
-                        progress.set_update_frequency(1500);
-                        let sender = progress_tx_for_tx.clone();
-                        progress.connect_changed(move |p| {
-                            let _ = sender.send(p.progress().clamp(0, 100) as u8);
-                        });
-                    });
-
-                    match tx.run(cancel) {
-                        Ok(_) => return Ok(()),
-                        Err(e) => {
-                            last_error = Some(ArcError::TransactionFailed(e.to_string()));
-                            continue;
+                    if let Some(f) = remote_ref.and_then(|r| r.format_ref()) {
+                        let f = f.to_string();
+                        if !refs_to_try.contains(&f) {
+                            refs_to_try.push(f);
                         }
                     }
                 }
 
-                if !branch_tried {
+                // Nothing on the guessed branches, look up the actual branch
+                if refs_to_try.is_empty() {
+                    for r in find_remote_refs_by_name(&inst, &remote_name, &app_id, cancel) {
+                        if let Some(f) = r.format_ref() {
+                            let f = f.to_string();
+                            if !refs_to_try.contains(&f) {
+                                refs_to_try.push(f);
+                            }
+                        }
+                    }
+                }
+
+                if refs_to_try.is_empty() {
                     last_error = Some(ArcError::TransactionFailed(format!(
-                        "No branches available for {} in remote {}",
+                        "{} not found in remote {}",
                         app_id, remote_name
                     )));
+                    continue;
+                }
+
+                for full_ref in refs_to_try {
+                    match run_install_transaction(
+                        &inst,
+                        &remote_name,
+                        &full_ref,
+                        Some(&progress_tx),
+                        cancel,
+                    ) {
+                        Ok(_) => return Ok(()),
+                        Err(e) => last_error = Some(e),
+                    }
                 }
             }
 
@@ -945,47 +986,54 @@ impl PackageProvider for FlatpakProvider {
                     }
                 }
 
-                let mut branch_tried = false;
-                for branch in branch_candidates {
-                    branch_tried = true;
-                    let remote_ref = match inst.fetch_remote_ref_sync(
-                        &remote_name,
-                        libflatpak::RefKind::App,
-                        &package_id,
-                        None,
-                        Some(branch.as_str()),
-                        cancel,
-                    ) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            last_error = Some(ArcError::TransactionFailed(e.to_string()));
-                            continue;
-                        }
-                    };
-
-                    let full_ref = remote_ref.format_ref().ok_or_else(|| {
-                        ArcError::TransactionFailed("could not format ref".into())
-                    })?;
-                    let tx = libflatpak::Transaction::for_installation(&inst, cancel)
-                        .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
-                    tx.set_no_interaction(true);
-                    tx.add_install(&remote_name, &full_ref, &[])
-                        .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
-
-                    match tx.run(cancel) {
-                        Ok(_) => return Ok(()),
-                        Err(e) => {
-                            last_error = Some(ArcError::TransactionFailed(e.to_string()));
-                            continue;
+                let mut refs_to_try: Vec<String> = Vec::new();
+                for branch in &branch_candidates {
+                    let remote_ref = [libflatpak::RefKind::App, libflatpak::RefKind::Runtime]
+                        .into_iter()
+                        .find_map(|kind| {
+                            inst.fetch_remote_ref_sync(
+                                &remote_name,
+                                kind,
+                                &package_id,
+                                None,
+                                Some(branch.as_str()),
+                                cancel,
+                            )
+                            .ok()
+                        });
+                    if let Some(f) = remote_ref.and_then(|r| r.format_ref()) {
+                        let f = f.to_string();
+                        if !refs_to_try.contains(&f) {
+                            refs_to_try.push(f);
                         }
                     }
                 }
 
-                if !branch_tried {
+                // Nothing on the guessed branches, look up the actual branch
+                if refs_to_try.is_empty() {
+                    for r in find_remote_refs_by_name(&inst, &remote_name, &package_id, cancel) {
+                        if let Some(f) = r.format_ref() {
+                            let f = f.to_string();
+                            if !refs_to_try.contains(&f) {
+                                refs_to_try.push(f);
+                            }
+                        }
+                    }
+                }
+
+                if refs_to_try.is_empty() {
                     last_error = Some(ArcError::TransactionFailed(format!(
-                        "No branches available for {} in remote {}",
+                        "{} not found in remote {}",
                         package_id, remote_name
                     )));
+                    continue;
+                }
+
+                for full_ref in refs_to_try {
+                    match run_install_transaction(&inst, &remote_name, &full_ref, None, cancel) {
+                        Ok(_) => return Ok(()),
+                        Err(e) => last_error = Some(e),
+                    }
                 }
             }
 
