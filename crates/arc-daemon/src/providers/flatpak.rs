@@ -89,6 +89,29 @@ fn installation_with_ref(
     )))
 }
 
+// Runtime names are ambiguous when multiple branches are installed at once
+// (e.g. org.freedesktop.Platform//22.08 alongside //23.08), which is the
+// common case since different apps pin different runtime versions. Matching
+// by name alone against list_installed_refs_by_kind can resolve to a branch
+// that is already current, silently no-opping the real pending update.
+// Prefer the ref that list_installed_refs_for_update actually flags first.
+fn installation_with_updatable_ref(
+    app_id: &str,
+) -> Result<(libflatpak::Installation, libflatpak::InstalledRef), ArcError> {
+    let cancel = libflatpak::gio::Cancellable::NONE;
+    for inst in all_installations() {
+        let updatable = inst
+            .list_installed_refs_for_update(cancel)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|r| r.name().map(|n| n == app_id).unwrap_or(false));
+        if let Some(r) = updatable {
+            return Ok((inst, r));
+        }
+    }
+    installation_with_ref(app_id)
+}
+
 // Extensions often live on branches named after the extension point version,
 // so when branch guessing fails we scan the full remote ref list by name
 fn find_remote_refs_by_name(
@@ -681,7 +704,7 @@ impl FlatpakProvider {
         let app_id = app_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = Some(&gio_cancel);
-            let (inst, installed) = installation_with_ref(&app_id)?;
+            let (inst, installed) = installation_with_updatable_ref(&app_id)?;
             let full_ref = installed
                 .format_ref()
                 .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?
@@ -1072,7 +1095,7 @@ impl PackageProvider for FlatpakProvider {
         let package_id = package_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
-            let (inst, installed) = installation_with_ref(&package_id)?;
+            let (inst, installed) = installation_with_updatable_ref(&package_id)?;
             let full_ref = installed
                 .format_ref()
                 .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?;
