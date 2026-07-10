@@ -1,6 +1,6 @@
 # Arc
 
-Arc Software is a Linux software manager that provides a unified interface for managing
+Arc Store is a Linux software manager that provides a unified interface for managing
 both Flatpak and native system packages. It wraps Flatpak (via libflatpak) and
 PackageKit both together with Appstream data behind a single D-Bus daemon, then exposes that daemon to a CLI tool
 and a graphical frontend.

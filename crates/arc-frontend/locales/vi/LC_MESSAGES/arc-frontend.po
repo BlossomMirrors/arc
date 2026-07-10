@@ -169,7 +169,7 @@ msgstr "Cài đặt như AppImage"
 msgid "Install via Distrobox"
 msgstr "Cài đặt từ Distrobox"
 
-msgid "Install {0} from Arc Software instead"
+msgid "Install {0} from Arc Store instead"
 msgstr "Cài đặt {0} từ cửa hàng Arc thay vì"
 
 msgid "Searching Flathub for an alternative..."

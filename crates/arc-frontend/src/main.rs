@@ -188,7 +188,7 @@ fn apply_translations(app: &AppWindow) {
     app.set_tr_all_ages(tr!("All ages").into());
     app.set_tr_pwa(tr!("PWA").into());
     app.set_tr_uninstall(tr!("Uninstall").into());
-    app.set_tr_install_from_suffix(tr!(" from Arc Software instead").into());
+    app.set_tr_install_from_suffix(tr!(" from Arc Store instead").into());
     // Verb-final languages (German, etc.) translate this sentinel to a non-empty value.
     // When detected, clear the verb prefix so the name leads and the suffix carries the verb.
     if tr!("verb_final_word_order") != "verb_final_word_order" {
@@ -1424,7 +1424,8 @@ fn main() -> Result<()> {
         let initial_app = std::env::args()
             .find(|a| a.starts_with("appstream://") || a.starts_with("appstream:"))
             .map(|a| {
-                let id = a.trim_start_matches("appstream://")
+                let id = a
+                    .trim_start_matches("appstream://")
                     .trim_start_matches("appstream:")
                     .trim_start_matches("//")
                     .trim_start_matches('/');
@@ -1433,10 +1434,12 @@ fn main() -> Result<()> {
         let flatpakref_url = std::env::args()
             .find(|a| a.starts_with("flatpak+https://") || a.starts_with("flatpak+http://"))
             .map(|a| a.trim_start_matches("flatpak+").to_string());
-        let flatpakref_file = std::env::args().skip(1)
+        let flatpakref_file = std::env::args()
+            .skip(1)
             .map(|a| a.strip_prefix("file://").map(str::to_string).unwrap_or(a))
             .find(|a| is_flatpakref(a));
-        let flatpakrepo_file = std::env::args().skip(1)
+        let flatpakrepo_file = std::env::args()
+            .skip(1)
             .map(|a| a.strip_prefix("file://").map(str::to_string).unwrap_or(a))
             .find(|a| is_flatpakrepo(a));
 
@@ -1461,128 +1464,126 @@ fn main() -> Result<()> {
                     app_ref.invoke_detail_requested(app_id.into());
                 }
             } else {
-
-            let app_weak2 = app_weak.clone();
-            let url2 = url.clone();
-            rt_handle.spawn(async move {
-                let content = match reqwest::get(&url2).await {
-                    Ok(r) => r.text().await.unwrap_or_default(),
-                    Err(_) => String::new(),
-                };
-                let (title, app_id, repo_url) = parse_flatpakref(&content);
-                let _ = app_weak2.upgrade_in_event_loop(move |app| {
-                    app.set_install_flatpakref_name(title.into());
-                    app.set_install_flatpakref_app_id(app_id.into());
-                    app.set_install_flatpakref_repo_url(repo_url.into());
-                    app.set_current_view("install-flatpakref".into());
+                let app_weak2 = app_weak.clone();
+                let url2 = url.clone();
+                rt_handle.spawn(async move {
+                    let content = match reqwest::get(&url2).await {
+                        Ok(r) => r.text().await.unwrap_or_default(),
+                        Err(_) => String::new(),
+                    };
+                    let (title, app_id, repo_url) = parse_flatpakref(&content);
+                    let _ = app_weak2.upgrade_in_event_loop(move |app| {
+                        app.set_install_flatpakref_name(title.into());
+                        app.set_install_flatpakref_app_id(app_id.into());
+                        app.set_install_flatpakref_repo_url(repo_url.into());
+                        app.set_current_view("install-flatpakref".into());
+                    });
                 });
-            });
 
-            {
-                let app_weak3 = app_weak.clone();
-                let proxy_arc2 = proxy_arc.clone();
-                let rt_handle2 = rt_handle.clone();
-                let store2 = store.clone();
-                app.on_install_flatpakref_confirmed(move || {
-                    let url3 = url.clone();
-                    let title = app_weak3
-                        .upgrade()
-                        .map(|a| a.get_install_flatpakref_name().to_string())
-                        .unwrap_or_else(|| url.clone());
+                {
+                    let app_weak3 = app_weak.clone();
+                    let proxy_arc2 = proxy_arc.clone();
+                    let rt_handle2 = rt_handle.clone();
+                    let store2 = store.clone();
+                    app.on_install_flatpakref_confirmed(move || {
+                        let url3 = url.clone();
+                        let title = app_weak3
+                            .upgrade()
+                            .map(|a| a.get_install_flatpakref_name().to_string())
+                            .unwrap_or_else(|| url.clone());
 
-                    begin_transaction(
-                        url3,
-                        String::new(),
-                        title,
-                        None,
-                        "flatpakref".to_string(),
-                        true,
-                        false,
-                        false,
-                        None,
-                        store2.clone(),
-                        proxy_arc2.clone(),
-                        app_weak3.clone(),
-                        rt_handle2.clone(),
-                    );
+                        begin_transaction(
+                            url3,
+                            String::new(),
+                            title,
+                            None,
+                            "flatpakref".to_string(),
+                            true,
+                            false,
+                            false,
+                            None,
+                            store2.clone(),
+                            proxy_arc2.clone(),
+                            app_weak3.clone(),
+                            rt_handle2.clone(),
+                        );
 
-                    if let Some(app_ref) = app_weak3.upgrade() {
-                        app_ref.set_current_view("downloads".into());
-                    }
-                });
-            }
+                        if let Some(app_ref) = app_weak3.upgrade() {
+                            app_ref.set_current_view("downloads".into());
+                        }
+                    });
+                }
 
-            {
-                let app_weak3 = app_weak.clone();
-                app.on_install_flatpakref_cancelled(move || {
-                    if let Some(app_ref) = app_weak3.upgrade() {
-                        app_ref.set_current_view("home".into());
-                    }
-                });
-            }
-
+                {
+                    let app_weak3 = app_weak.clone();
+                    app.on_install_flatpakref_cancelled(move || {
+                        if let Some(app_ref) = app_weak3.upgrade() {
+                            app_ref.set_current_view("home".into());
+                        }
+                    });
+                }
             } // end non-flathub flatpakref branch
         } else if let Some(file_path) = flatpakref_file {
             let content = std::fs::read_to_string(&file_path).unwrap_or_default();
             let (title, app_id, repo_url) = parse_flatpakref(&content);
-            let is_flathub = repo_url.contains("dl.flathub.org") || repo_url.contains("flathub.org");
+            let is_flathub =
+                repo_url.contains("dl.flathub.org") || repo_url.contains("flathub.org");
 
             if is_flathub {
                 if let Some(app_ref) = app_weak.upgrade() {
                     app_ref.invoke_detail_requested(app_id.into());
                 }
             } else {
-            if let Some(app_ref) = app_weak.upgrade() {
-                app_ref.set_install_flatpakref_name(title.into());
-                app_ref.set_install_flatpakref_app_id(app_id.into());
-                app_ref.set_install_flatpakref_repo_url(repo_url.into());
-                app_ref.set_current_view("install-flatpakref".into());
-            }
+                if let Some(app_ref) = app_weak.upgrade() {
+                    app_ref.set_install_flatpakref_name(title.into());
+                    app_ref.set_install_flatpakref_app_id(app_id.into());
+                    app_ref.set_install_flatpakref_repo_url(repo_url.into());
+                    app_ref.set_current_view("install-flatpakref".into());
+                }
 
-            {
-                let app_weak3 = app_weak.clone();
-                let proxy_arc2 = proxy_arc.clone();
-                let rt_handle2 = rt_handle.clone();
-                let store2 = store.clone();
-                let file_url = format!("file://{}", file_path);
-                app.on_install_flatpakref_confirmed(move || {
-                    let url3 = file_url.clone();
-                    let title = app_weak3
-                        .upgrade()
-                        .map(|a| a.get_install_flatpakref_name().to_string())
-                        .unwrap_or_default();
+                {
+                    let app_weak3 = app_weak.clone();
+                    let proxy_arc2 = proxy_arc.clone();
+                    let rt_handle2 = rt_handle.clone();
+                    let store2 = store.clone();
+                    let file_url = format!("file://{}", file_path);
+                    app.on_install_flatpakref_confirmed(move || {
+                        let url3 = file_url.clone();
+                        let title = app_weak3
+                            .upgrade()
+                            .map(|a| a.get_install_flatpakref_name().to_string())
+                            .unwrap_or_default();
 
-                    begin_transaction(
-                        url3,
-                        String::new(),
-                        title,
-                        None,
-                        "flatpakref".to_string(),
-                        true,
-                        false,
-                        false,
-                        None,
-                        store2.clone(),
-                        proxy_arc2.clone(),
-                        app_weak3.clone(),
-                        rt_handle2.clone(),
-                    );
+                        begin_transaction(
+                            url3,
+                            String::new(),
+                            title,
+                            None,
+                            "flatpakref".to_string(),
+                            true,
+                            false,
+                            false,
+                            None,
+                            store2.clone(),
+                            proxy_arc2.clone(),
+                            app_weak3.clone(),
+                            rt_handle2.clone(),
+                        );
 
-                    if let Some(app_ref) = app_weak3.upgrade() {
-                        app_ref.set_current_view("downloads".into());
-                    }
-                });
-            }
+                        if let Some(app_ref) = app_weak3.upgrade() {
+                            app_ref.set_current_view("downloads".into());
+                        }
+                    });
+                }
 
-            {
-                let app_weak3 = app_weak.clone();
-                app.on_install_flatpakref_cancelled(move || {
-                    if let Some(app_ref) = app_weak3.upgrade() {
-                        app_ref.set_current_view("home".into());
-                    }
-                });
-            }
-
+                {
+                    let app_weak3 = app_weak.clone();
+                    app.on_install_flatpakref_cancelled(move || {
+                        if let Some(app_ref) = app_weak3.upgrade() {
+                            app_ref.set_current_view("home".into());
+                        }
+                    });
+                }
             } // end non-flathub flatpakref file branch
         } else if let Some(repo_path) = flatpakrepo_file {
             let content = std::fs::read_to_string(&repo_path).unwrap_or_default();
@@ -1630,7 +1631,8 @@ fn main() -> Result<()> {
         let proxy_arc = proxy_opt.clone();
         let store = tx_store.clone();
 
-        let pkg_file = std::env::args().skip(1)
+        let pkg_file = std::env::args()
+            .skip(1)
             .map(|a| a.strip_prefix("file://").map(str::to_string).unwrap_or(a))
             .find(|a| is_pkg_file(a));
 

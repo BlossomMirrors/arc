@@ -3,7 +3,7 @@
   <id>org.blossomos.Arc</id>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
-  <name>Arc Software</name>
+  <name>Arc Store</name>
   <summary>Discover and install apps from Flathub and local package files</summary>
   <summary xml:lang="de">Apps aus Flathub entdecken und lokale Pakete installieren</summary>
 

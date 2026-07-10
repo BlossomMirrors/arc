@@ -22,7 +22,7 @@ fn parse_packages(json: &str) -> Result<Vec<Package>> {
 }
 
 #[derive(Parser)]
-#[command(name = "arc", about = "Arc Software Manager CLI", version)]
+#[command(name = "arc", about = "Arc Store Manager CLI", version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

@@ -160,7 +160,7 @@ msgstr ""
 msgid "Install via Distrobox"
 msgstr ""
 
-msgid " from Arc Software instead"
+msgid " from Arc Store instead"
 msgstr ""
 
 msgid "Searching Flathub for an alternative..."

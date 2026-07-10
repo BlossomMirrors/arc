@@ -180,8 +180,8 @@ msgstr "Als AppImage installieren"
 msgid "Install via Distrobox"
 msgstr "Über Distrobox installieren"
 
-msgid "Install {0} from Arc Software instead"
-msgstr "{0} stattdessen aus Arc Software installieren"
+msgid "Install {0} from Arc Store instead"
+msgstr "{0} stattdessen aus Arc Store installieren"
 
 msgid "Searching Flathub for an alternative..."
 msgstr "Suche nach einer Alternative auf Flathub..."
