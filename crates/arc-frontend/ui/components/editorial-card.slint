@@ -1,4 +1,4 @@
-import { Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { HeroItem } from "../types.slint";
 
 export component EditorialCard inherits Rectangle {
@@ -9,9 +9,8 @@ export component EditorialCard inherits Rectangle {
     height: 150px;
     border-radius: 14px;
     clip: true;
-    background: Palette.alternate-background;
+    background: Theme.alternate-bg;
 
-    // Story: full-coverage banner
     if root.item.is-story && root.item.banner.width > 0: Image {
         source: root.item.banner;
         width: parent.width;
@@ -19,14 +18,12 @@ export component EditorialCard inherits Rectangle {
         image-fit: cover;
     }
 
-    // App / no-banner: dark gradient
     if !root.item.is-story || root.item.banner.width == 0: Rectangle {
         width: parent.width;
         height: parent.height;
-        background: @linear-gradient(135deg, #1e2440 0%, #0d0f1e 100%);
+        background: @linear-gradient(135deg, Theme.card-deep-1 0%, Theme.card-deep-2 100%);
     }
 
-    // App: icon in upper center
     if !root.item.is-story && root.item.icon.width > 0: Rectangle {
         x: (parent.width - 56px) / 2;
         y: 20px;
@@ -42,16 +39,14 @@ export component EditorialCard inherits Rectangle {
         }
     }
 
-    // Bottom gradient
     Rectangle {
         x: 0;
         y: parent.height - 80px;
         width: parent.width;
         height: 80px;
-        background: @linear-gradient(180deg, transparent 0%, #000000d0 100%);
+        background: @linear-gradient(180deg, transparent 0%, Colors.black.transparentize(0.18) 100%);
     }
 
-    // Title + subtitle
     VerticalLayout {
         x: 12px;
         y: parent.height - 58px;
@@ -62,14 +57,14 @@ export component EditorialCard inherits Rectangle {
             text: root.item.title;
             font-size: 13px;
             font-weight: 700;
-            color: white;
+            color: Theme.on-image;
             overflow: elide;
         }
 
         if root.item.body != "": Text {
             text: root.item.body;
             font-size: 11px;
-            color: #ffffffaa;
+            color: Theme.on-image.transparentize(0.33);
             overflow: elide;
         }
     }
@@ -79,13 +74,12 @@ export component EditorialCard inherits Rectangle {
         clicked => { root.clicked(root.item.id, root.item.is-story); }
     }
 
-    // Hover border
     Rectangle {
         width: parent.width;
         height: parent.height;
         border-radius: parent.border-radius;
         border-width: ta.has-hover ? 2px : 1px;
-        border-color: ta.has-hover ? #ffffff50 : #ffffff18;
+        border-color: ta.has-hover ? Theme.on-image.transparentize(0.69) : Theme.on-image.transparentize(0.91);
         background: transparent;
         animate border-width { duration: 100ms; }
         animate border-color { duration: 100ms; }

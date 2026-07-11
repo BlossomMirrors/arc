@@ -1,7 +1,10 @@
 import { ListView, VerticalBox } from "std-widgets.slint";
-import { Palette, HorizontalBox } from "std-widgets.slint";
+import { HorizontalBox } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { PackageItem } from "../types.slint";
 import { AppIcon } from "../components/app-icon.slint";
+import { AppProgressBar } from "../components/progress-bar.slint";
+import { ActionButton, ActionButtonKind } from "../components/action-button.slint";
 import { ConveyorLoader } from "../components/conveyor-loader.slint";
 
 export component PackageListScreen inherits Rectangle {
@@ -34,7 +37,7 @@ export component PackageListScreen inherits Rectangle {
         Text {
             text: root.current-view == "search" ? root.tr-no-packages : (root.current-view == "updates" ? root.tr-up-to-date : root.tr-no-installed);
             horizontal-alignment: center;
-            color: Palette.foreground.transparentize(0.4);
+            color: Theme.fg.transparentize(0.4);
         }
     }
 
@@ -48,9 +51,9 @@ export component PackageListScreen inherits Rectangle {
                 y: i == 0 ? 17px : 5px;
                 height: 62px;
                 border-radius: 10px;
-                background: row-ta.has-hover ? #80808028 : #80808016;
+                background: row-ta.has-hover ? Theme.track : Theme.surface;
                 border-width: 1px;
-                border-color: row-ta.has-hover ? #80808040 : #80808028;
+                border-color: row-ta.has-hover ? Theme.control-strong : Theme.track;
                 clip: true;
 
                 row-ta := TouchArea {
@@ -90,16 +93,15 @@ export component PackageListScreen inherits Rectangle {
                         Text {
                             text: pkg.description;
                             font-size: 11px;
-                            color: Palette.foreground.transparentize(0.45);
+                            color: Theme.fg.transparentize(0.45);
                             overflow: elide;
                         }
                     }
 
-                    // Normal state: version text + action button
                     if !pkg.busy: Text {
                         text: pkg.version;
                         font-size: 11px;
-                        color: Palette.foreground.transparentize(0.5);
+                        color: Theme.fg.transparentize(0.5);
                         vertical-alignment: center;
                         horizontal-alignment: right;
                         min-width: 60px;
@@ -112,9 +114,9 @@ export component PackageListScreen inherits Rectangle {
                             width: pkg.installed && root.current-view != "updates" ? 30px : 80px;
                             height: 30px;
                             border-radius: 7px;
-                            background: pkg.installed ? (action-ta.has-hover ? #dc2626 : #ef4444) : (action-ta.has-hover ? #80808035 : #80808020);
+                            background: pkg.installed ? (action-ta.has-hover ? Theme.danger-hover : Theme.danger) : (action-ta.has-hover ? Theme.control-border : Theme.control);
                             border-width: pkg.installed ? 0px : 1px;
-                            border-color: #80808040;
+                            border-color: Theme.control-strong;
 
                             action-ta := TouchArea {
                                 clicked => {
@@ -141,14 +143,13 @@ export component PackageListScreen inherits Rectangle {
                                 text: root.current-view == "updates" ? root.tr-update : root.tr-install;
                                 font-size: 12px;
                                 font-weight: 600;
-                                color: Palette.foreground.transparentize(0.1);
+                                color: Theme.fg.transparentize(0.1);
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
                         }
                     }
 
-                    // Busy state: status label + cancel button
                     if pkg.busy: HorizontalLayout {
                         spacing: 8px;
                         alignment: center;
@@ -156,61 +157,33 @@ export component PackageListScreen inherits Rectangle {
                         Text {
                             text: root.tr-installing;
                             font-size: 11px;
-                            color: Palette.foreground.transparentize(0.45);
+                            color: Theme.fg.transparentize(0.45);
                             vertical-alignment: center;
                         }
 
                         VerticalLayout {
                             alignment: center;
 
-                            Rectangle {
-                                width: busy-cancel-label.preferred-width + 20px;
+                            ActionButton {
+                                kind: ActionButtonKind.danger;
                                 height: 28px;
                                 border-radius: 6px;
-                                background: busy-cancel-ta.has-hover ? #dc2626 : #ef4444;
-
-                                busy-cancel-ta := TouchArea {
-                                    clicked => {
-                                        root.cancel-requested(pkg.transaction-id);
-                                    }
-                                }
-
-                                busy-cancel-label := Text {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    text: root.tr-cancel;
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    color: white;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                                font-size: 11px;
+                                text: root.tr-cancel;
+                                clicked => {
+                                    root.cancel-requested(pkg.transaction-id);
                                 }
                             }
                         }
                     }
                 }
 
-                // Progress bar — same style and positioning as the transaction row
-                if pkg.busy: Rectangle {
+                if pkg.busy: AppProgressBar {
                     x: 66px;
                     y: parent.height - 10px;
                     width: parent.width - 66px - 18px;
                     height: 5px;
-                    border-radius: 3px;
-                    background: #80808028;
-
-                    Rectangle {
-                        x: 0px;
-                        y: 0px;
-                        width: parent.width * pkg.progress;
-                        height: parent.height;
-                        border-radius: 3px;
-                        background: #3b82f6;
-                        animate width {
-                            duration: 600ms;
-                            easing: ease-in-out;
-                        }
-                    }
+                    progress: pkg.progress;
                 }
             }
         }

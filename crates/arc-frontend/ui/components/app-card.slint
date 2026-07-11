@@ -1,4 +1,4 @@
-import { VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { AppCardData } from "../types.slint";
 import { Badge } from "badge.slint";
 
@@ -9,11 +9,11 @@ export component AppCard inherits Rectangle {
     callback clicked(string);
 
     border-radius: root.is-small ? 12px : 14px;
-    background: Palette.alternate-background;
+    background: Theme.alternate-bg;
     border-width: 1px;
     border-color: ta.has-hover
-        ? Palette.foreground.transparentize(0.72)
-        : Palette.foreground.transparentize(0.91);
+        ? Theme.fg.transparentize(0.72)
+        : Theme.fg.transparentize(0.91);
     animate border-color { duration: 120ms; }
 
     ta := TouchArea {
@@ -28,13 +28,12 @@ export component AppCard inherits Rectangle {
 
         HorizontalLayout {
             alignment: center;
-            // Icon with rounded clip, no background box
             Rectangle {
                 width: root.is-small ? 48px : 76px;
                 height: root.is-small ? 48px : 76px;
                 border-radius: root.is-small ? 11px : 17px;
                 clip: true;
-                background: Palette.foreground.transparentize(0.94);
+                background: Theme.surface;
 
                 Image {
                     source: root.card.icon;
@@ -56,7 +55,7 @@ export component AppCard inherits Rectangle {
         if !root.is-small: Text {
             text: root.card.summary;
             font-size: 10px;
-            color: Palette.foreground.transparentize(0.5);
+            color: Theme.fg.transparentize(0.5);
             overflow: elide;
             horizontal-alignment: center;
         }

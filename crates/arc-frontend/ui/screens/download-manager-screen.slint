@@ -1,4 +1,5 @@
-import { Palette, ScrollView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { TransactionItem, PackageItem } from "../types.slint";
 import { TransactionRow } from "../components/transaction-row.slint";
 import { UpdateRow } from "../components/update-row.slint";
@@ -53,7 +54,6 @@ export component DownloadManagerScreen inherits Rectangle {
             x: (parent.width - self.width) / 2;
             alignment: start;
 
-            // Page header
             HorizontalLayout {
                 padding-left: 30px;
                 padding-right: 20px;
@@ -73,9 +73,9 @@ export component DownloadManagerScreen inherits Rectangle {
                     width: check-label.preferred-width + 24px;
                     height: 32px;
                     border-radius: 6px;
-                    background: check-ta.has-hover && !root.updates-loading ? #80808018 : #00000000;
+                    background: check-ta.has-hover && !root.updates-loading ? Theme.surface : transparent;
                     border-width: 1px;
-                    border-color: #80808030;
+                    border-color: Theme.control-hover;
 
                     check-ta := TouchArea {
                         enabled: !root.updates-loading;
@@ -87,14 +87,13 @@ export component DownloadManagerScreen inherits Rectangle {
                     check-label := Text {
                         text: root.updates-loading ? root.tr-checking : root.tr-check-updates;
                         font-size: 12px;
-                        color: root.updates-loading ? Palette.foreground.transparentize(0.5) : Palette.foreground.transparentize(0.1);
+                        color: root.updates-loading ? Theme.fg.transparentize(0.5) : Theme.fg.transparentize(0.1);
                         x: (parent.width - self.width) / 2;
                         y: (parent.height - self.height) / 2;
                     }
                 }
             }
 
-            // Active
             if root.active-transactions.length > 0: VerticalLayout {
                 spacing: 0px;
 
@@ -108,7 +107,7 @@ export component DownloadManagerScreen inherits Rectangle {
                         text: root.tr-active-prefix + root.active-transactions.length + ")";
                         font-size: 11px;
                         font-weight: 700;
-                        color: Palette.foreground.transparentize(0.4);
+                        color: Theme.fg.transparentize(0.4);
                         vertical-alignment: center;
                     }
                 }
@@ -124,7 +123,6 @@ export component DownloadManagerScreen inherits Rectangle {
                 }
             }
 
-            // Pending
             if root.pending-transactions.length > 0: VerticalLayout {
                 spacing: 0px;
 
@@ -138,7 +136,7 @@ export component DownloadManagerScreen inherits Rectangle {
                         text: root.tr-pending-prefix + root.pending-transactions.length + ")";
                         font-size: 11px;
                         font-weight: 700;
-                        color: Palette.foreground.transparentize(0.4);
+                        color: Theme.fg.transparentize(0.4);
                         vertical-alignment: center;
                     }
                 }
@@ -154,7 +152,6 @@ export component DownloadManagerScreen inherits Rectangle {
                 }
             }
 
-            // Completed
             if root.completed-transactions.length > 0: VerticalLayout {
                 spacing: 0px;
 
@@ -169,7 +166,7 @@ export component DownloadManagerScreen inherits Rectangle {
                         text: root.tr-completed-prefix + root.completed-transactions.length + ")";
                         font-size: 11px;
                         font-weight: 700;
-                        color: Palette.foreground.transparentize(0.4);
+                        color: Theme.fg.transparentize(0.4);
                         horizontal-stretch: 1;
                         vertical-alignment: center;
                     }
@@ -178,9 +175,9 @@ export component DownloadManagerScreen inherits Rectangle {
                         width: clr-label.preferred-width + 20px;
                         height: 24px;
                         border-radius: 5px;
-                        background: clr-ta.has-hover ? #80808020 : #00000000;
+                        background: clr-ta.has-hover ? Theme.control : transparent;
                         border-width: 1px;
-                        border-color: #80808028;
+                        border-color: Theme.track;
 
                         clr-ta := TouchArea {
                             clicked => {
@@ -191,7 +188,7 @@ export component DownloadManagerScreen inherits Rectangle {
                         clr-label := Text {
                             text: root.tr-clear-all;
                             font-size: 11px;
-                            color: Palette.foreground.transparentize(0.3);
+                            color: Theme.fg.transparentize(0.3);
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                         }
@@ -208,7 +205,6 @@ export component DownloadManagerScreen inherits Rectangle {
                 }
             }
 
-            // Updates Available
             if root.available-updates.length > 0: VerticalLayout {
                 spacing: 0px;
 
@@ -223,7 +219,7 @@ export component DownloadManagerScreen inherits Rectangle {
                         text: root.tr-updates-available-prefix + root.available-updates.length + ")";
                         font-size: 11px;
                         font-weight: 700;
-                        color: Palette.foreground.transparentize(0.4);
+                        color: Theme.fg.transparentize(0.4);
                         horizontal-stretch: 1;
                         vertical-alignment: center;
                     }
@@ -232,7 +228,7 @@ export component DownloadManagerScreen inherits Rectangle {
                         width: upd-all-label.preferred-width + 24px;
                         height: 24px;
                         border-radius: 5px;
-                        background: root.updates-all-queued ? #2563eb60 : (upd-all-ta.has-hover ? #3b82f6 : #2563eb);
+                        background: root.updates-all-queued ? Theme.accent-disabled : (upd-all-ta.has-hover ? Theme.accent-hover : Theme.accent);
 
                         upd-all-ta := TouchArea {
                             enabled: !root.updates-all-queued;
@@ -245,7 +241,7 @@ export component DownloadManagerScreen inherits Rectangle {
                             text: root.tr-update-all;
                             font-size: 11px;
                             font-weight: 600;
-                            color: root.updates-all-queued ? #ffffff80 : white;
+                            color: root.updates-all-queued ? Theme.on-image.transparentize(0.5) : white;
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                         }
@@ -261,7 +257,6 @@ export component DownloadManagerScreen inherits Rectangle {
                 }
             }
 
-            // Empty state
             if !root.has-content: VerticalLayout {
                 alignment: center;
                 spacing: 8px;
@@ -273,14 +268,14 @@ export component DownloadManagerScreen inherits Rectangle {
                     font-size: 16px;
                     font-weight: 600;
                     horizontal-alignment: center;
-                    color: Palette.foreground.transparentize(0.4);
+                    color: Theme.fg.transparentize(0.4);
                 }
 
                 Text {
                     text: root.tr-downloads-empty;
                     font-size: 12px;
                     horizontal-alignment: center;
-                    color: Palette.foreground.transparentize(0.55);
+                    color: Theme.fg.transparentize(0.55);
                 }
             }
         }

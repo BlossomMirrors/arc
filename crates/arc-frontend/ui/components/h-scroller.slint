@@ -1,0 +1,66 @@
+import { Theme } from "../theme.slint";
+import { ScrollArrow } from "scroll-arrow.slint";
+
+// Horizontal scroller: the caller supplies absolutely-positioned children (a
+// for-loop over cards) plus the total content-width; arrows page by `step`.
+export component HScroller inherits Rectangle {
+    in property <length> content-width;
+    in property <length> step: 232px;
+    in property <length> arrow-width: 40px;
+    in property <length> arrow-height: 40px;
+    in property <length> arrow-radius: 20px;
+    in property <brush> arrow-bg: Theme.overlay-control;
+    in property <color> arrow-icon-color: Theme.on-image;
+    in property <bool> arrow-shadow: false;
+    in property <length> arrow-icon-size: 14px;
+
+    clip: true;
+    preferred-width: 0px;
+
+    property <length> max-scroll: max(0px, root.content-width - self.width);
+
+    flick := Flickable {
+        width: parent.width;
+        height: parent.height;
+        viewport-width: max(root.content-width, self.width);
+        viewport-height: parent.height;
+        interactive: true;
+        animate viewport-x { duration: 250ms; easing: ease-in-out; }
+
+        @children
+    }
+
+    left-arrow := ScrollArrow {
+        x: 4px;
+        y: (parent.height - self.height) / 2;
+        width: root.arrow-width;
+        height: root.arrow-height;
+        border-radius: root.arrow-radius;
+        background: root.arrow-bg;
+        icon-color: root.arrow-icon-color;
+        icon-size: root.arrow-icon-size;
+        shadow: root.arrow-shadow;
+        points-left: true;
+        active: flick.viewport-x < 0px;
+        activated => {
+            flick.viewport-x = min(0px, flick.viewport-x + root.step);
+        }
+    }
+
+    ScrollArrow {
+        x: parent.width - self.width - 4px;
+        y: (parent.height - self.height) / 2;
+        width: root.arrow-width;
+        height: root.arrow-height;
+        border-radius: root.arrow-radius;
+        background: root.arrow-bg;
+        icon-color: root.arrow-icon-color;
+        icon-size: root.arrow-icon-size;
+        shadow: root.arrow-shadow;
+        points-left: false;
+        active: flick.viewport-x > -root.max-scroll;
+        activated => {
+            flick.viewport-x = max(-root.max-scroll, flick.viewport-x - root.step);
+        }
+    }
+}

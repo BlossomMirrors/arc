@@ -1,4 +1,4 @@
-import { Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { CategoryItem } from "../types.slint";
 
 export component CategoryCard inherits Rectangle {
@@ -19,14 +19,13 @@ export component CategoryCard inherits Rectangle {
         width: parent.width;
         height: parent.height;
         border-radius: parent.border-radius;
-        background: #ffffff12;
+        background: Theme.on-image.transparentize(0.93);
     }
 
     HorizontalLayout {
         padding: 16px;
         spacing: 14px;
 
-        // Icon
         VerticalLayout {
             alignment: center;
             width: 36px;
@@ -35,17 +34,17 @@ export component CategoryCard inherits Rectangle {
                 width: 36px;
                 height: 36px;
                 image-fit: contain;
+                colorize: Theme.on-image;
             }
         }
 
-        // Label
         VerticalLayout {
             alignment: center;
             Text {
                 text: root.category.label;
                 font-weight: 700;
                 font-size: 14px;
-                color: white;
+                color: Theme.on-image;
             }
         }
     }

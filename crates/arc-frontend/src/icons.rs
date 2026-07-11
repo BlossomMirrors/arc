@@ -5,6 +5,8 @@ use resvg::{tiny_skia, usvg};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+const FALLBACK_THEMES: [&str; 4] = ["BlossomUI", "breeze", "Adwaita", "hicolor"];
+
 #[derive(Clone)]
 pub struct RawIcon {
     pub width: u32,
@@ -195,40 +197,28 @@ fn load_icon_from_path(path: &Path, size: u32) -> Option<RawIcon> {
 }
 
 fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default()
+    dirs::home_dir().unwrap_or_default()
 }
 
 fn system_theme_name() -> Option<String> {
-    let config_home = std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home_dir().join(".config"));
+    let config_home = dirs::config_dir().unwrap_or_else(|| home_dir().join(".config"));
     for cfg in ["gtk-4.0/settings.ini", "gtk-3.0/settings.ini"] {
-        if let Ok(content) = std::fs::read_to_string(config_home.join(cfg)) {
-            for line in content.lines() {
-                if let Some(val) = line.trim().strip_prefix("gtk-icon-theme-name=") {
-                    return Some(val.to_string());
-                }
+        if let Ok(ini) = ini::Ini::load_from_file(config_home.join(cfg)) {
+            if let Some(val) = ini
+                .section(Some("Settings"))
+                .and_then(|s| s.get("gtk-icon-theme-name"))
+            {
+                return Some(val.to_string());
             }
         }
     }
-    if let Ok(content) = std::fs::read_to_string(config_home.join("kdeglobals")) {
-        let mut in_icons = false;
-        for line in content.lines() {
-            let line = line.trim();
-            if line == "[Icons]" {
-                in_icons = true;
-            } else if line.starts_with('[') {
-                in_icons = false;
-            } else if in_icons {
-                if let Some(val) = line.strip_prefix("Theme=") {
-                    return Some(val.to_string());
-                }
-            }
-        }
-    }
-    None
+    ini::Ini::load_from_file(config_home.join("kdeglobals"))
+        .ok()
+        .and_then(|i| {
+            i.section(Some("Icons"))
+                .and_then(|s| s.get("Theme"))
+                .map(str::to_string)
+        })
 }
 
 // Try the icon in each theme in order, stopping at the first hit.
@@ -241,7 +231,7 @@ fn find_system_icon(icon_name: &str, size: u16) -> Option<PathBuf> {
     if let Some(t) = system_theme_name() {
         themes.push(t);
     }
-    for t in ["BlossomUI", "breeze", "Adwaita", "hicolor"] {
+    for t in FALLBACK_THEMES {
         if !themes.iter().any(|x| x == t) {
             themes.push(t.to_string());
         }
@@ -279,8 +269,8 @@ fn find_flatpak_icon_path(icon_name: &str) -> Option<PathBuf> {
     if let Some(path) = search_flatpak_icon_dir("/var/lib/flatpak/appstream", icon_name) {
         return Some(path);
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let user_path = PathBuf::from(home).join(".local/share/flatpak/appstream");
+    if let Some(home) = dirs::home_dir() {
+        let user_path = home.join(".local/share/flatpak/appstream");
         if let Some(found) = search_flatpak_icon_dir(&user_path, icon_name) {
             return Some(found);
         }

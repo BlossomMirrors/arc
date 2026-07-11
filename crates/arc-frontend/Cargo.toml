@@ -24,6 +24,9 @@ resvg = "0.44"
 flate2 = "1"
 appstream = { version = "0.2", features = ["gzip"] }
 icon-loader = "0.4"
+ashpd = { version = "0.13", default-features = false, features = ["settings", "tokio"] }
+rust-ini = "0.21.3"
+dirs = "6.0.0"
 
 [build-dependencies]
 slint-build = "1"

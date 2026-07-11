@@ -1,19 +1,27 @@
-import { Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 
 export component AppIcon inherits Rectangle {
     in property <length> size: 44px;
     in property <image> icon;
+    in property <length> icon-size: root.size;
+    in property <brush> icon-colorize: transparent;
+    in property <bool> outlined: false;
 
     width: root.size;
     height: root.size;
     border-radius: root.size / 6;
-    background: Palette.foreground.transparentize(0.94);
+    background: Theme.surface;
+    border-width: root.outlined ? 1px : 0px;
+    border-color: Theme.surface-border;
     clip: true;
 
     Image {
         source: root.icon;
-        width: parent.width;
-        height: parent.height;
+        width: root.icon-size;
+        height: root.icon-size;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
         image-fit: contain;
+        colorize: root.icon-colorize;
     }
 }

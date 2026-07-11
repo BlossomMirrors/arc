@@ -41,17 +41,10 @@ impl Default for Settings {
 
 impl Settings {
     fn path() -> PathBuf {
-        // xdg_config_home is the standard linux equivalent of appdata on windows,
-        // falls back to ~/.config if the env var is not set
-        let base = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .unwrap_or_default()
-                    .join(".config")
-            });
-        base.join("arc").join("settings.toml")
+        dirs::config_dir()
+            .unwrap_or_default()
+            .join("arc")
+            .join("settings.toml")
     }
 
     pub fn load() -> Self {

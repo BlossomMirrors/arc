@@ -1,4 +1,4 @@
-import { Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 
 // Non-slip relationship: 672px travel over 1.0 phase => 1080deg rotation (12 x 90deg).
 component RollingBlock inherits Rectangle {
@@ -18,20 +18,18 @@ component RollingBlock inherits Rectangle {
     y: 57px - 9px * (1.0 - 2.0 * abs(root.bob-t - 0.5));
     transform-rotation: root.phase * 1080deg;
 
-    // High-contrast diagonal gradient: light top-left -> dark bottom-right
     background: @linear-gradient(135deg, root.highlight-color 0%, root.dark-color 100%);
     drop-shadow-blur: 14px;
-    drop-shadow-color: #000dff38;
+    drop-shadow-color: Theme.accent.transparentize(0.78);
     drop-shadow-offset-x: 0px;
     drop-shadow-offset-y: 4px;
 
-    // Gloss sheen: simulates a convex surface catching directional light
     Rectangle {
         x: 0;
         y: 0;
         width: parent.width;
         height: parent.height;
-        background: @linear-gradient(135deg, #ffffff32 0%, #ffffff00 58%);
+        background: @linear-gradient(135deg, Theme.on-image.transparentize(0.8) 0%, transparent 58%);
     }
 }
 
@@ -53,28 +51,28 @@ export component ConveyorLoader inherits Rectangle {
     // highlight = base lightened ~22%, dark = base darkened ~42%.
     RollingBlock {
         phase: root.phase;
-        highlight-color: #6896ff;
-        dark-color: #244694;
+        highlight-color: Theme.accent.brighter(0.35);
+        dark-color: Theme.accent.mix(Colors.black, 0.42);
     }
     RollingBlock {
         phase: mod(root.phase + 0.2, 1.0);
-        highlight-color: #5d80ff;
-        dark-color: #1b3594;
+        highlight-color: Theme.accent.brighter(0.25);
+        dark-color: Theme.accent.mix(Colors.black, 0.5);
     }
     RollingBlock {
         phase: mod(root.phase + 0.4, 1.0);
-        highlight-color: #526aff;
-        dark-color: #132594;
+        highlight-color: Theme.accent.brighter(0.15);
+        dark-color: Theme.accent.mix(Colors.black, 0.58);
     }
     RollingBlock {
         phase: mod(root.phase + 0.6, 1.0);
-        highlight-color: #4656ff;
-        dark-color: #0a1694;
+        highlight-color: Theme.accent.brighter(0.05);
+        dark-color: Theme.accent.mix(Colors.black, 0.66);
     }
     RollingBlock {
         phase: mod(root.phase + 0.8, 1.0);
-        highlight-color: #3842ff;
-        dark-color: #000894;
+        highlight-color: Theme.accent;
+        dark-color: Theme.accent.mix(Colors.black, 0.72);
     }
 
     Rectangle {
@@ -82,13 +80,13 @@ export component ConveyorLoader inherits Rectangle {
         y: 0;
         width: 120px;
         height: parent.height;
-        background: @linear-gradient(90deg, Palette.background 0%, transparent 100%);
+        background: @linear-gradient(90deg, Theme.window-bg 0%, transparent 100%);
     }
     Rectangle {
         x: parent.width - 120px;
         y: 0;
         width: 120px;
         height: parent.height;
-        background: @linear-gradient(270deg, Palette.background 0%, transparent 100%);
+        background: @linear-gradient(270deg, Theme.window-bg 0%, transparent 100%);
     }
 }

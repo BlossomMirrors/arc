@@ -1,5 +1,4 @@
-import { LineEdit } from "std-widgets.slint";
-import { Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 
 export component TopBar inherits Rectangle {
     in-out property <string> search-text;
@@ -50,7 +49,6 @@ export component TopBar inherits Rectangle {
             padding-bottom: 11px;
             spacing: 8px;
 
-            // Back / forward navigation buttons
             Rectangle {
                 width: 56px;
                 border-radius: 6px;
@@ -62,7 +60,7 @@ export component TopBar inherits Rectangle {
                     Rectangle {
                         width: 28px;
                         border-radius: 6px;
-                        background: back-nav-ta.has-hover && root.can-go-back ? #80808018 : #00000000;
+                        background: back-nav-ta.has-hover && root.can-go-back ? Theme.surface : transparent;
 
                         back-nav-ta := TouchArea {
                             enabled: root.can-go-back;
@@ -76,7 +74,7 @@ export component TopBar inherits Rectangle {
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                             source: root.icon-nav-back;
-                            colorize: root.can-go-back ? Palette.foreground : Palette.foreground.transparentize(0.65);
+                            colorize: root.can-go-back ? Theme.fg : Theme.fg.transparentize(0.65);
                             image-fit: contain;
                         }
                     }
@@ -84,7 +82,7 @@ export component TopBar inherits Rectangle {
                     Rectangle {
                         width: 28px;
                         border-radius: 6px;
-                        background: fwd-nav-ta.has-hover && root.can-go-forward ? #80808018 : #00000000;
+                        background: fwd-nav-ta.has-hover && root.can-go-forward ? Theme.surface : transparent;
 
                         fwd-nav-ta := TouchArea {
                             enabled: root.can-go-forward;
@@ -98,7 +96,7 @@ export component TopBar inherits Rectangle {
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                             source: root.icon-nav-forward;
-                            colorize: root.can-go-forward ? Palette.foreground : Palette.foreground.transparentize(0.65);
+                            colorize: root.can-go-forward ? Theme.fg : Theme.fg.transparentize(0.65);
                             image-fit: contain;
                         }
                     }
@@ -108,7 +106,7 @@ export component TopBar inherits Rectangle {
             Rectangle {
                 width: 34px;
                 border-radius: 6px;
-                background: home-ta.has-hover ? #80808018 : #00000000;
+                background: home-ta.has-hover ? Theme.surface : transparent;
 
                 home-ta := TouchArea {
                     clicked => {
@@ -123,7 +121,7 @@ export component TopBar inherits Rectangle {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
                     source: root.icon-home;
-                    colorize: Palette.foreground;
+                    colorize: Theme.fg;
                     image-fit: contain;
                 }
             }
@@ -133,19 +131,18 @@ export component TopBar inherits Rectangle {
                 height: 36px;
                 border-radius: 6px;
                 border-width: 1.5px;
-                border-color: search-input.has-focus ? Palette.selection-background : Palette.border;
-                background: Palette.control-background;
+                border-color: search-input.has-focus ? Theme.selection-bg : Theme.control-border;
+                background: Theme.button-bg;
                 clip: true;
 
                 HorizontalLayout {
                     padding: 0px;
                     spacing: 0px;
 
-                    // Search icon on the left — submits the query when clicked
                     Rectangle {
                         width: 34px;
                         border-radius: 4px;
-                        background: search-icon-ta.has-hover ? #80808018 : #00000000;
+                        background: search-icon-ta.has-hover ? Theme.surface : transparent;
 
                         search-icon-ta := TouchArea {
                             clicked => {
@@ -165,13 +162,12 @@ export component TopBar inherits Rectangle {
                             y: (parent.height - self.height) / 2;
                             source: root.icon-search;
                             colorize: search-input.has-focus
-                                ? Palette.selection-background
-                                : Palette.foreground.transparentize(0.4);
+                                ? Theme.selection-bg
+                                : Theme.fg.transparentize(0.4);
                             image-fit: contain;
                         }
                     }
 
-                    // Text input
                     Rectangle {
                         horizontal-stretch: 1;
                         clip: true;
@@ -181,7 +177,7 @@ export component TopBar inherits Rectangle {
                             height: parent.height;
                             vertical-alignment: center;
                             font-size: 14px;
-                            color: Palette.foreground;
+                            color: Theme.fg;
                             text <=> root.search-text;
                             accepted => {
                                 if root.search-text != "" {
@@ -196,15 +192,14 @@ export component TopBar inherits Rectangle {
                             y: (parent.height - self.height) / 2;
                             text: root.tr-search-placeholder;
                             font-size: 14px;
-                            color: Palette.foreground.transparentize(0.5);
+                            color: Theme.fg.transparentize(0.5);
                         }
                     }
 
-                    // Clear button on the right — only visible when there is text
                     if root.search-text != "": Rectangle {
                         width: 32px;
                         border-radius: 4px;
-                        background: clear-ta.has-hover ? #80808018 : #00000000;
+                        background: clear-ta.has-hover ? Theme.surface : transparent;
 
                         clear-ta := TouchArea {
                             clicked => {
@@ -216,7 +211,7 @@ export component TopBar inherits Rectangle {
                         Text {
                             text: "×";
                             font-size: 18px;
-                            color: Palette.foreground.transparentize(0.35);
+                            color: Theme.fg.transparentize(0.35);
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                         }
@@ -224,15 +219,13 @@ export component TopBar inherits Rectangle {
                 }
             }
 
-            // Tabs with sliding indicator
             Rectangle {
                 width: tabs-row.preferred-width;
                 height: 36px;
                 border-radius: 8px;
-                background: #80808010;
+                background: Theme.surface;
                 clip: true;
 
-                // Sliding pill — animates when current-view changes
                 Rectangle {
                     x: root.current-view == "downloads"
                         ? (2px + installed-tab.width)
@@ -244,7 +237,7 @@ export component TopBar inherits Rectangle {
                     height: parent.height - 4px;
                     border-radius: 6px;
                     background: (root.current-view == "installed" || root.current-view == "downloads")
-                        ? #3584e440
+                        ? Theme.accent-dim
                         : transparent;
                     animate x { duration: 200ms; easing: ease-in-out; }
                     animate width { duration: 200ms; easing: ease-in-out; }
@@ -271,8 +264,8 @@ export component TopBar inherits Rectangle {
                             text: root.tr-installed;
                             font-size: 12px;
                             color: root.current-view == "installed"
-                                ? #3584e4
-                                : Palette.foreground.transparentize(0.45);
+                                ? Theme.accent
+                                : Theme.fg.transparentize(0.45);
                             horizontal-alignment: center;
                             vertical-alignment: center;
                             animate color { duration: 150ms; }
@@ -299,8 +292,8 @@ export component TopBar inherits Rectangle {
                                 text: root.tr-downloads;
                                 font-size: 12px;
                                 color: root.current-view == "downloads"
-                                    ? #3584e4
-                                    : Palette.foreground.transparentize(0.45);
+                                    ? Theme.accent
+                                    : Theme.fg.transparentize(0.45);
                                 vertical-alignment: center;
                                 animate color { duration: 150ms; }
                             }
@@ -309,7 +302,7 @@ export component TopBar inherits Rectangle {
                                 width: max(bubble-n.preferred-width + 8px, 16px);
                                 height: 16px;
                                 border-radius: 8px;
-                                background: #ef4444;
+                                background: Theme.danger;
                                 y: (parent.height - self.height) / 2;
 
                                 bubble-n := Text {
@@ -329,7 +322,7 @@ export component TopBar inherits Rectangle {
             Rectangle {
                 width: 34px;
                 border-radius: 6px;
-                background: settings-ta.has-hover ? #80808018 : #00000000;
+                background: settings-ta.has-hover ? Theme.surface : transparent;
 
                 settings-ta := TouchArea {
                     clicked => {
@@ -344,7 +337,7 @@ export component TopBar inherits Rectangle {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
                     source: root.icon-settings;
-                    colorize: Palette.foreground;
+                    colorize: Theme.fg;
                     image-fit: contain;
                 }
             }
@@ -352,7 +345,7 @@ export component TopBar inherits Rectangle {
 
         Rectangle {
             height: 1px;
-            background: #80808025;
+            background: Theme.surface-border;
         }
     }
 }

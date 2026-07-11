@@ -1,98 +1,49 @@
+import { Theme } from "../theme.slint";
+import { HScroller } from "h-scroller.slint";
+
 export component ScreenshotCarousel inherits Rectangle {
     in property <[image]> screenshots;
 
     callback screenshot-clicked(int);
 
-    private property <length> card-slot: 330px;
-    private property <length> scroll-x: 0px;
-    private property <length> max-scroll: max(0px, root.screenshots.length * root.card-slot - root.width);
-
-    animate scroll-x {
-        duration: 250ms;
-        easing: ease-in-out;
-    }
+    property <length> card-slot: 330px;
 
     height: 220px;
-    clip: true;
+    preferred-width: 0px;
 
-    for shot[i] in root.screenshots: Rectangle {
-        x: i * root.card-slot + root.scroll-x + 5px;
-        y: (parent.height - self.height) / 2;
-        width: 320px;
-        height: 200px;
-        border-radius: 8px;
-        background: #80808012;
-        border-width: 1px;
-        border-color: #80808025;
-        clip: true;
+    HScroller {
+        width: parent.width;
+        height: parent.height;
+        content-width: root.screenshots.length * root.card-slot;
+        step: root.card-slot;
+        arrow-width: 32px;
+        arrow-height: 48px;
+        arrow-radius: 8px;
+        arrow-icon-size: 16px;
 
-        Image {
-            source: shot;
-            width: parent.width;
-            height: parent.height;
-            image-fit: cover;
-        }
-
-        TouchArea {
-            clicked => {
-                root.screenshot-clicked(i);
-            }
-        }
-    }
-
-    Rectangle {
-        x: 4px;
-        y: (parent.height - 48px) / 2;
-        width: 32px;
-        height: 48px;
-        border-radius: 8px;
-        background: #000000bb;
-        opacity: root.scroll-x < 0px ? 1.0 : 0.0;
-        animate opacity { duration: 150ms; }
-
-        TouchArea {
-            enabled: root.scroll-x < 0px;
-            clicked => {
-                root.scroll-x = min(0px, root.scroll-x + root.card-slot);
-            }
-        }
-
-        Image {
-            source: @image-url("../../assets/chevron-left.svg");
-            width: 16px;
-            height: 16px;
-            x: (parent.width - self.width) / 2;
+        for shot[i] in root.screenshots: Rectangle {
+            x: i * root.card-slot + 5px;
             y: (parent.height - self.height) / 2;
-            image-fit: contain;
-            colorize: white;
-        }
-    }
+            width: 320px;
+            height: 200px;
+            border-radius: 8px;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.surface-border;
+            clip: true;
 
-    Rectangle {
-        x: parent.width - 36px;
-        y: (parent.height - 48px) / 2;
-        width: 32px;
-        height: 48px;
-        border-radius: 8px;
-        background: #000000bb;
-        opacity: root.scroll-x > -root.max-scroll ? 1.0 : 0.0;
-        animate opacity { duration: 150ms; }
-
-        TouchArea {
-            enabled: root.scroll-x > -root.max-scroll;
-            clicked => {
-                root.scroll-x = max(-root.max-scroll, root.scroll-x - root.card-slot);
+            Image {
+                source: shot;
+                width: parent.width;
+                height: parent.height;
+                image-fit: cover;
             }
-        }
 
-        Image {
-            source: @image-url("../../assets/chevron-right.svg");
-            width: 16px;
-            height: 16px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            image-fit: contain;
-            colorize: white;
+            TouchArea {
+                clicked => {
+                    root.screenshot-clicked(i);
+                }
+            }
         }
     }
 }

@@ -9,7 +9,7 @@ SPECS_DIR=$BUILDROOT/SPECS
 SOURCES_DIR=$BUILDROOT/SOURCES
 
 echo "Building Arc..."
-cargo build --release
+cargo build --release --workspace
 
 echo "Generating shell completions..."
 mkdir -p completions

@@ -1,0 +1,19 @@
+import { Theme } from "../theme.slint";
+
+export component Divider inherits Rectangle {
+    height: 1px;
+    background: Theme.divider;
+}
+
+export component SectionHeader inherits VerticalLayout {
+    in property <string> text;
+    spacing: 10px;
+
+    Text {
+        text: root.text;
+        font-size: 17px;
+        font-weight: 700;
+    }
+
+    Divider { }
+}

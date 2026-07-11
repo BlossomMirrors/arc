@@ -6,7 +6,8 @@ import {
     LineEdit,
     ScrollView,
 } from "std-widgets.slint";
-import { Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { ActionButton, ActionButtonKind } from "../components/action-button.slint";
 import { RemoteItem } from "../types.slint";
 
 component SectionLabel inherits HorizontalBox {
@@ -20,7 +21,7 @@ component SectionLabel inherits HorizontalBox {
         text: root.text;
         font-size: 10px;
         font-weight: 700;
-        color: Palette.foreground.transparentize(0.45);
+        color: Theme.fg.transparentize(0.45);
         letter-spacing: 0.8px;
     }
 }
@@ -86,7 +87,6 @@ export component SettingsScreen inherits Rectangle {
             padding: 20px;
             spacing: 0px;
 
-            // Header
             HorizontalBox {
                 padding-left: 10px;
                 padding-right: 0;
@@ -101,7 +101,6 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
-            // GENERAL
             SectionLabel {
                 text: root.tr-general;
             }
@@ -122,7 +121,7 @@ export component SettingsScreen inherits Rectangle {
                     Text {
                         text: root.tr-auto-updates-desc;
                         font-size: 11px;
-                        color: Palette.foreground.transparentize(0.4);
+                        color: Theme.fg.transparentize(0.4);
                         wrap: word-wrap;
                     }
                 }
@@ -157,7 +156,7 @@ export component SettingsScreen inherits Rectangle {
                     Text {
                         text: root.tr-security-warnings-desc;
                         font-size: 11px;
-                        color: Palette.foreground.transparentize(0.4);
+                        color: Theme.fg.transparentize(0.4);
                         wrap: word-wrap;
                     }
                 }
@@ -176,7 +175,6 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
-            // DOWNLOADS
             SectionLabel {
                 text: root.tr-downloads-section;
                 padding-bottom: 0px;
@@ -198,7 +196,7 @@ export component SettingsScreen inherits Rectangle {
                     Text {
                         text: root.tr-concurrent-desc;
                         font-size: 11px;
-                        color: Palette.foreground.transparentize(0.4);
+                        color: Theme.fg.transparentize(0.4);
                     }
                 }
 
@@ -211,8 +209,8 @@ export component SettingsScreen inherits Rectangle {
                         height: 28px;
                         border-radius: 5px;
                         border-width: 1px;
-                        border-color: Palette.border;
-                        background: dec-ta.has-hover ? Palette.background.darker(8%) : transparent;
+                        border-color: Theme.control-border;
+                        background: dec-ta.has-hover ? Theme.window-bg.darker(8%) : transparent;
                         dec-ta := TouchArea {
                             clicked => {
                                 if root.settings-concurrent-downloads > 1 {
@@ -247,8 +245,8 @@ export component SettingsScreen inherits Rectangle {
                         height: 28px;
                         border-radius: 5px;
                         border-width: 1px;
-                        border-color: Palette.border;
-                        background: inc-ta.has-hover ? Palette.background.darker(8%) : transparent;
+                        border-color: Theme.control-border;
+                        background: inc-ta.has-hover ? Theme.window-bg.darker(8%) : transparent;
                         inc-ta := TouchArea {
                             clicked => {
                                 if root.settings-concurrent-downloads < 16 {
@@ -268,7 +266,6 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
-            // REPOSITORIES
             HorizontalBox {
                 padding-right: 0;
                 padding-top: 20px;
@@ -278,7 +275,7 @@ export component SettingsScreen inherits Rectangle {
                     text: root.tr-repositories;
                     font-size: 10px;
                     font-weight: 700;
-                    color: Palette.foreground.transparentize(0.45);
+                    color: Theme.fg.transparentize(0.45);
                     letter-spacing: 0.8px;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
@@ -287,7 +284,7 @@ export component SettingsScreen inherits Rectangle {
                 if root.settings-remotes-loading: Text {
                     text: root.tr-loading-ellipsis;
                     font-size: 11px;
-                    color: Palette.foreground.transparentize(0.4);
+                    color: Theme.fg.transparentize(0.4);
                     vertical-alignment: center;
                 }
             }
@@ -311,7 +308,7 @@ export component SettingsScreen inherits Rectangle {
                     Text {
                         text: repo.url;
                         font-size: 11px;
-                        color: Palette.foreground.transparentize(0.4);
+                        color: Theme.fg.transparentize(0.4);
                         overflow: elide;
                     }
                 }
@@ -324,11 +321,11 @@ export component SettingsScreen inherits Rectangle {
                         width: 72px;
                         height: 24px;
                         border-radius: 4px;
-                        background: Palette.foreground.transparentize(0.88);
+                        background: Theme.fg.transparentize(0.88);
                         Text {
                             text: root.tr-protected;
                             font-size: 10px;
-                            color: Palette.foreground.transparentize(0.4);
+                            color: Theme.fg.transparentize(0.4);
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -347,7 +344,6 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
-            // ADD REPOSITORY
             SectionLabel {
                 text: root.tr-add-repo-section;
             }
@@ -405,7 +401,6 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
-            // DANGER ZONE (collapsible)
             Rectangle {
                 height: dz-header.preferred-height;
 
@@ -423,7 +418,7 @@ export component SettingsScreen inherits Rectangle {
                         text: root.tr-danger-zone;
                         font-size: 10px;
                         font-weight: 700;
-                        color: #ef4444;
+                        color: Theme.danger;
                         letter-spacing: 0.8px;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
@@ -432,7 +427,7 @@ export component SettingsScreen inherits Rectangle {
                     Text {
                         text: root.danger-zone-open ? "▲" : "▼";
                         font-size: 9px;
-                        color: white;
+                        color: Theme.fg;
                         vertical-alignment: center;
                     }
                 }
@@ -460,7 +455,7 @@ export component SettingsScreen inherits Rectangle {
                             Text {
                                 text: root.tr-force-updates-desc;
                                 font-size: 11px;
-                                color: Palette.foreground.transparentize(0.4);
+                                color: Theme.fg.transparentize(0.4);
                                 wrap: word-wrap;
                             }
                         }
@@ -470,23 +465,15 @@ export component SettingsScreen inherits Rectangle {
                             padding: 0;
                             horizontal-stretch: 0;
 
-                            Rectangle {
+                            ActionButton {
+                                kind: ActionButtonKind.danger;
                                 width: 110px;
                                 height: 30px;
                                 border-radius: 7px;
-                                background: force-ta.has-hover ? #dc2626 : #ef4444;
-
-                                force-ta := TouchArea {
-                                    clicked => { root.force-update-requested(); }
-                                }
-
-                                Text {
-                                    text: root.tr-force-update;
-                                    font-size: 12px;
-                                    font-weight: 600;
-                                    color: white;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                                font-size: 12px;
+                                text: root.tr-force-update;
+                                clicked => {
+                                    root.force-update-requested();
                                 }
                             }
                         }
@@ -506,7 +493,7 @@ export component SettingsScreen inherits Rectangle {
                             Text {
                                 text: root.tr-restart-daemon-desc;
                                 font-size: 11px;
-                                color: Palette.foreground.transparentize(0.4);
+                                color: Theme.fg.transparentize(0.4);
                                 wrap: word-wrap;
                             }
                         }
@@ -516,23 +503,15 @@ export component SettingsScreen inherits Rectangle {
                             padding: 0;
                             horizontal-stretch: 0;
 
-                            Rectangle {
+                            ActionButton {
+                                kind: ActionButtonKind.danger;
                                 width: 110px;
                                 height: 30px;
                                 border-radius: 7px;
-                                background: restart-ta.has-hover ? #dc2626 : #ef4444;
-
-                                restart-ta := TouchArea {
-                                    clicked => { root.restart-daemon-requested(); }
-                                }
-
-                                Text {
-                                    text: root.tr-restart;
-                                    font-size: 12px;
-                                    font-weight: 600;
-                                    color: white;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                                font-size: 12px;
+                                text: root.tr-restart;
+                                clicked => {
+                                    root.restart-daemon-requested();
                                 }
                             }
                         }

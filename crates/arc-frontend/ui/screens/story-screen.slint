@@ -1,4 +1,5 @@
-import { Palette, ScrollView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { StoryItem } from "../types.slint";
 import { AppCard } from "../components/app-card.slint";
 import { AppIcon } from "../components/app-icon.slint";
@@ -20,7 +21,7 @@ export component StoryScreen inherits Rectangle {
             width: parent.width;
             height: 280px;
             clip: true;
-            background: #1a1a2e;
+            background: Theme.card-deep-2;
 
             if root.story.screenshot.width > 0: Image {
                 source: root.story.screenshot;
@@ -36,7 +37,7 @@ export component StoryScreen inherits Rectangle {
                 y: parent.height - 100px;
                 width: parent.width;
                 height: 100px;
-                background: @linear-gradient(180deg, transparent 0%, Palette.background 100%);
+                background: @linear-gradient(180deg, transparent 0%, Theme.window-bg 100%);
             }
 
             // Top gradient (back button legibility)
@@ -45,7 +46,7 @@ export component StoryScreen inherits Rectangle {
                 y: 0;
                 width: parent.width;
                 height: 60px;
-                background: @linear-gradient(180deg, #00000066 0%, transparent 100%);
+                background: @linear-gradient(180deg, Theme.scrim 0%, transparent 100%);
             }
         }
 
@@ -67,7 +68,7 @@ export component StoryScreen inherits Rectangle {
                     font-size: 26px;
                     font-weight: 800;
                     wrap: word-wrap;
-                    color: Palette.foreground;
+                    color: Theme.fg;
                 }
 
                 // Description blocks (HTML body parsed into paragraphs/headings/images/app-links)
@@ -83,7 +84,7 @@ export component StoryScreen inherits Rectangle {
                         text: (block.is-image || block.is-app) ? "" : block.text;
                         font-size: block.is-heading ? 16px : 14px;
                         font-weight: block.is-heading ? 700 : (block.is-bold ? 600 : 400);
-                        color: block.is-heading ? Palette.foreground : Palette.foreground.transparentize(0.2);
+                        color: block.is-heading ? Theme.fg : Theme.fg.transparentize(0.2);
                         wrap: word-wrap;
                     }
 
@@ -94,7 +95,7 @@ export component StoryScreen inherits Rectangle {
                         height: parent.width * 9 / 16;
                         border-radius: 10px;
                         clip: true;
-                        background: Palette.alternate-background;
+                        background: Theme.alternate-bg;
 
                         if block.image.width > 0: Image {
                             source: block.image;
@@ -111,7 +112,7 @@ export component StoryScreen inherits Rectangle {
                         width: parent.width;
                         text: block.text;
                         font-size: 11px;
-                        color: Palette.foreground.transparentize(0.5);
+                        color: Theme.fg.transparentize(0.5);
                         horizontal-alignment: center;
                     }
 
@@ -122,9 +123,9 @@ export component StoryScreen inherits Rectangle {
                         width: parent.width;
                         height: 72px;
                         border-radius: 12px;
-                        background: app-link-ta.has-hover ? Palette.alternate-background.darker(0.03) : Palette.alternate-background;
+                        background: app-link-ta.has-hover ? Theme.alternate-bg.darker(0.03) : Theme.alternate-bg;
                         border-width: 1px;
-                        border-color: Palette.foreground.transparentize(0.9);
+                        border-color: Theme.fg.transparentize(0.9);
 
                         app-link-ta := TouchArea {
                             mouse-cursor: pointer;
@@ -152,13 +153,13 @@ export component StoryScreen inherits Rectangle {
                                     font-size: 14px;
                                     font-weight: 700;
                                     overflow: elide;
-                                    color: Palette.foreground;
+                                    color: Theme.fg;
                                 }
 
                                 Text {
                                     text: block.app-card.summary;
                                     font-size: 12px;
-                                    color: Palette.foreground.transparentize(0.45);
+                                    color: Theme.fg.transparentize(0.45);
                                     overflow: elide;
                                 }
                             }
@@ -174,9 +175,9 @@ export component StoryScreen inherits Rectangle {
                     for app[i] in root.story.featured-apps: Rectangle {
                         height: 96px;
                         border-radius: 12px;
-                        background: app-ta.has-hover ? Palette.alternate-background.darker(0.03) : Palette.alternate-background;
+                        background: app-ta.has-hover ? Theme.alternate-bg.darker(0.03) : Theme.alternate-bg;
                         border-width: 1px;
-                        border-color: Palette.foreground.transparentize(0.9);
+                        border-color: Theme.fg.transparentize(0.9);
 
                         app-ta := TouchArea {
                             clicked => {
@@ -189,7 +190,6 @@ export component StoryScreen inherits Rectangle {
                             spacing: 16px;
                             alignment: start;
 
-                            // App icon
                             AppIcon {
                                 size: 56px;
                                 icon: app.icon;
@@ -204,13 +204,13 @@ export component StoryScreen inherits Rectangle {
                                     font-size: 15px;
                                     font-weight: 700;
                                     overflow: elide;
-                                    color: Palette.foreground;
+                                    color: Theme.fg;
                                 }
 
                                 Text {
                                     text: app.summary;
                                     font-size: 12px;
-                                    color: Palette.foreground.transparentize(0.45);
+                                    color: Theme.fg.transparentize(0.45);
                                     overflow: elide;
                                 }
                             }

@@ -1,7 +1,8 @@
-import { VerticalBox, Button } from "std-widgets.slint";
-import { Palette } from "std-widgets.slint";
+import { VerticalBox } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { AppDetailData } from "../types.slint";
-import { Badge } from "../components/badge.slint";
+import { AppIcon } from "../components/app-icon.slint";
+import { ActionButton, ActionButtonKind } from "../components/action-button.slint";
 
 export component EulaScreen inherits Rectangle {
     in property <AppDetailData> detail-app;
@@ -23,22 +24,11 @@ export component EulaScreen inherits Rectangle {
 
         HorizontalLayout {
             alignment: center;
-            Rectangle {
-                width: 80px;
-                height: 80px;
-                border-radius: 16px;
-                background: #80808012;
-                border-width: 1px;
-                border-color: #80808025;
-
-                Image {
-                    source: root.detail-app.icon;
-                    width: 64px;
-                    height: 64px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    image-fit: contain;
-                }
+            AppIcon {
+                size: 80px;
+                icon: root.detail-app.icon;
+                icon-size: 64px;
+                outlined: true;
             }
         }
 
@@ -52,7 +42,7 @@ export component EulaScreen inherits Rectangle {
         Text {
             text: root.detail-app.name + root.tr-eula-requires;
             font-size: 13px;
-            color: Palette.foreground.transparentize(0.25);
+            color: Theme.fg.transparentize(0.25);
             horizontal-alignment: center;
             wrap: word-wrap;
         }
@@ -64,9 +54,9 @@ export component EulaScreen inherits Rectangle {
                 height: 32px;
                 width: eula-label.preferred-width + 24px;
                 border-radius: 8px;
-                background: eula-ta.has-hover ? #80808025 : #80808015;
+                background: eula-ta.has-hover ? Theme.surface-border : Theme.surface;
                 border-width: 1px;
-                border-color: #80808030;
+                border-color: Theme.control-hover;
 
                 eula-ta := TouchArea {
                     mouse-cursor: pointer;
@@ -80,7 +70,7 @@ export component EulaScreen inherits Rectangle {
                     height: parent.height;
                     text: root.tr-read-license;
                     font-size: 12px;
-                    color: #3b82f6;
+                    color: Theme.accent;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
@@ -91,53 +81,18 @@ export component EulaScreen inherits Rectangle {
             spacing: 12px;
             alignment: center;
 
-            Rectangle {
-                width: cancel-label.preferred-width + 32px;
-                height: 36px;
-                border-radius: 8px;
-                background: cancel-ta.has-hover ? #80808025 : #80808015;
-                border-width: 1px;
-                border-color: #80808030;
-
-                cancel-ta := TouchArea {
-                    clicked => {
-                        root.cancelled();
-                    }
-                }
-
-                cancel-label := Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: root.tr-cancel;
-                    font-size: 13px;
-                    font-weight: 600;
-                    color: Palette.foreground.transparentize(0.2);
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+            ActionButton {
+                kind: ActionButtonKind.secondary;
+                text: root.tr-cancel;
+                clicked => {
+                    root.cancelled();
                 }
             }
 
-            Rectangle {
-                width: accept-label.preferred-width + 32px;
-                height: 36px;
-                border-radius: 8px;
-                background: accept-ta.has-hover ? #2563eb : #3b82f6;
-
-                accept-ta := TouchArea {
-                    clicked => {
-                        root.confirmed();
-                    }
-                }
-
-                accept-label := Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: root.tr-accept-install;
-                    font-size: 13px;
-                    font-weight: 600;
-                    color: white;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+            ActionButton {
+                text: root.tr-accept-install;
+                clicked => {
+                    root.confirmed();
                 }
             }
         }

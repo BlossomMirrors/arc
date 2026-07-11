@@ -1,6 +1,7 @@
-import { Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { PackageItem } from "../types.slint";
 import { AppIcon } from "app-icon.slint";
+import { ActionButton } from "action-button.slint";
 
 export component UpdateRow inherits Rectangle {
     in property <PackageItem> item;
@@ -14,7 +15,7 @@ export component UpdateRow inherits Rectangle {
         y: parent.height - 1px;
         width: parent.width - 40px;
         height: 1px;
-        background: #80808018;
+        background: Theme.surface;
     }
 
     HorizontalLayout {
@@ -44,7 +45,7 @@ export component UpdateRow inherits Rectangle {
             Text {
                 text: root.item.version;
                 font-size: 11px;
-                color: Palette.foreground.transparentize(0.45);
+                color: Theme.fg-dim;
                 overflow: elide;
             }
         }
@@ -52,23 +53,13 @@ export component UpdateRow inherits Rectangle {
         VerticalLayout {
             alignment: center;
 
-            btn-rect := Rectangle {
-                width: btn-label.preferred-width + 24px;
+            ActionButton {
                 height: 28px;
                 border-radius: 6px;
-                background: btn-ta.has-hover ? #3b82f6 : #2563eb;
-
-                btn-ta := TouchArea {
-                    clicked => { root.update-clicked(root.item.id); }
-                }
-
-                btn-label := Text {
-                    text: root.tr-update;
-                    font-size: 12px;
-                    font-weight: 600;
-                    color: white;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
+                font-size: 12px;
+                text: root.tr-update;
+                clicked => {
+                    root.update-clicked(root.item.id);
                 }
             }
         }

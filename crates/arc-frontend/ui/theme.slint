@@ -1,0 +1,63 @@
+import { Palette } from "std-widgets.slint";
+
+// Single color source for the whole UI. The in-out tokens map to KDE color-scheme
+// roles and are overwritten from Rust (src/system_style.rs) when a KDE scheme is
+// available; their defaults reproduce the look on systems without one.
+export global Theme {
+    // [General] AccentColor, else [Colors:Selection] BackgroundNormal
+    in-out property <color> accent: #3b82f6;
+    // [Colors:View] ForegroundNegative
+    in-out property <color> danger: #ef4444;
+    // [Colors:View] ForegroundNeutral
+    in-out property <color> warning: #f97316;
+    // [Colors:View] ForegroundPositive
+    in-out property <color> success: Palette.color-scheme == ColorScheme.dark ? #22c55e : #15803d;
+    // [Colors:View] ForegroundVisited
+    in-out property <color> pwa: #8b5cf6;
+    // [Colors:View] ForegroundLink
+    in-out property <color> link: #3b82f6;
+    // [Colors:Window] BackgroundNormal
+    in-out property <color> window-bg: Palette.background;
+    // [Colors:View] BackgroundNormal
+    in-out property <color> view-bg: Palette.background;
+    // [Colors:View] BackgroundAlternate
+    in-out property <color> alternate-bg: Palette.alternate-background;
+    // [Colors:Window] ForegroundNormal
+    in-out property <color> fg: Palette.foreground;
+    // [Colors:Window] ForegroundInactive
+    in-out property <color> fg-dim: Palette.foreground.transparentize(0.45);
+    // [Colors:Button] BackgroundNormal
+    in-out property <color> button-bg: Palette.control-background;
+    // [Colors:Selection] BackgroundNormal / ForegroundNormal
+    in-out property <color> selection-bg: Palette.selection-background;
+    in-out property <color> selection-fg: Palette.selection-foreground;
+    // [Colors:Header] BackgroundNormal
+    in-out property <color> header-bg: Palette.background;
+
+    out property <color> accent-hover: accent.darker(0.15);
+    out property <color> accent-light: accent.brighter(0.25);
+    out property <brush> accent-dim: accent.transparentize(0.75);
+    out property <brush> accent-disabled: accent.transparentize(0.62);
+    out property <color> danger-hover: danger.darker(0.1);
+    out property <brush> warning-surface: warning.transparentize(0.94);
+    out property <brush> warning-border: warning.transparentize(0.81);
+
+    out property <brush> divider: fg.transparentize(0.88);
+    out property <brush> surface: fg.transparentize(0.95);
+    out property <brush> surface-border: fg.transparentize(0.89);
+    out property <brush> control: fg.transparentize(0.91);
+    out property <brush> control-hover: fg.transparentize(0.86);
+    out property <brush> control-border: fg.transparentize(0.84);
+    out property <brush> control-strong: fg.transparentize(0.75);
+    out property <brush> track: fg.transparentize(0.87);
+
+    // Overlays on top of imagery; no KDE role, derived from named colors only.
+    out property <brush> scrim: Colors.black.transparentize(0.62);
+    out property <brush> scrim-strong: Colors.black.transparentize(0.2);
+    out property <brush> overlay-control: Colors.black.transparentize(0.27);
+    out property <color> on-image: Colors.white;
+
+    // Fallback banner tint for cards without artwork, tinted by the accent.
+    out property <color> card-deep-1: accent.mix(Colors.black, 0.22);
+    out property <color> card-deep-2: accent.mix(Colors.black, 0.3);
+}

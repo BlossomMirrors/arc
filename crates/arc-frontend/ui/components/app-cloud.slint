@@ -1,4 +1,4 @@
-import { Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { AppCardData } from "../types.slint";
 
 component CloudIcon inherits Rectangle {
@@ -9,11 +9,11 @@ component CloudIcon inherits Rectangle {
 
     border-radius: self.width * 0.22;
     clip: true;
-    background: Palette.alternate-background;
+    background: Theme.alternate-bg;
     border-width: 1.5px;
-    border-color: Palette.foreground.transparentize(0.82);
+    border-color: Theme.fg.transparentize(0.82);
     drop-shadow-blur: 24px;
-    drop-shadow-color: #00000055;
+    drop-shadow-color: Theme.scrim;
     drop-shadow-offset-x: 2px;
     drop-shadow-offset-y: 7px;
     transform-rotation: root.tilt;

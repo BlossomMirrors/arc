@@ -1,8 +1,9 @@
-import { Button } from "std-widgets.slint";
-import { Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { AppDetailData } from "../types.slint";
 import { Badge } from "badge.slint";
 import { AppIcon } from "app-icon.slint";
+import { AppProgressBar } from "progress-bar.slint";
+import { ActionButton, ActionButtonKind } from "action-button.slint";
 
 export component DetailHeader inherits Rectangle {
     in property <AppDetailData> detail-app;
@@ -40,20 +41,17 @@ export component DetailHeader inherits Rectangle {
     VerticalLayout {
         spacing: 0px;
 
-        // App info row: icon | name/developer/badges (stretch) | install button
         HorizontalLayout {
             padding-left: 30px;
             padding-right: 30px;
             padding-bottom: 20px;
             spacing: 20px;
 
-            // App icon
             AppIcon {
                 size: 96px;
                 icon: root.detail-app.icon;
             }
 
-            // Name / developer / metadata chips
             VerticalLayout {
                 alignment: center;
                 spacing: 6px;
@@ -73,7 +71,7 @@ export component DetailHeader inherits Rectangle {
                     Text {
                         text: root.detail-app.developer;
                         font-size: 13px;
-                        color: Palette.foreground.transparentize(0.35);
+                        color: Theme.fg.transparentize(0.35);
                         vertical-alignment: center;
                     }
 
@@ -85,7 +83,7 @@ export component DetailHeader inherits Rectangle {
                             source: @image-url("../../assets/verified.svg");
                             width: 14px;
                             height: 14px;
-                            colorize: #0d6efd;
+                            colorize: Theme.accent;
                         }
 
                         verified-ta := TouchArea { }
@@ -95,7 +93,7 @@ export component DetailHeader inherits Rectangle {
                             y: 20px;
                             width: tt-text.preferred-width + 12px;
                             height: 22px;
-                            background: Palette.color-scheme == ColorScheme.dark ? #e2e8f0 : #1e293b;
+                            background: Theme.fg;
                             border-radius: 4px;
 
                             tt-text := Text {
@@ -103,7 +101,7 @@ export component DetailHeader inherits Rectangle {
                                 y: (parent.height - self.preferred-height) / 2;
                                 text: root.tr-verified;
                                 font-size: 11px;
-                                color: Palette.color-scheme == ColorScheme.dark ? #1e293b : #f1f5f9;
+                                color: Theme.window-bg;
                             }
                         }
                     }
@@ -116,27 +114,26 @@ export component DetailHeader inherits Rectangle {
 
                     if root.detail-app.version != "": Badge {
                         label: root.detail-app.version;
-                        accent: Palette.foreground.transparentize(0.3);
+                        accent: Theme.fg.transparentize(0.3);
                     }
 
                     if root.detail-app.license != "": Badge {
                         label: root.detail-app.license == "Proprietary" ? root.tr-proprietary : root.detail-app.license;
-                        accent: root.detail-app.license == "Proprietary" ? #ef4444 : #3b82f6;
+                        accent: root.detail-app.license == "Proprietary" ? Theme.danger : Theme.accent;
                     }
 
                     if root.detail-app.content-rating != "": Badge {
                         label: root.detail-app.content-rating == "All ages" ? root.tr-all-ages : root.detail-app.content-rating;
-                        accent: root.detail-app.content-rating == "18+" ? #ef4444 : root.detail-app.content-rating == "12+" ? #f97316 : root.detail-app.content-rating == "7+" ? #eab308 : Palette.foreground.transparentize(0.4);
+                        accent: root.detail-app.content-rating == "18+" ? Theme.danger : root.detail-app.content-rating == "12+" ? Theme.warning : root.detail-app.content-rating == "7+" ? Theme.warning : Theme.fg.transparentize(0.4);
                     }
 
                     if root.detail-app.pwa: Badge {
                         label: root.tr-pwa;
-                        accent: #8b5cf6;
+                        accent: Theme.pwa;
                     }
                 }
             }
 
-            // Buttons column
             VerticalLayout {
                 alignment: center;
                 horizontal-stretch: 0;
@@ -149,9 +146,9 @@ export component DetailHeader inherits Rectangle {
                         width: root.shared-btn-height;
                         height: root.shared-btn-height;
                         border-radius: 8px;
-                        background: ext-icon-ta.has-hover ? #80808020 : #80808010;
+                        background: ext-icon-ta.has-hover ? Theme.control : Theme.surface;
                         border-width: 1px;
-                        border-color: #80808030;
+                        border-color: Theme.control-hover;
 
                         ext-icon-ta := TouchArea {
                             clicked => {
@@ -162,7 +159,7 @@ export component DetailHeader inherits Rectangle {
                         Text {
                             text: "⊞";
                             font-size: 17px;
-                            color: Palette.foreground.transparentize(0.2);
+                            color: Theme.fg.transparentize(0.2);
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -172,9 +169,9 @@ export component DetailHeader inherits Rectangle {
                         width: root.shared-btn-height;
                         height: root.shared-btn-height;
                         border-radius: 8px;
-                        background: root.btn-active-id == "" ? #80808030 : (remove-ta.has-hover ? #dc2626 : #ef4444);
+                        background: root.btn-active-id == "" ? Theme.control-hover : (remove-ta.has-hover ? Theme.danger-hover : Theme.danger);
                         border-width: root.btn-active-id == "" ? 1px : 0px;
-                        border-color: #80808040;
+                        border-color: Theme.control-strong;
 
                         remove-ta := TouchArea {
                             enabled: root.btn-active-id != "";
@@ -189,123 +186,66 @@ export component DetailHeader inherits Rectangle {
                             height: 14px;
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
-                            colorize: root.btn-active-id == "" ? Palette.foreground.transparentize(0.6) : white;
+                            colorize: root.btn-active-id == "" ? Theme.fg.transparentize(0.6) : white;
                         }
                     }
 
-                    if !root.btn-is-appimage && !root.btn-is-installed: Rectangle {
+                    if !root.btn-is-appimage && !root.btn-is-installed: ActionButton {
+                        kind: ActionButtonKind.secondary;
+                        enabled: root.btn-active-id != "";
                         width: root.shared-btn-width;
                         height: root.shared-btn-height;
-                        border-radius: 8px;
-                        background: root.btn-active-id == "" ? #80808030 : (install-ta.has-hover ? #80808035 : #80808020);
-                        border-width: 1px;
-                        border-color: #80808040;
-
-                        install-ta := TouchArea {
-                            enabled: root.btn-active-id != "";
-                            clicked => {
-                                if root.detail-app.eula-url != "" {
-                                    root.eula-requested();
-                                } else {
-                                    root.install-requested(root.btn-active-id);
-                                }
+                        text: root.tr-install;
+                        clicked => {
+                            if root.detail-app.eula-url != "" {
+                                root.eula-requested();
+                            } else {
+                                root.install-requested(root.btn-active-id);
                             }
-                        }
-
-                        Text {
-                            text: root.tr-install;
-                            font-size: 13px;
-                            font-weight: 600;
-                            color: root.btn-active-id == "" ? Palette.foreground.transparentize(0.6) : Palette.foreground.transparentize(0.05);
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
                         }
                     }
 
-                    if root.btn-is-installed: Rectangle {
+                    if root.btn-is-installed: ActionButton {
                         width: root.shared-btn-width;
                         height: root.shared-btn-height;
-                        border-radius: 8px;
-                        background: run-ta.has-hover ? #2563eb : #3b82f6;
-
-                        run-ta := TouchArea {
-                            clicked => {
-                                root.launch-requested(root.btn-active-id);
-                            }
-                        }
-
-                        run-label := Text {
-                            text: root.tr-run;
-                            font-size: 13px;
-                            font-weight: 600;
-                            color: white;
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
+                        text: root.tr-run;
+                        clicked => {
+                            root.launch-requested(root.btn-active-id);
                         }
                     }
                 }
 
-                if root.detail-busy && (root.detail-app.flatpak-id != "" || root.detail-app.appimage-id != ""): Rectangle {
-                    width: cancel-detail-label.preferred-width + 24px;
+                if root.detail-busy && (root.detail-app.flatpak-id != "" || root.detail-app.appimage-id != ""): ActionButton {
+                    kind: ActionButtonKind.danger;
                     height: root.shared-btn-height;
-                    border-radius: 8px;
-                    background: cancel-detail-ta.has-hover ? #dc2626 : #ef4444;
-
-                    cancel-detail-ta := TouchArea {
-                        clicked => {
-                            root.cancel-requested(root.detail-transaction-id);
-                        }
-                    }
-
-                    cancel-detail-label := Text {
-                        text: root.tr-cancel;
-                        font-size: 13px;
-                        font-weight: 600;
-                        color: white;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
+                    text: root.tr-cancel;
+                    clicked => {
+                        root.cancel-requested(root.detail-transaction-id);
                     }
                 }
 
                 if root.detail-busy && root.detail-app.flatpak-id == "" && root.detail-app.appimage-id == "": Text {
                     text: root.tr-working;
                     font-size: 13px;
-                    color: Palette.foreground.transparentize(0.4);
+                    color: Theme.fg.transparentize(0.4);
                     vertical-alignment: center;
                 }
             }
         }
 
-        // Progress bar below the app-info row when busy
         if root.detail-busy: HorizontalLayout {
             padding-left: 30px;
             padding-right: 30px;
             padding-bottom: 12px;
 
-            Rectangle {
-                height: 4px;
-                border-radius: 2px;
-                background: #80808028;
-
-                Rectangle {
-                    x: 0;
-                    y: 0;
-                    width: parent.width * root.detail-progress;
-                    height: parent.height;
-                    border-radius: 2px;
-                    background: #3b82f6;
-                    animate width {
-                        duration: 600ms;
-                        easing: ease-in-out;
-                    }
-                }
+            AppProgressBar {
+                progress: root.detail-progress;
             }
         }
 
-        // Divider
         Rectangle {
             height: 1px;
-            background: #80808025;
+            background: Theme.surface-border;
         }
     }
 }

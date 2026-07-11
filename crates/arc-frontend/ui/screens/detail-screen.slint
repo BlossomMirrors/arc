@@ -1,9 +1,12 @@
-import { Palette, HorizontalBox, ScrollView } from "std-widgets.slint";
+import { HorizontalBox, ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { AppDetailData, ExtensionItem, DescriptionBlock } from "../types.slint";
 import { DetailHeader } from "../components/detail-header.slint";
 import { ScreenshotCarousel } from "../components/screenshot-carousel.slint";
 import { Lightbox } from "../components/lightbox.slint";
 import { ConveyorLoader } from "../components/conveyor-loader.slint";
+import { ActionButton, ActionButtonKind } from "../components/action-button.slint";
+import { ModalDialog } from "../components/modal-dialog.slint";
 
 export component DetailScreen inherits Rectangle {
     in property <AppDetailData> detail-app;
@@ -110,7 +113,7 @@ export component DetailScreen inherits Rectangle {
                     text: root.detail-app.summary;
                     font-size: 13px;
                     wrap: word-wrap;
-                    color: Palette.foreground.transparentize(0.1);
+                    color: Theme.fg.transparentize(0.1);
                 }
             }
 
@@ -141,14 +144,14 @@ export component DetailScreen inherits Rectangle {
                         font-size: 13px;
                         font-weight: 700;
                         wrap: word-wrap;
-                        color: Palette.foreground.transparentize(0.05);
+                        color: Theme.fg.transparentize(0.05);
                     }
                     if !block.is-list-item && !block.is-heading: Text {
                         text: block.text;
                         font-size: 12px;
                         font-weight: block.is-bold ? 700 : 400;
                         wrap: word-wrap;
-                        color: block.is-bold ? Palette.foreground.transparentize(0.1) : Palette.foreground.transparentize(0.25);
+                        color: block.is-bold ? Theme.fg.transparentize(0.1) : Theme.fg.transparentize(0.25);
                     }
                     if block.is-list-item: HorizontalLayout {
                         padding-left: 8px;
@@ -156,7 +159,7 @@ export component DetailScreen inherits Rectangle {
                         Text {
                             text: "•";
                             font-size: 12px;
-                            color: Palette.foreground.transparentize(0.25);
+                            color: Theme.fg.transparentize(0.25);
                             horizontal-stretch: 0;
                             vertical-alignment: top;
                             min-width: 10px;
@@ -167,7 +170,7 @@ export component DetailScreen inherits Rectangle {
                             font-size: 12px;
                             font-weight: block.is-bold ? 700 : 400;
                             wrap: word-wrap;
-                            color: block.is-bold ? Palette.foreground.transparentize(0.1) : Palette.foreground.transparentize(0.25);
+                            color: block.is-bold ? Theme.fg.transparentize(0.1) : Theme.fg.transparentize(0.25);
                             horizontal-stretch: 1;
                         }
                     }
@@ -182,7 +185,7 @@ export component DetailScreen inherits Rectangle {
 
                 Rectangle {
                     height: 1px;
-                    background: #80808025;
+                    background: Theme.surface-border;
                 }
 
                 HorizontalLayout {
@@ -194,7 +197,7 @@ export component DetailScreen inherits Rectangle {
                         text: root.tr-website;
                         font-size: 12px;
                         font-weight: 600;
-                        color: Palette.foreground.transparentize(0.3);
+                        color: Theme.fg.transparentize(0.3);
                         vertical-alignment: center;
                         min-width: 80px;
                     }
@@ -210,7 +213,7 @@ export component DetailScreen inherits Rectangle {
                         Text {
                             text: root.detail-app.homepage-url;
                             font-size: 12px;
-                            color: url-ta.has-hover ? #60a5fa : #3b82f6;
+                            color: url-ta.has-hover ? Theme.accent-light : Theme.accent;
                             overflow: elide;
                             width: parent.width;
                         }
@@ -230,136 +233,92 @@ export component DetailScreen inherits Rectangle {
         }
     }
 
-    if root.extensions-popup-visible: Rectangle {
+    if root.extensions-popup-visible: ModalDialog {
         width: parent.width;
         height: parent.height;
-        background: #00000055;
-
-        TouchArea {
-            clicked => {
-                root.extensions-popup-visible = false;
-            }
+        panel-width: 480px;
+        panel-height: min(root.detail-extensions.length * 60px + 88px, parent.height - 80px);
+        panel-y: max(48px, (parent.height - self.panel-height) / 2);
+        dismissed => {
+            root.extensions-popup-visible = false;
         }
 
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: max(48px, (parent.height - self.height) / 2);
-            width: min(480px, parent.width - 48px);
-            height: min(root.detail-extensions.length * 60px + 88px, parent.height - 80px);
-            border-radius: 12px;
-            background: Palette.background;
-            drop-shadow-blur: 32px;
-            drop-shadow-color: #00000050;
+        HorizontalLayout {
+            spacing: 8px;
 
-            TouchArea { }
+            Text {
+                text: root.tr-extensions;
+                font-size: 16px;
+                font-weight: 700;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
 
-            VerticalLayout {
-                padding: 20px;
-                spacing: 12px;
+            Rectangle {
+                width: 28px;
+                height: 28px;
+                horizontal-stretch: 0;
+                border-radius: 6px;
+                background: close-ext-ta.has-hover ? Theme.surface-border : transparent;
 
-                HorizontalLayout {
-                    spacing: 8px;
-
-                    Text {
-                        text: root.tr-extensions;
-                        font-size: 16px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-
-                    Rectangle {
-                        width: 28px;
-                        height: 28px;
-                        horizontal-stretch: 0;
-                        border-radius: 6px;
-                        background: close-ext-ta.has-hover ? #80808025 : transparent;
-
-                        close-ext-ta := TouchArea {
-                            clicked => {
-                                root.extensions-popup-visible = false;
-                            }
-                        }
-
-                        Text {
-                            text: "✕";
-                            font-size: 11px;
-                            color: Palette.foreground.transparentize(0.4);
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
+                close-ext-ta := TouchArea {
+                    clicked => {
+                        root.extensions-popup-visible = false;
                     }
                 }
 
-                ScrollView {
-                    vertical-stretch: 1;
-                    viewport-width: self.visible-width;
+                Text {
+                    text: "✕";
+                    font-size: 11px;
+                    color: Theme.fg.transparentize(0.4);
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
 
-                    VerticalLayout {
-                        spacing: 4px;
-                        padding-bottom: 4px;
+        ScrollView {
+            vertical-stretch: 1;
+            viewport-width: self.visible-width;
 
-                        for ext in root.detail-extensions: Rectangle {
-                            height: 44px;
+            VerticalLayout {
+                spacing: 4px;
+                padding-bottom: 4px;
 
-                            HorizontalLayout {
-                                padding-left: 8px;
-                                padding-right: 8px;
-                                padding-top: 12px;
-                                padding-bottom: 12px;
-                                spacing: 12px;
+                for ext in root.detail-extensions: Rectangle {
+                    height: 44px;
 
-                                Text {
-                                    text: ext.name;
-                                    font-size: 13px;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                    horizontal-stretch: 1;
-                                }
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        padding-top: 12px;
+                        padding-bottom: 12px;
+                        spacing: 12px;
 
-                                if !ext.installed: Rectangle {
-                                    width: 80px;
-                                    height: 30px;
-                                    border-radius: 8px;
-                                    background: inst-ext-ta.has-hover ? #2563eb : #3b82f6;
+                        Text {
+                            text: ext.name;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
 
-                                    inst-ext-ta := TouchArea {
-                                        clicked => {
-                                            root.install-extension-requested(ext.id);
-                                        }
-                                    }
+                        if !ext.installed: ActionButton {
+                            width: 80px;
+                            height: 30px;
+                            text: root.tr-install;
+                            clicked => {
+                                root.install-extension-requested(ext.id);
+                            }
+                        }
 
-                                    Text {
-                                        text: root.tr-install;
-                                        font-size: 13px;
-                                        font-weight: 600;
-                                        color: white;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                if ext.installed: Rectangle {
-                                    width: 80px;
-                                    height: 30px;
-                                    border-radius: 8px;
-                                    background: rm-ext-ta.has-hover ? #dc2626 : #ef4444;
-
-                                    rm-ext-ta := TouchArea {
-                                        clicked => {
-                                            root.remove-extension-requested(ext.id);
-                                        }
-                                    }
-
-                                    Text {
-                                        text: root.tr-remove;
-                                        font-size: 13px;
-                                        font-weight: 600;
-                                        color: white;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
+                        if ext.installed: ActionButton {
+                            kind: ActionButtonKind.danger;
+                            width: 80px;
+                            height: 30px;
+                            text: root.tr-remove;
+                            clicked => {
+                                root.remove-extension-requested(ext.id);
                             }
                         }
                     }

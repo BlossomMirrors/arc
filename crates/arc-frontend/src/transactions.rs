@@ -257,9 +257,7 @@ pub async fn load_icon_for_pkg(
     if pkg_id.starts_with("pwa:") {
         let appid = pkg_id.trim_start_matches("pwa:").to_string();
         let local = tokio::task::spawn_blocking(move || {
-            let home = std::path::PathBuf::from(
-                std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()),
-            );
+            let home = dirs::home_dir().unwrap_or_else(|| "/root".into());
             let icons_dir = home.join(".local/share/icons/hicolor/256x256/apps");
             for ext in ["png", "svg", "webp"] {
                 let p = icons_dir.join(format!("arc-pwa-{}.{}", appid, ext));
@@ -690,8 +688,10 @@ pub async fn run_signal_listener(
                         let store_for_native = store.clone();
                         let app_weak_for_native = app_weak.clone();
                         tokio::spawn(async move {
-                            let home = std::env::var("HOME")
-                                .unwrap_or_else(|_| "/root".to_string());
+                            let home = dirs::home_dir()
+                                .unwrap_or_else(|| "/root".into())
+                                .to_string_lossy()
+                                .into_owned();
 
                             // Try all three containers to find the .info file.
                             let (info_content, found_container) = {
@@ -802,8 +802,10 @@ pub async fn run_signal_listener(
                         let store_for_update = store.clone();
                         let app_weak_for_update = app_weak.clone();
                         tokio::spawn(async move {
-                            let home = std::env::var("HOME")
-                                .unwrap_or_else(|_| "/root".to_string());
+                            let home = dirs::home_dir()
+                                .unwrap_or_else(|| "/root".into())
+                                .to_string_lossy()
+                                .into_owned();
                             let info_path = std::path::PathBuf::from(home)
                                 .join(".local/share/arc/appimages")
                                 .join(format!("{}.info", stem));

@@ -553,15 +553,18 @@ async fn entries_to_cards(
         .into_iter()
         .map(|e| {
             let installed_flag = installed.contains(&e.id);
-            tokio::task::spawn_blocking(move || {
-                let icon = e.icon_url.as_ref().and_then(|url| {
-                    if url.starts_with("local:") {
-                        icons::load_local_flatpak_icon(&e.id)
-                    } else {
-                        let rt = tokio::runtime::Handle::current();
-                        rt.block_on(icons::load_icon(url))
+            async move {
+                let icon = match e.icon_url.as_deref() {
+                    Some(url) if url.starts_with("local:") => {
+                        let id = e.id.clone();
+                        tokio::task::spawn_blocking(move || icons::load_local_flatpak_icon(&id))
+                            .await
+                            .ok()
+                            .flatten()
                     }
-                });
+                    Some(url) => icons::load_icon(url).await,
+                    None => None,
+                };
                 RawCard {
                     id: e.id,
                     name: e.name,
@@ -569,15 +572,11 @@ async fn entries_to_cards(
                     icon,
                     installed: installed_flag,
                 }
-            })
+            }
         })
         .collect();
 
-    join_all(tasks)
-        .await
-        .into_iter()
-        .filter_map(|r| r.ok())
-        .collect()
+    join_all(tasks).await
 }
 
 fn cards_to_model(cards: Vec<RawCard>) -> slint::ModelRc<crate::AppCardData> {
@@ -1397,9 +1396,7 @@ pub async fn load_package_icons(pkgs: Vec<libarc::Package>) -> Vec<RawPackage> {
                     let appid = pkg.id.strip_prefix("pwa:").unwrap_or(&pkg.id).to_string();
                     let icon_url = pkg.icon_url.clone();
                     let local = tokio::task::spawn_blocking(move || {
-                        let home = std::path::PathBuf::from(
-                            std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()),
-                        );
+                        let home = dirs::home_dir().unwrap_or_else(|| "/root".into());
                         let icons_dir = home.join(".local/share/icons/hicolor/256x256/apps");
                         for ext in ["png", "svg", "webp"] {
                             let p = icons_dir.join(format!("arc-pwa-{}.{}", appid, ext));
@@ -1573,8 +1570,7 @@ pub async fn load_detail(
     let icon = if let Some(pwa) = pwa_pkg {
         // Try local icon written by the PWA provider, fall back to remote URL.
         let appid = pwa.id.strip_prefix("pwa:").unwrap_or(&pwa.id).to_string();
-        let home =
-            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()));
+        let home = dirs::home_dir().unwrap_or_else(|| "/root".into());
         let icons_dir = home.join(".local/share/icons/hicolor/256x256/apps");
         let local = tokio::task::spawn_blocking(move || {
             for ext in ["png", "svg", "webp"] {

@@ -1,33 +1,25 @@
-/*
- * Full-screen lightbox for viewing
- * Use with `if visible: LightBox { initial-index: N; ... }` so
- * each opening creates a fresh instance with the correct starting index.
-*/
+import { Theme } from "../theme.slint";
+import { ScrollArrow } from "scroll-arrow.slint";
+
+// Instantiate with `if visible:` so each opening starts fresh at initial-index.
 export component Lightbox inherits Rectangle {
     in property <[image]> images;
     in property <int> initial-index;
 
     callback closed();
 
-    /*
-     * current-index starts bound to initial-index; first prev/next click breaks
-     * the binding and the property becomes independently writable.
-    */
+    // Bound to initial-index until the first prev/next click breaks the binding.
     private property <int> current-index: root.initial-index;
 
-    background: #000000aa;
+    background: Colors.black.transparentize(0.33);
 
-    // Tap the dark background to dismiss
     TouchArea {
         clicked => {
             root.closed();
         }
     }
 
-    /*
-     * Current screenshot, centred, 90 % of screen, no touch area so taps fall
-     * through to the background and close the lightbox
-    */
+    // No touch area so taps fall through to the backdrop and dismiss.
     Image {
         source: root.images[root.current-index];
         x: parent.width * 0.05;
@@ -37,72 +29,43 @@ export component Lightbox inherits Rectangle {
         image-fit: contain;
     }
 
-    // Prev arrow
-    Rectangle {
+    ScrollArrow {
         x: 16px;
         y: (parent.height - self.height) / 2;
         width: 48px;
         height: 48px;
         border-radius: 24px;
-        background: lb-prev-ta.has-hover ? #000000cc : #00000088;
-        opacity: root.current-index > 0 ? 1.0 : 0.0;
-        animate opacity { duration: 150ms; }
-
-        lb-prev-ta := TouchArea {
-            enabled: root.current-index > 0;
-            clicked => {
-                root.current-index -= 1;
-            }
-        }
-
-        Image {
-            source: @image-url("../../assets/chevron-left.svg");
-            width: 20px;
-            height: 20px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            image-fit: contain;
-            colorize: white;
+        icon-size: 20px;
+        background: Colors.black.transparentize(0.47);
+        points-left: true;
+        active: root.current-index > 0;
+        activated => {
+            root.current-index -= 1;
         }
     }
 
-    // Next arrow
-    Rectangle {
+    ScrollArrow {
         x: parent.width - self.width - 16px;
         y: (parent.height - self.height) / 2;
         width: 48px;
         height: 48px;
         border-radius: 24px;
-        background: lb-next-ta.has-hover ? #000000cc : #00000088;
-        opacity: root.current-index < root.images.length - 1 ? 1.0 : 0.0;
-        animate opacity { duration: 150ms; }
-
-        lb-next-ta := TouchArea {
-            enabled: root.current-index < root.images.length - 1;
-            clicked => {
-                root.current-index += 1;
-            }
-        }
-
-        Image {
-            source: @image-url("../../assets/chevron-right.svg");
-            width: 20px;
-            height: 20px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            image-fit: contain;
-            colorize: white;
+        icon-size: 20px;
+        background: Colors.black.transparentize(0.47);
+        points-left: false;
+        active: root.current-index < root.images.length - 1;
+        activated => {
+            root.current-index += 1;
         }
     }
 
-    // Close button
     Rectangle {
         x: parent.width - self.width - 16px;
         y: 16px;
         width: 40px;
         height: 40px;
         border-radius: 20px;
-        background: lb-close-ta.has-hover ? #000000cc : #00000088;
+        background: lb-close-ta.has-hover ? Theme.scrim-strong : Colors.black.transparentize(0.47);
 
         lb-close-ta := TouchArea {
             clicked => {
@@ -113,7 +76,7 @@ export component Lightbox inherits Rectangle {
         Text {
             text: "×";
             font-size: 22px;
-            color: white;
+            color: Theme.on-image;
             horizontal-alignment: center;
             vertical-alignment: center;
         }

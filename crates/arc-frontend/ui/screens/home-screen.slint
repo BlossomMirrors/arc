@@ -2,14 +2,16 @@ import {
     VerticalBox,
     HorizontalBox,
     ScrollView,
-    Palette,
 } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { ConveyorLoader } from "../components/conveyor-loader.slint";
 import { CategoryCard } from "../components/category-card.slint";
 import { PopularCard } from "../components/popular-card.slint";
 import { AppCloud } from "../components/app-cloud.slint";
 import { Carousel } from "../components/carousel.slint";
+import { HScroller } from "../components/h-scroller.slint";
 import { HeroCarousel } from "../components/hero-carousel.slint";
+import { SectionHeader, Divider } from "../components/section-header.slint";
 import { EditorialCard } from "../components/editorial-card.slint";
 import {
     HomeItem,
@@ -64,7 +66,6 @@ export component HomeScreen inherits Rectangle {
                 // No top padding for the very first item; otherwise separate sections clearly
                 padding-top: i == 0 ? 0px : item.item-type == "app-row" || item.item-type == "app-grid" || item.item-type == "app-cloud" || item.item-type == "categories" || item.item-type == "carousel" ? 28px : 8px;
 
-                // Carousel section (hero + editorial)
                 if item.item-type == "carousel": VerticalLayout {
                     spacing: 12px;
 
@@ -97,12 +98,11 @@ export component HomeScreen inherits Rectangle {
                         }
                     }
 
-                    if item.editorial-items.length > 0: Flickable {
+                    if item.editorial-items.length > 0: HScroller {
                         width: parent.width;
                         height: 154px;
-                        viewport-width: item.editorial-items.length * 232px;
-                        viewport-height: 154px;
-                        interactive: true;
+                        content-width: item.editorial-items.length * 232px;
+                        step: 232px;
 
                         for eitem[j] in item.editorial-items: EditorialCard {
                             x: j * 232px;
@@ -126,7 +126,6 @@ export component HomeScreen inherits Rectangle {
                     }
                 }
 
-                // Text elements
                 if item.item-type == "h1": Text {
                     text: item.text;
                     font-size: 22px;
@@ -151,31 +150,17 @@ export component HomeScreen inherits Rectangle {
                 if item.item-type == "p": Text {
                     text: item.text;
                     font-size: 13px;
-                    color: Palette.foreground.transparentize(0.4);
+                    color: Theme.fg.transparentize(0.4);
                     wrap: word-wrap;
                 }
 
-                if item.item-type == "br" && i > 0: Rectangle {
-                    height: 1px;
-                    background: Palette.foreground.transparentize(0.88);
-                }
+                if item.item-type == "br" && i > 0: Divider { }
 
-                // Horizontal app row
                 if item.item-type == "app-row" && item.apps.length > 0: VerticalLayout {
                     spacing: 10px;
 
-                    if item.title != "": VerticalLayout {
-                        spacing: 10px;
-                        Text {
-                            text: item.title;
-                            font-size: 17px;
-                            font-weight: 700;
-                        }
-
-                        Rectangle {
-                            height: 1px;
-                            background: Palette.foreground.transparentize(0.88);
-                        }
+                    if item.title != "": SectionHeader {
+                        text: item.title;
                     }
 
                     Carousel {
@@ -187,22 +172,11 @@ export component HomeScreen inherits Rectangle {
                     }
                 }
 
-                // App grid
                 if item.item-type == "app-grid" && item.apps.length > 0: VerticalLayout {
                     spacing: 10px;
 
-                    if item.title != "": VerticalLayout {
-                        spacing: 10px;
-                        Text {
-                            text: item.title;
-                            font-size: 17px;
-                            font-weight: 700;
-                        }
-
-                        Rectangle {
-                            height: 1px;
-                            background: Palette.foreground.transparentize(0.88);
-                        }
+                    if item.title != "": SectionHeader {
+                        text: item.title;
                     }
 
                     Rectangle {
@@ -223,28 +197,16 @@ export component HomeScreen inherits Rectangle {
                     }
                 }
 
-                // Custom editorial app collection — floating icon cloud
                 if item.item-type == "app-cloud" && item.apps.length > 0: AppCloud {
                     items: item.apps;
                     item-clicked(id) => { root.detail-requested(id); }
                 }
 
-                // Links section (Mac App Store "More Information" style)
                 if item.item-type == "links" && item.link-items.length > 0: VerticalLayout {
                     spacing: 0px;
 
-                    if item.link-title != "": VerticalLayout {
-                        spacing: 10px;
-                        Text {
-                            text: item.link-title;
-                            font-size: 17px;
-                            font-weight: 700;
-                        }
-
-                        Rectangle {
-                            height: 1px;
-                            background: Palette.foreground.transparentize(0.88);
-                        }
+                    if item.link-title != "": SectionHeader {
+                        text: item.link-title;
                     }
 
                     for link[j] in item.link-items: VerticalLayout {
@@ -252,7 +214,7 @@ export component HomeScreen inherits Rectangle {
 
                         Rectangle {
                             height: 44px;
-                            background: link-ta.has-hover ? Palette.alternate-background : transparent;
+                            background: link-ta.has-hover ? Theme.alternate-bg : transparent;
 
                             link-ta := TouchArea {
                                 mouse-cursor: pointer;
@@ -277,7 +239,7 @@ export component HomeScreen inherits Rectangle {
                                 Text {
                                     text: link.text;
                                     font-size: 14px;
-                                    color: link.href != "" ? Palette.foreground.transparentize(0.15) : Palette.foreground;
+                                    color: link.href != "" ? Theme.fg.transparentize(0.15) : Theme.fg;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
                                 }
@@ -285,35 +247,21 @@ export component HomeScreen inherits Rectangle {
                                 if link.href != "": Text {
                                     text: "↗";
                                     font-size: 11px;
-                                    color: Palette.foreground.transparentize(0.4);
+                                    color: Theme.fg.transparentize(0.4);
                                     vertical-alignment: center;
                                 }
                             }
                         }
 
-                        Rectangle {
-                            height: 1px;
-                            background: Palette.foreground.transparentize(0.88);
-                        }
+                        Divider { }
                     }
                 }
 
-                // Categories
                 if item.item-type == "categories" && root.categories.length > 0: VerticalLayout {
                     spacing: 10px;
 
-                    VerticalLayout {
-                        spacing: 10px;
-                        Text {
-                            text: root.tr-categories;
-                            font-size: 17px;
-                            font-weight: 700;
-                        }
-
-                        Rectangle {
-                            height: 1px;
-                            background: Palette.foreground.transparentize(0.88);
-                        }
+                    SectionHeader {
+                        text: root.tr-categories;
                     }
 
                     HorizontalLayout {

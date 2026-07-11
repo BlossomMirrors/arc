@@ -1,10 +1,10 @@
-import { Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 
 export component Badge inherits Rectangle {
     in property <image> icon;
     in property <bool> has-icon: false;
     in property <string> label;
-    in property <color> accent: Palette.color-scheme == ColorScheme.dark ? #22c55e : #15803d;
+    in property <color> accent: Theme.success;
 
     height: 18px;
     border-radius: self.height / 2;

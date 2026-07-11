@@ -1,26 +1,19 @@
+use ini::Ini;
 use libarc::{connect, ArcDaemonProxy, Package, Provider, Settings};
 use slint::Model;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub fn parse_flatpakref(content: &str) -> (String, String, String) {
-    let mut name = String::new();
-    let mut title = String::new();
-    let mut url = String::new();
-    for line in content.lines() {
-        let line = line.trim();
-        if let Some(v) = line.strip_prefix("Name=") {
-            name = v.to_string();
-        } else if let Some(v) = line.strip_prefix("Title=") {
-            title = v.to_string();
-        } else if let Some(v) = line.strip_prefix("Url=") {
-            url = v.to_string();
-        }
-    }
+    let ini = Ini::load_from_str(content).unwrap_or_default();
+    let section = ini.section(Some("Flatpak Ref"));
+    let get = |key: &str| section.and_then(|s| s.get(key)).unwrap_or("").to_string();
+    let name = get("Name");
+    let mut title = get("Title");
     if title.is_empty() {
         title = name.clone();
     }
-    (title, name, url)
+    (title, name, get("Url"))
 }
 
 pub fn is_pkg_file(path: &str) -> bool {
@@ -46,17 +39,10 @@ pub fn is_flatpakref(path: &str) -> bool {
 }
 
 pub fn parse_flatpakrepo(content: &str) -> (String, String) {
-    let mut title = String::new();
-    let mut url = String::new();
-    for line in content.lines() {
-        let line = line.trim();
-        if let Some(v) = line.strip_prefix("Title=") {
-            title = v.trim().to_string();
-        } else if let Some(v) = line.strip_prefix("Url=") {
-            url = v.trim().to_string();
-        }
-    }
-    (title, url)
+    let ini = Ini::load_from_str(content).unwrap_or_default();
+    let section = ini.section(Some("Flatpak Repo"));
+    let get = |key: &str| section.and_then(|s| s.get(key)).unwrap_or("").to_string();
+    (get("Title"), get("Url"))
 }
 
 pub fn is_appimage(path: &str) -> bool {

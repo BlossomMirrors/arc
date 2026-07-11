@@ -1,0 +1,51 @@
+import { Theme } from "../theme.slint";
+
+export enum ActionButtonKind { primary, secondary, danger }
+
+export component ActionButton inherits Rectangle {
+    in property <string> text;
+    in property <ActionButtonKind> kind: ActionButtonKind.primary;
+    in property <bool> enabled: true;
+    in property <length> font-size: 13px;
+
+    callback clicked();
+
+    height: 36px;
+    width: label.preferred-width + 28px;
+    border-radius: 8px;
+
+    property <bool> is-secondary: root.kind == ActionButtonKind.secondary;
+    property <color> base: root.kind == ActionButtonKind.danger
+        ? Theme.danger
+        : root.is-secondary ? Theme.control : Theme.accent;
+    property <color> hover: root.kind == ActionButtonKind.danger
+        ? Theme.danger-hover
+        : root.is-secondary ? Theme.control-hover : Theme.accent-hover;
+
+    background: !root.enabled
+        ? Theme.control
+        : (ta.has-hover ? root.hover : root.base);
+    border-width: root.is-secondary ? 1px : 0px;
+    border-color: Theme.control-border;
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    label := Text {
+        text: root.text;
+        font-size: root.font-size;
+        font-weight: 600;
+        color: !root.enabled
+            ? Theme.fg.transparentize(0.6)
+            : (root.is-secondary ? Theme.fg.transparentize(0.1) : Theme.on-image);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+}
