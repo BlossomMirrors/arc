@@ -452,9 +452,24 @@ impl FlatpakProvider {
     pub async fn get_app_info(&self, app_id: &str) -> Result<Option<Package>, ArcError> {
         let app_id = app_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<Option<Package>, ArcError> {
-            Ok(AppStreamDb::get_static()
-                .find_by_id(&app_id)
-                .map(|e| entry_to_flatpak_package(e, false)))
+            let cancel = libflatpak::gio::Cancellable::NONE;
+            // same lookup list_installed() uses; installed_ref() with no
+            // explicit arch/branch doesn't reliably match despite being
+            // documented as optional
+            let installed = all_installations().iter().any(|inst| {
+                inst.list_installed_refs_by_kind(libflatpak::RefKind::App, cancel)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|r| r.name().map(|n| n.to_string()).as_deref() == Some(app_id.as_str()))
+            });
+            // fast path: an installed app's own exported metainfo is a
+            // single small local file, independent of the shared
+            // AppStreamDb OnceLock's full-catalog parse — try it first so
+            // clicking into something you already have installed doesn't
+            // queue behind that bulk warm-up
+            let entry = crate::appstream_db::load_local_metainfo(&app_id)
+                .or_else(|| AppStreamDb::get_static().find_by_id(&app_id));
+            Ok(entry.map(|e| entry_to_flatpak_package(e, installed)))
         })
         .await
         .map_err(|e| ArcError::ProviderError(e.to_string()))?

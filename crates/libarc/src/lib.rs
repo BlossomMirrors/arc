@@ -16,9 +16,9 @@ use zbus::{proxy, Connection};
 // this macro generates a strongly typed rust client for our daemon's dbus api,
 // method calls become normal async functions and signals become streams
 #[proxy(
-    interface = "dev.arc.ArcDaemon1",
-    default_service = "dev.arc.ArcDaemon1",
-    default_path = "/dev/arc/ArcDaemon1"
+    interface = "org.blossomos.arc.daemon",
+    default_service = "org.blossomos.arc.daemon",
+    default_path = "/org/blossomos/arc/daemon"
 )]
 pub trait ArcDaemon {
     async fn install_package(&self, package_id: &str) -> zbus::Result<String>;

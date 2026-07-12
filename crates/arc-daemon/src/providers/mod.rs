@@ -1,15 +1,49 @@
 use async_trait::async_trait;
 use libarc::{ArcError, Package};
+use std::future::Future;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc::UnboundedSender, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
 
 use libflatpak::gio::prelude::CancellableExt;
 
 // 15 minutes
 // newly installed packages show up without a manual refresh
 const PACKAGE_CACHE_TTL: Duration = Duration::from_secs(900);
+
+// a single slow or unreachable provider (e.g. Lutris waiting on lutris.net)
+// must not block search results from every other provider
+const PROVIDER_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
+// flatpak's fetch depends on parsing the (potentially large, multi-remote)
+// appstream catalog via the shared AppStreamDb::get_static() OnceLock, a
+// one-time cost per daemon lifetime that's slow but always terminates on its
+// own; it gets more headroom than network-bound providers that could hang
+// indefinitely instead of just being slow
+const FLATPAK_FETCH_TIMEOUT: Duration = Duration::from_secs(180);
+
+// a timeout is presumed transient (e.g. a slow network) and worth retrying
+// soon; a real error from the provider is left at the normal cache TTL so a
+// persistently broken provider isn't hammered every few seconds
+async fn bounded<F>(name: &str, timeout: Duration, fetch: F) -> (Vec<Package>, bool)
+where
+    F: Future<Output = Result<Vec<Package>, ArcError>>,
+{
+    match tokio::time::timeout(timeout, fetch).await {
+        Ok(Ok(packages)) => (packages, true),
+        Ok(Err(e)) => {
+            warn!("{name} provider fetch failed: {e}");
+            (Vec::new(), true)
+        }
+        Err(_) => {
+            warn!("{name} provider fetch timed out after {timeout:?}");
+            (Vec::new(), false)
+        }
+    }
+}
 
 #[async_trait]
 pub trait PackageProvider: Send + Sync {
@@ -30,6 +64,49 @@ pub mod flatpak;
 pub mod lutris;
 pub mod pwa;
 
+// a JSON snapshot of the last successful package_cache, so a fresh daemon
+// process can serve (slightly stale) search results immediately on startup
+// instead of making every first search wait out the full provider fetch
+fn disk_cache_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".cache/arc/package_cache.json"))
+}
+
+fn load_disk_cache() -> Option<Vec<Package>> {
+    let path = disk_cache_path()?;
+    let bytes = std::fs::read(&path).ok()?;
+    match serde_json::from_slice::<Vec<Package>>(&bytes) {
+        Ok(packages) => {
+            info!("Loaded {} packages from on-disk cache", packages.len());
+            Some(packages)
+        }
+        Err(e) => {
+            warn!("Failed to parse on-disk package cache, ignoring: {e}");
+            None
+        }
+    }
+}
+
+fn save_disk_cache(packages: &[Package]) {
+    let Some(path) = disk_cache_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            warn!("Failed to create cache dir {}: {e}", parent.display());
+            return;
+        }
+    }
+    match serde_json::to_vec(packages) {
+        Ok(bytes) => {
+            if let Err(e) = std::fs::write(&path, bytes) {
+                warn!("Failed to write on-disk package cache: {e}");
+            }
+        }
+        Err(e) => warn!("Failed to serialize package cache: {e}"),
+    }
+}
+
 pub struct MultiProvider {
     pub native: Arc<distrobox::DistroboxProvider>,
     pub flatpak: Arc<flatpak::FlatpakProvider>,
@@ -48,13 +125,20 @@ impl MultiProvider {
         appimage: appimage::AppImageProvider,
         pwa: pwa::PwaProvider,
     ) -> Self {
+        // pre-seed the cache from disk (if any) so the very first search
+        // after startup doesn't have to wait for a live provider fetch;
+        // treated as fresh (full TTL) since the background warm-up spawned
+        // by the caller unconditionally runs a real fetch shortly after and
+        // will overwrite this with live data regardless
+        let seeded = load_disk_cache().map(|packages| (Instant::now(), packages));
+
         Self {
             native: Arc::new(native),
             flatpak: Arc::new(flatpak),
             lutris: Arc::new(lutris),
             appimage: Arc::new(appimage),
             pwa: Arc::new(pwa),
-            package_cache: RwLock::new(None),
+            package_cache: RwLock::new(seeded),
             fetch_lock: Mutex::new(()),
         }
     }
@@ -85,20 +169,35 @@ impl MultiProvider {
 
     async fn fetch_and_store(&self) -> Result<Vec<Package>, ArcError> {
         let (flatpak, native, lutris, appimage, pwa) = tokio::join!(
-            self.flatpak.fetch_all(),
-            self.native.fetch_all(),
-            self.lutris.fetch_all(),
-            self.appimage.fetch_all(),
-            self.pwa.search(""),
+            bounded("flatpak", FLATPAK_FETCH_TIMEOUT, self.flatpak.fetch_all()),
+            bounded("native", PROVIDER_FETCH_TIMEOUT, self.native.fetch_all()),
+            bounded("lutris", PROVIDER_FETCH_TIMEOUT, self.lutris.fetch_all()),
+            bounded("appimage", PROVIDER_FETCH_TIMEOUT, self.appimage.fetch_all()),
+            bounded("pwa", PROVIDER_FETCH_TIMEOUT, self.pwa.search("")),
         );
-        let mut packages = flatpak.unwrap_or_default();
-        packages.extend(native.unwrap_or_default());
-        packages.extend(lutris.unwrap_or_default());
-        packages.extend(appimage.unwrap_or_default());
-        packages.extend(pwa.unwrap_or_default());
+        let complete = flatpak.1 && native.1 && lutris.1 && appimage.1 && pwa.1;
+        let mut packages = flatpak.0;
+        packages.extend(native.0);
+        packages.extend(lutris.0);
+        packages.extend(appimage.0);
+        packages.extend(pwa.0);
         {
             let mut cache = self.package_cache.write().await;
-            *cache = Some((Instant::now(), packages.clone()));
+            // if a provider timed out, keep this result around only briefly so
+            // the next search retries instead of being stuck on partial data
+            // for the full cache TTL
+            let retry_grace = Duration::from_secs(15);
+            let cached_at = if complete {
+                Instant::now()
+            } else {
+                Instant::now() - PACKAGE_CACHE_TTL.saturating_sub(retry_grace)
+            };
+            *cache = Some((cached_at, packages.clone()));
+        }
+        if complete {
+            // persist off the async path; this is plain blocking file I/O
+            let to_persist = packages.clone();
+            tokio::task::spawn_blocking(move || save_disk_cache(&to_persist));
         }
         Ok(packages)
     }

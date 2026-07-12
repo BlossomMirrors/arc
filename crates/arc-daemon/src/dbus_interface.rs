@@ -31,9 +31,14 @@ fn provider_from_id(package_id: &str) -> Provider {
 }
 
 use tr::tr;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
+
+// AppStreamDb's cold parse can take well over a minute; fail fast instead of
+// making a UI click hang for that whole window — the caller can just retry
+// once the background warm-up (kicked off at daemon startup) finishes.
+const APP_INFO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 pub struct ArcDaemonInterface {
     pub provider: Arc<MultiProvider>,
@@ -41,7 +46,7 @@ pub struct ArcDaemonInterface {
     pub download_semaphore: Arc<Semaphore>,
 }
 
-#[interface(name = "dev.arc.ArcDaemon1")]
+#[interface(name = "org.blossomos.arc.daemon")]
 impl ArcDaemonInterface {
     async fn install_package(
         &self,
@@ -584,13 +589,23 @@ impl ArcDaemonInterface {
 
     async fn get_app_info(&self, package_id: String) -> String {
         info!("GetAppInfo: {}", package_id);
-        match self.provider.get_app_info(&package_id).await {
-            Ok(Some(package)) => {
+        // AppStreamDb::get_static() is a lazy OnceLock: on a cold daemon this
+        // call can otherwise block for as long as the one-time parse takes
+        // (over a minute), making the UI look permanently stuck instead of
+        // just slow. Bound it so a click during that window fails fast
+        // rather than hanging indefinitely.
+        match tokio::time::timeout(APP_INFO_TIMEOUT, self.provider.get_app_info(&package_id)).await
+        {
+            Ok(Ok(Some(package))) => {
                 serde_json::to_string(&Some(package)).unwrap_or_else(|_| "null".to_string())
             }
-            Ok(None) => "null".to_string(),
-            Err(e) => {
+            Ok(Ok(None)) => "null".to_string(),
+            Ok(Err(e)) => {
                 error!("GetAppInfo failed: {}", e);
+                "null".to_string()
+            }
+            Err(_) => {
+                warn!("GetAppInfo timed out for {package_id} (appstream still warming up)");
                 "null".to_string()
             }
         }
@@ -601,15 +616,32 @@ impl ArcDaemonInterface {
         if package_id.starts_with("pwa:") {
             return self.provider.pwa.get_metadata_json(&package_id).await;
         }
-        tokio::task::spawn_blocking(move || {
+
+        // fast path first: an installed app's own exported metainfo file is
+        // a single small local XML read, independent of the shared
+        // AppStreamDb OnceLock, so it answers instantly even while that
+        // OnceLock is still mid-parse. This covers the common case (looking
+        // at something already installed) without waiting on the bulk scan.
+        let fast_id = package_id.clone();
+        if let Ok(Some(json)) = tokio::task::spawn_blocking(move || {
+            crate::appstream_db::load_local_metainfo(&fast_id).and_then(|e| serde_json::to_string(&e).ok())
+        })
+        .await
+        {
+            return json;
+        }
+
+        let fetch = tokio::task::spawn_blocking(move || {
             let db = crate::appstream_db::AppStreamDb::get_static();
             db.find_by_id(&package_id)
                 .or_else(|| db.load_from_exported_metainfo(&package_id))
                 .and_then(|e| serde_json::to_string(&e).ok())
                 .unwrap_or_else(|| "null".to_string())
-        })
-        .await
-        .unwrap_or_else(|_| "null".to_string())
+        });
+        match tokio::time::timeout(APP_INFO_TIMEOUT, fetch).await {
+            Ok(Ok(json)) => json,
+            _ => "null".to_string(),
+        }
     }
 
     async fn list_installed(&self) -> String {

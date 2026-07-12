@@ -211,26 +211,7 @@ impl AppStreamDb {
     }
 
     pub fn load_from_exported_metainfo_with_locales(&self, id: &str, locales: &[String]) -> Option<AppStreamEntry> {
-        let mut dirs = vec![
-            PathBuf::from("/var/lib/flatpak/exports/share/metainfo"),
-            PathBuf::from("/var/lib/flatpak/exports/share/appdata"),
-        ];
-        if let Some(home) = std::env::var_os("HOME") {
-            let h = PathBuf::from(home);
-            dirs.push(h.join(".local/share/flatpak/exports/share/metainfo"));
-            dirs.push(h.join(".local/share/flatpak/exports/share/appdata"));
-        }
-        for dir in &dirs {
-            for suffix in &[".metainfo.xml", ".appdata.xml"] {
-                let path = dir.join(format!("{}{}", id, suffix));
-                if !path.exists() { continue; }
-                let Ok(bytes) = std::fs::read(&path) else { continue; };
-                if let Some(entry) = parse_metainfo_bytes(id, &bytes, locales) {
-                    return Some(entry);
-                }
-            }
-        }
-        None
+        scan_exported_metainfo(id, locales)
     }
 
     pub fn get_apps_by_category(&self, category: &str) -> Vec<AppStreamEntry> {
@@ -245,6 +226,43 @@ impl AppStreamDb {
             .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications))
             .collect()
     }
+}
+
+// Standalone (not AppStreamDb::get_static()-gated) lookup for a single
+// installed app's own exported metainfo file. Reads one small local XML
+// file, so it stays fast even while the shared FLATPAK_DB OnceLock is still
+// doing its one-time full-catalog parse — letting GetAppInfo/GetAppMetadata
+// answer instantly for whatever the user is actually looking at (almost
+// always something installed) instead of queuing behind the bulk warm-up.
+pub fn load_local_metainfo(id: &str) -> Option<AppStreamEntry> {
+    scan_exported_metainfo(id, &detect_locales())
+}
+
+fn scan_exported_metainfo(id: &str, locales: &[String]) -> Option<AppStreamEntry> {
+    let mut dirs = vec![
+        PathBuf::from("/var/lib/flatpak/exports/share/metainfo"),
+        PathBuf::from("/var/lib/flatpak/exports/share/appdata"),
+    ];
+    if let Some(home) = std::env::var_os("HOME") {
+        let h = PathBuf::from(home);
+        dirs.push(h.join(".local/share/flatpak/exports/share/metainfo"));
+        dirs.push(h.join(".local/share/flatpak/exports/share/appdata"));
+    }
+    for dir in &dirs {
+        for suffix in &[".metainfo.xml", ".appdata.xml"] {
+            let path = dir.join(format!("{}{}", id, suffix));
+            if !path.exists() {
+                continue;
+            }
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            if let Some(entry) = parse_metainfo_bytes(id, &bytes, locales) {
+                return Some(entry);
+            }
+        }
+    }
+    None
 }
 
 // Parse a single metainfo/appdata XML file and build an AppStreamEntry.
