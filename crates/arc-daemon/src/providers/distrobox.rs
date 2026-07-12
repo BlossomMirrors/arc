@@ -1,4 +1,4 @@
-use super::PackageProvider;
+use super::{PackageProvider, Progress};
 use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider};
 use std::path::{Path, PathBuf};
@@ -659,7 +659,7 @@ async fn run_cancellable(
 /// Spawns a task that drip-feeds progress from `from` to `ceiling` every
 /// `interval_secs` seconds. Abort the returned handle when the phase ends.
 fn slow_tick(
-    tx: UnboundedSender<u8>,
+    tx: UnboundedSender<Progress>,
     from: u8,
     ceiling: u8,
     interval_secs: u64,
@@ -669,7 +669,7 @@ fn slow_tick(
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(interval_secs)).await;
             p = p.saturating_add(1).min(ceiling);
-            if tx.send(p).is_err() {
+            if tx.send(Progress::pct(p)).is_err() {
                 break;
             }
         }
@@ -680,7 +680,7 @@ impl DistroboxProvider {
     pub async fn install_with_progress(
         &self,
         package_id: &str,
-        progress_tx: UnboundedSender<u8>,
+        progress_tx: UnboundedSender<Progress>,
         cancel_token: CancellationToken,
     ) -> Result<(), ArcError> {
         let path = PathBuf::from(package_id);
@@ -690,14 +690,14 @@ impl DistroboxProvider {
         let guessed_name = guess_pkg_name(&path, pkg_type);
 
         // Phase 1: ensure container (fast if it exists, slow if it needs creating)
-        let _ = progress_tx.send(5);
+        let _ = progress_tx.send(Progress::pct(5));
         let ticker = slow_tick(progress_tx.clone(), 5, 18, 2);
         let result = self.ensure_container(&container, &image, &cancel_token).await;
         ticker.abort();
         result?;
 
         // Phase 2: one-time compat setup
-        let _ = progress_tx.send(20);
+        let _ = progress_tx.send(Progress::pct(20));
         if container == CONTAINER_DEB {
             let ticker = slow_tick(progress_tx.clone(), 20, 55, 3);
             let result = self.ensure_debian_compat(&cancel_token).await;
@@ -711,7 +711,7 @@ impl DistroboxProvider {
         }
 
         // Phase 3: install + export inside the container
-        let _ = progress_tx.send(60);
+        let _ = progress_tx.send(Progress::pct(60));
         let ticker = slow_tick(progress_tx.clone(), 60, 92, 2);
         let result = self
             .install_and_export(&container, &path, pkg_type, &guessed_name, &cancel_token)
@@ -719,7 +719,7 @@ impl DistroboxProvider {
         ticker.abort();
         result?;
 
-        let _ = progress_tx.send(95);
+        let _ = progress_tx.send(Progress::pct(95));
         Ok(())
     }
 

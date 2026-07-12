@@ -4,6 +4,7 @@ members = [
     "crates/arc-daemon",
     "crates/arcli",
     "crates/arc-frontend",
+    "crates/arc-frontend-qml",
     "crates/arc-dev",
 ]
 default-members = ["crates/arc-dev"]

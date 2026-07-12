@@ -107,6 +107,19 @@ fn save_disk_cache(packages: &[Package]) {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct Progress {
+    pub percent: u8,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+}
+
+impl Progress {
+    pub fn pct(percent: u8) -> Self {
+        Self { percent, ..Default::default() }
+    }
+}
+
 pub struct MultiProvider {
     pub native: Arc<distrobox::DistroboxProvider>,
     pub flatpak: Arc<flatpak::FlatpakProvider>,
@@ -218,18 +231,18 @@ impl MultiProvider {
     pub async fn install_with_progress(
         &self,
         package_id: &str,
-        progress_tx: UnboundedSender<u8>,
+        progress_tx: UnboundedSender<Progress>,
         cancel_token: CancellationToken,
     ) -> Result<(), ArcError> {
         if Self::is_pwa_id(package_id) {
-            let _ = progress_tx.send(10);
+            let _ = progress_tx.send(Progress::pct(10));
             let result = self.pwa.install(package_id).await;
-            let _ = progress_tx.send(100);
+            let _ = progress_tx.send(Progress::pct(100));
             result
         } else if Self::is_appimage_id(package_id) {
-            let _ = progress_tx.send(10);
+            let _ = progress_tx.send(Progress::pct(10));
             let result = self.appimage.install(package_id).await;
-            let _ = progress_tx.send(100);
+            let _ = progress_tx.send(Progress::pct(100));
             result
         } else if Self::is_flatpak_id(package_id) {
             let gio_cancel = libflatpak::gio::Cancellable::new();
@@ -256,7 +269,7 @@ impl MultiProvider {
     pub async fn install_flatpakref_with_progress(
         &self,
         url: &str,
-        progress_tx: UnboundedSender<u8>,
+        progress_tx: UnboundedSender<Progress>,
         cancel_token: CancellationToken,
     ) -> Result<(), ArcError> {
         let gio_cancel = libflatpak::gio::Cancellable::new();
@@ -276,7 +289,7 @@ impl MultiProvider {
     pub async fn install_bundle_with_progress(
         &self,
         path: &str,
-        progress_tx: UnboundedSender<u8>,
+        progress_tx: UnboundedSender<Progress>,
         cancel_token: CancellationToken,
     ) -> Result<(), ArcError> {
         let gio_cancel = libflatpak::gio::Cancellable::new();
@@ -296,13 +309,13 @@ impl MultiProvider {
     pub async fn update_with_progress(
         &self,
         package_id: &str,
-        progress_tx: UnboundedSender<u8>,
+        progress_tx: UnboundedSender<Progress>,
         cancel_token: CancellationToken,
     ) -> Result<(), ArcError> {
         if Self::is_appimage_id(package_id) {
-            let _ = progress_tx.send(10);
+            let _ = progress_tx.send(Progress::pct(10));
             let result = self.appimage.update(package_id).await;
-            let _ = progress_tx.send(100);
+            let _ = progress_tx.send(Progress::pct(100));
             result
         } else if Self::is_flatpak_id(package_id) {
             let gio_cancel = libflatpak::gio::Cancellable::new();

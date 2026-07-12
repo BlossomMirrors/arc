@@ -35,6 +35,7 @@ pub trait ArcDaemon {
     async fn get_transaction(&self, transaction_id: &str) -> zbus::Result<String>;
     async fn list_transactions(&self) -> zbus::Result<String>;
     async fn refresh_cache(&self) -> zbus::Result<bool>;
+    async fn set_foreground_package(&self, package_id: &str) -> zbus::Result<()>;
     async fn run_package(&self, package_id: &str) -> zbus::Result<String>;
     async fn cancel_transaction(&self, transaction_id: &str) -> zbus::Result<bool>;
     async fn get_home_apps(&self, popular_count: u32, recent_count: u32) -> zbus::Result<String>;
@@ -52,6 +53,14 @@ pub trait ArcDaemon {
 
     #[zbus(signal)]
     fn transaction_progress(&self, transaction_id: String, progress: u8) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    fn transaction_stats(
+        &self,
+        transaction_id: String,
+        bytes_done: u64,
+        bytes_total: u64,
+    ) -> zbus::Result<()>;
 
     #[zbus(signal)]
     fn transaction_finished(

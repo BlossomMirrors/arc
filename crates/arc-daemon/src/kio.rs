@@ -16,8 +16,18 @@ pub struct KioJob {
 }
 
 impl KioJob {
-    pub fn start(title: &str, package_id: &str, cancel_token: Option<CancellationToken>) -> Self {
+    // hidden skips the job view entirely so no notification appears while
+    // the sender side keeps working as usual
+    pub fn start(
+        title: &str,
+        package_id: &str,
+        cancel_token: Option<CancellationToken>,
+        hidden: bool,
+    ) -> Self {
         let (tx, rx) = mpsc::channel();
+        if hidden {
+            return Self { tx };
+        }
         let title = title.to_string();
         let package_id = package_id.to_string();
         std::thread::spawn(move || run(title, package_id, cancel_token, rx));

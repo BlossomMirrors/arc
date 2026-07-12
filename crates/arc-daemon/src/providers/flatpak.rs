@@ -1,4 +1,4 @@
-use super::PackageProvider;
+use super::{PackageProvider, Progress};
 use crate::appstream_db::{entry_to_flatpak_package, AppStreamDb};
 use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider, RemoteInfo};
@@ -135,7 +135,7 @@ fn run_install_transaction(
     inst: &libflatpak::Installation,
     remote_name: &str,
     full_ref: &str,
-    progress_tx: Option<&UnboundedSender<u8>>,
+    progress_tx: Option<&UnboundedSender<Progress>>,
     cancel: Option<&libflatpak::gio::Cancellable>,
 ) -> Result<(), ArcError> {
     let tx = libflatpak::Transaction::for_installation(inst, cancel)
@@ -145,11 +145,16 @@ fn run_install_transaction(
         .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
     if let Some(sender) = progress_tx {
         let sender = sender.clone();
-        tx.connect_new_operation(move |_, _op, progress| {
-            progress.set_update_frequency(1500);
+        tx.connect_new_operation(move |_, op, progress| {
+            progress.set_update_frequency(500);
+            let total = op.download_size();
             let sender = sender.clone();
             progress.connect_changed(move |p| {
-                let _ = sender.send(p.progress().clamp(0, 100) as u8);
+                let _ = sender.send(Progress {
+                    percent: p.progress().clamp(0, 100) as u8,
+                    bytes_done: p.bytes_transferred(),
+                    bytes_total: total,
+                });
             });
         });
     }
@@ -478,7 +483,7 @@ impl FlatpakProvider {
     pub async fn install_with_progress(
         &self,
         app_id: &str,
-        progress_tx: UnboundedSender<u8>,
+        progress_tx: UnboundedSender<Progress>,
         gio_cancel: libflatpak::gio::Cancellable,
     ) -> Result<(), ArcError> {
         let app_id = app_id.to_string();
@@ -613,7 +618,7 @@ impl FlatpakProvider {
     pub async fn install_flatpakref_with_progress(
         &self,
         url: &str,
-        progress_tx: UnboundedSender<u8>,
+        progress_tx: UnboundedSender<Progress>,
         gio_cancel: libflatpak::gio::Cancellable,
     ) -> Result<(), ArcError> {
         let url = url.to_string();
@@ -695,11 +700,16 @@ impl FlatpakProvider {
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
 
             let progress_tx_for_tx = progress_tx.clone();
-            tx.connect_new_operation(move |_, _op, progress| {
-                progress.set_update_frequency(1500);
+            tx.connect_new_operation(move |_, op, progress| {
+                progress.set_update_frequency(500);
+                let total = op.download_size();
                 let sender = progress_tx_for_tx.clone();
                 progress.connect_changed(move |p| {
-                    let _ = sender.send(p.progress().clamp(0, 100) as u8);
+                    let _ = sender.send(Progress {
+                        percent: p.progress().clamp(0, 100) as u8,
+                        bytes_done: p.bytes_transferred(),
+                        bytes_total: total,
+                    });
                 });
             });
 
@@ -713,7 +723,7 @@ impl FlatpakProvider {
     pub async fn update_with_progress(
         &self,
         app_id: &str,
-        progress_tx: UnboundedSender<u8>,
+        progress_tx: UnboundedSender<Progress>,
         gio_cancel: libflatpak::gio::Cancellable,
     ) -> Result<(), ArcError> {
         let app_id = app_id.to_string();
@@ -728,12 +738,12 @@ impl FlatpakProvider {
             // Runtime refs live in the system installation and need flatpak-system-helper
             // for privilege elevation. Delegate to subprocess so polkit handles it.
             if full_ref.starts_with("runtime/") {
-                let _ = progress_tx.send(10);
+                let _ = progress_tx.send(Progress::pct(10));
                 let status = std::process::Command::new("flatpak")
                     .args(["update", "-y", "--noninteractive", &full_ref])
                     .status()
                     .map_err(|e| ArcError::TransactionFailed(e.to_string()))?;
-                let _ = progress_tx.send(100);
+                let _ = progress_tx.send(Progress::pct(100));
                 return if status.success() {
                     Ok(())
                 } else {
@@ -749,11 +759,16 @@ impl FlatpakProvider {
             tx.set_no_interaction(true);
             tx.add_update(&full_ref, &[], None)
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
-            tx.connect_new_operation(move |_, _op, progress| {
-                progress.set_update_frequency(1500);
+            tx.connect_new_operation(move |_, op, progress| {
+                progress.set_update_frequency(500);
+                let total = op.download_size();
                 let sender = progress_tx.clone();
                 progress.connect_changed(move |p| {
-                    let _ = sender.send(p.progress().clamp(0, 100) as u8);
+                    let _ = sender.send(Progress {
+                        percent: p.progress().clamp(0, 100) as u8,
+                        bytes_done: p.bytes_transferred(),
+                        bytes_total: total,
+                    });
                 });
             });
             tx.run(cancel)
@@ -882,7 +897,7 @@ impl FlatpakProvider {
     pub async fn install_bundle_with_progress(
         &self,
         path: &str,
-        progress_tx: UnboundedSender<u8>,
+        progress_tx: UnboundedSender<Progress>,
         gio_cancel: libflatpak::gio::Cancellable,
     ) -> Result<(), ArcError> {
         let path = path.to_string();
@@ -897,11 +912,16 @@ impl FlatpakProvider {
             tx.add_install_bundle(&file, None::<&glib::Bytes>)
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
             let progress_tx_for_tx = progress_tx.clone();
-            tx.connect_new_operation(move |_, _op, progress| {
-                progress.set_update_frequency(1500);
+            tx.connect_new_operation(move |_, op, progress| {
+                progress.set_update_frequency(500);
+                let total = op.download_size();
                 let sender = progress_tx_for_tx.clone();
                 progress.connect_changed(move |p| {
-                    let _ = sender.send(p.progress().clamp(0, 100) as u8);
+                    let _ = sender.send(Progress {
+                        percent: p.progress().clamp(0, 100) as u8,
+                        bytes_done: p.bytes_transferred(),
+                        bytes_total: total,
+                    });
                 });
             });
             tx.run(cancel)

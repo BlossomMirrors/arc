@@ -44,6 +44,15 @@ pub struct ArcDaemonInterface {
     pub provider: Arc<MultiProvider>,
     pub transaction_manager: Arc<TransactionManager>,
     pub download_semaphore: Arc<Semaphore>,
+    // package whose detail page the frontend currently shows so its
+    // transactions skip the job notification
+    pub foreground_package: Arc<tokio::sync::RwLock<String>>,
+}
+
+impl ArcDaemonInterface {
+    async fn kio_hidden(&self, package_id: &str) -> bool {
+        *self.foreground_package.read().await == package_id
+    }
 }
 
 #[interface(name = "org.blossomos.arc.daemon")]
@@ -75,6 +84,7 @@ impl ArcDaemonInterface {
 
         // spawn so we return the tx id to the caller right away and do the
         // actual install in the background, progress comes via signals
+        let kio_hidden = self.kio_hidden(&package_id).await;
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
@@ -82,6 +92,7 @@ impl ArcDaemonInterface {
                 &tr!("Installing application"),
                 &package_id,
                 Some(cancel_token.clone()),
+                kio_hidden,
             );
 
             // Wait for a download slot; allow cancellation while queued
@@ -97,7 +108,7 @@ impl ArcDaemonInterface {
                 }
             };
 
-            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
+            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
 
             // Forward GLib progress signals to DBus as they arrive
             let emitter_fwd = emitter.clone();
@@ -113,11 +124,13 @@ impl ArcDaemonInterface {
                         }
                         result = progress_rx.recv() => {
                             match result {
-                                Some(pct) => {
-                                    tm_fwd.update_progress(tx_id, pct).await;
-                                    kio_fwd.progress(pct);
+                                Some(p) => {
+                                    tm_fwd.update_progress(tx_id, p.percent).await;
+                                    kio_fwd.progress(p.percent);
                                     let _ =
-                                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), p.percent).await;
+                                    let _ =
+                                        Self::transaction_stats(&emitter_fwd, tx_id.to_string(), p.bytes_done, p.bytes_total).await;
                                 }
                                 None => break, // Channel closed
                             }
@@ -196,12 +209,14 @@ impl ArcDaemonInterface {
         let semaphore = self.download_semaphore.clone();
         let emitter = emitter.to_owned();
 
+        let kio_hidden = self.kio_hidden(&url).await;
         tokio::spawn(async move {
             let _ = Self::transaction_started(&emitter, tx_id.to_string(), url.clone()).await;
             let kio = crate::kio::KioJob::start(
                 &tr!("Installing application"),
                 &url,
                 Some(cancel_token.clone()),
+                kio_hidden,
             );
 
             let _permit = tokio::select! {
@@ -216,7 +231,7 @@ impl ArcDaemonInterface {
                 }
             };
 
-            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
+            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
 
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
@@ -231,11 +246,13 @@ impl ArcDaemonInterface {
                         }
                         result = progress_rx.recv() => {
                             match result {
-                                Some(pct) => {
-                                    tm_fwd.update_progress(tx_id, pct).await;
-                                    kio_fwd.progress(pct);
+                                Some(p) => {
+                                    tm_fwd.update_progress(tx_id, p.percent).await;
+                                    kio_fwd.progress(p.percent);
                                     let _ =
-                                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), p.percent).await;
+                                    let _ =
+                                        Self::transaction_stats(&emitter_fwd, tx_id.to_string(), p.bytes_done, p.bytes_total).await;
                                 }
                                 None => break, // Channel closed
                             }
@@ -313,10 +330,12 @@ impl ArcDaemonInterface {
         let tm = self.transaction_manager.clone();
         let emitter = emitter.to_owned();
 
+        let kio_hidden = self.kio_hidden(&package_id).await;
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
-            let kio = crate::kio::KioJob::start(&tr!("Removing application"), &package_id, None);
+            let kio =
+                crate::kio::KioJob::start(&tr!("Removing application"), &package_id, None, kio_hidden);
 
             tm.update_progress(tx_id, 10).await;
             kio.progress(10);
@@ -376,10 +395,12 @@ impl ArcDaemonInterface {
         let tm = self.transaction_manager.clone();
         let emitter = emitter.to_owned();
 
+        let kio_hidden = self.kio_hidden(&package_id).await;
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
-            let kio = crate::kio::KioJob::start(&tr!("Removing application"), &package_id, None);
+            let kio =
+                crate::kio::KioJob::start(&tr!("Removing application"), &package_id, None, kio_hidden);
             tm.update_progress(tx_id, 10).await;
             kio.progress(10);
             let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 10).await;
@@ -454,6 +475,7 @@ impl ArcDaemonInterface {
         let semaphore = self.download_semaphore.clone();
         let emitter = emitter.to_owned();
 
+        let kio_hidden = self.kio_hidden(&package_id).await;
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
@@ -461,6 +483,7 @@ impl ArcDaemonInterface {
                 &tr!("Updating application"),
                 &package_id,
                 Some(cancel_token.clone()),
+                kio_hidden,
             );
 
             let _permit = tokio::select! {
@@ -475,7 +498,7 @@ impl ArcDaemonInterface {
                 }
             };
 
-            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
+            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
 
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
@@ -490,11 +513,13 @@ impl ArcDaemonInterface {
                         }
                         result = progress_rx.recv() => {
                             match result {
-                                Some(pct) => {
-                                    tm_fwd.update_progress(tx_id, pct).await;
-                                    kio_fwd.progress(pct);
+                                Some(p) => {
+                                    tm_fwd.update_progress(tx_id, p.percent).await;
+                                    kio_fwd.progress(p.percent);
                                     let _ =
-                                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                                        Self::transaction_progress(&emitter_fwd, tx_id.to_string(), p.percent).await;
+                                    let _ =
+                                        Self::transaction_stats(&emitter_fwd, tx_id.to_string(), p.bytes_done, p.bytes_total).await;
                                 }
                                 None => break, // Channel closed
                             }
@@ -550,6 +575,12 @@ impl ArcDaemonInterface {
         });
 
         tx_id.to_string()
+    }
+
+    // the frontend reports which app its detail page currently shows so
+    // transactions for it run without a job notification
+    async fn set_foreground_package(&self, package_id: String) {
+        *self.foreground_package.write().await = package_id;
     }
 
     async fn refresh_cache(&self) -> bool {
@@ -798,12 +829,14 @@ impl ArcDaemonInterface {
         let semaphore = self.download_semaphore.clone();
         let emitter = emitter.to_owned();
 
+        let kio_hidden = self.kio_hidden(&path).await;
         tokio::spawn(async move {
             let _ = Self::transaction_started(&emitter, tx_id.to_string(), path.clone()).await;
             let kio = crate::kio::KioJob::start(
                 &tr!("Installing application"),
                 &path,
                 Some(cancel_token.clone()),
+                kio_hidden,
             );
 
             let _permit = tokio::select! {
@@ -818,7 +851,7 @@ impl ArcDaemonInterface {
                 }
             };
 
-            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
+            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
             let cancel_token_fwd = cancel_token.clone();
@@ -828,10 +861,11 @@ impl ArcDaemonInterface {
                     tokio::select! {
                         _ = cancel_token_fwd.cancelled() => break,
                         result = progress_rx.recv() => match result {
-                            Some(pct) => {
-                                tm_fwd.update_progress(tx_id, pct).await;
-                                kio_fwd.progress(pct);
-                                let _ = Self::transaction_progress(&emitter_fwd, tx_id.to_string(), pct).await;
+                            Some(p) => {
+                                tm_fwd.update_progress(tx_id, p.percent).await;
+                                kio_fwd.progress(p.percent);
+                                let _ = Self::transaction_progress(&emitter_fwd, tx_id.to_string(), p.percent).await;
+                                let _ = Self::transaction_stats(&emitter_fwd, tx_id.to_string(), p.bytes_done, p.bytes_total).await;
                             }
                             None => break,
                         }
@@ -881,6 +915,14 @@ impl ArcDaemonInterface {
         signal_emitter: &SignalEmitter<'_>,
         transaction_id: String,
         progress: u8,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn transaction_stats(
+        signal_emitter: &SignalEmitter<'_>,
+        transaction_id: String,
+        bytes_done: u64,
+        bytes_total: u64,
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]

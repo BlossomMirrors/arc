@@ -14,7 +14,7 @@ fn main() {
     let mut build = Command::new(env!("CARGO"));
     build
         .current_dir(&root)
-        .args(["build", "-p", "arc-daemon", "-p", "arc-frontend"]);
+        .args(["build", "-p", "arc-daemon", "-p", "arc-frontend-qml"]);
     if profile == "release" {
         build.arg("--release");
     }
@@ -34,7 +34,7 @@ fn main() {
 
     std::thread::sleep(Duration::from_millis(800));
 
-    let frontend_status = Command::new(bin_dir.join("arc-frontend")).status();
+    let frontend_status = Command::new(bin_dir.join("arc-frontend-qml")).status();
 
     let _ = daemon.kill();
     let _ = daemon.wait();
@@ -42,7 +42,7 @@ fn main() {
     match frontend_status {
         Ok(s) => std::process::exit(s.code().unwrap_or(0)),
         Err(e) => {
-            eprintln!("failed to start arc-frontend: {e}");
+            eprintln!("failed to start arc-frontend-qml: {e}");
             std::process::exit(1);
         }
     }

@@ -161,6 +161,7 @@ impl Daemon {
             provider: self.provider,
             transaction_manager: self.transaction_manager.clone(),
             download_semaphore: Arc::new(Semaphore::new(concurrent)),
+            foreground_package: Arc::new(tokio::sync::RwLock::new(String::new())),
         };
 
         // the bus name was already claimed in claim_bus_name(), before the
