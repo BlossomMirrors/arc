@@ -8,7 +8,9 @@ use axum::{
 use serde::Deserialize;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::appstream_db::{parse_locale_candidates, score_entry, AppStreamDb, AppStreamEntry};
+use crate::appstream_db::{
+    find_local_flatpak_icon_bytes, parse_locale_candidates, score_entry, AppStreamDb, AppStreamEntry,
+};
 
 pub fn router() -> Router {
     let cors = CorsLayer::new()
@@ -169,9 +171,10 @@ async fn app_metadata(Path(id): Path<String>, Query(p): Query<AppParams>) -> Res
 }
 
 async fn app_icon(Path(id): Path<String>) -> Response {
+    let id_for_lookup = id.clone();
     let icon_url = tokio::task::spawn_blocking(move || {
         AppStreamDb::get_static()
-            .find_by_id(&id)
+            .find_by_id(&id_for_lookup)
             .and_then(|e| e.icon_url)
     })
     .await
@@ -180,6 +183,18 @@ async fn app_icon(Path(id): Path<String>) -> Response {
     let Some(url) = icon_url else {
         return StatusCode::NOT_FOUND.into_response();
     };
+
+    // Apps without a remote icon URL get a "local:" placeholder (see component_to_entry);
+    // resolve those from the on-disk AppStream/flatpak export caches instead of the network.
+    if url.starts_with("local:") {
+        let bytes = tokio::task::spawn_blocking(move || find_local_flatpak_icon_bytes(&id))
+            .await
+            .unwrap_or(None);
+        return match bytes {
+            Some((bytes, content_type)) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
+            None => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
 
     if !url.starts_with("https://") && !url.starts_with("http://") {
         return StatusCode::NOT_FOUND.into_response();
