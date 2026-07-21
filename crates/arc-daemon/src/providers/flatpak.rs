@@ -1114,6 +1114,12 @@ impl PackageProvider for FlatpakProvider {
             let full_ref = installed
                 .format_ref()
                 .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?;
+
+            // Best-effort: kill any running instances before uninstalling.
+            let _ = std::process::Command::new("flatpak")
+                .args(["kill", &package_id])
+                .status();
+
             let tx = libflatpak::Transaction::for_installation(&inst, cancel)
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
             tx.set_no_interaction(true);

@@ -772,6 +772,81 @@ fn load_flatpak_root(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Local icon resolution, for entries whose icon_url is a "local:" placeholder
+// (Icon::Local / Icon::Cached / Icon::Stock in component_to_entry) rather than
+// a fetchable http(s) URL. Looks the actual file up on disk so the HTTP icon
+// endpoint has bytes to serve instead of 404ing.
+// ---------------------------------------------------------------------------
+
+const ICON_SIZES: [&str; 7] = ["128x128", "256x256", "96x96", "64x64", "48x48", "32x32", "scalable"];
+const ICON_EXTS: [&str; 3] = ["png", "svg", "svgz"];
+
+fn icon_content_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+        "svg" | "svgz" => "image/svg+xml",
+        _ => "image/png",
+    }
+}
+
+// Cached AppStream icon dirs are populated for every app in the catalog,
+// installed or not, so this covers apps the user is only browsing.
+fn find_appstream_icon(id: &str) -> Option<PathBuf> {
+    let mut roots = vec![PathBuf::from("/var/lib/flatpak/appstream")];
+    if let Some(home) = std::env::var_os("HOME") {
+        roots.push(PathBuf::from(home).join(".local/share/flatpak/appstream"));
+    }
+    for root in &roots {
+        let Ok(remotes) = std::fs::read_dir(root) else { continue };
+        for remote_dir in remotes.flatten() {
+            let Ok(arches) = std::fs::read_dir(remote_dir.path()) else { continue };
+            for arch in arches.flatten() {
+                let icons_base = arch.path().join("active").join("icons");
+                if !icons_base.exists() {
+                    continue;
+                }
+                // Flatpak stores icons in both <icons>/<size>/ and <icons>/flatpak/<size>/.
+                for search_root in [icons_base.clone(), icons_base.join("flatpak")] {
+                    for size in ICON_SIZES {
+                        for ext in ICON_EXTS {
+                            let p = search_root.join(size).join(format!("{}.{}", id, ext));
+                            if p.exists() {
+                                return Some(p);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+// The exported hicolor theme only has icons for apps that are actually installed.
+fn find_exported_icon(id: &str) -> Option<PathBuf> {
+    let mut bases = vec![PathBuf::from("/var/lib/flatpak/exports/share/icons/hicolor")];
+    if let Some(home) = std::env::var_os("HOME") {
+        bases.push(PathBuf::from(home).join(".local/share/flatpak/exports/share/icons/hicolor"));
+    }
+    for base in &bases {
+        for size in ICON_SIZES {
+            for ext in ICON_EXTS {
+                let p = base.join(size).join("apps").join(format!("{}.{}", id, ext));
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn find_local_flatpak_icon_bytes(id: &str) -> Option<(Vec<u8>, String)> {
+    let path = find_appstream_icon(id).or_else(|| find_exported_icon(id))?;
+    let bytes = std::fs::read(&path).ok()?;
+    Some((bytes, icon_content_type(&path).to_string()))
+}
+
 pub fn entry_to_flatpak_package(entry: AppStreamEntry, installed: bool) -> Package {
     let name = if entry.name.is_empty() {
         entry.id.clone()
