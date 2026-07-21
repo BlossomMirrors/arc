@@ -6,11 +6,27 @@ use axum::{
     Router,
 };
 use serde::Deserialize;
+use std::sync::OnceLock;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::appstream_db::{
     find_local_flatpak_icon_bytes, parse_locale_candidates, score_entry, AppStreamDb, AppStreamEntry,
 };
+use crate::providers::lutris::LutrisProvider;
+use crate::providers::pwa::PwaProvider;
+use crate::providers::PackageProvider;
+use libarc::score_package;
+
+static PWA_PROVIDER: OnceLock<PwaProvider> = OnceLock::new();
+static LUTRIS_PROVIDER: OnceLock<LutrisProvider> = OnceLock::new();
+
+fn pwa_provider() -> &'static PwaProvider {
+    PWA_PROVIDER.get_or_init(PwaProvider::new)
+}
+
+fn lutris_provider() -> &'static LutrisProvider {
+    LUTRIS_PROVIDER.get_or_init(LutrisProvider::new)
+}
 
 pub fn router() -> Router {
     let cors = CorsLayer::new()
@@ -106,20 +122,40 @@ struct ImageParams {
 
 async fn search(Query(p): Query<SearchParams>) -> impl IntoResponse {
     let locales = p.lang.locales();
-    let mut results: Vec<(AppStreamEntry, u32)> = tokio::task::spawn_blocking(move || {
-        AppStreamDb::get_static()
-            .search_apps_with_locales(&p.q, &locales)
-            .into_iter()
-            .filter_map(|e| score_entry(&e, &p.q.to_lowercase()).map(|s| (e, s)))
-            .collect()
-    })
-    .await
-    .unwrap_or_default();
-    results.sort_by(|a, b| b.1.cmp(&a.1));
-    let response: Vec<serde_json::Value> = results
+    let q_lower = p.q.to_lowercase();
+
+    let flatpak_results: Vec<(AppStreamEntry, u32)> = {
+        let q = p.q.clone();
+        let q_lower = q_lower.clone();
+        tokio::task::spawn_blocking(move || {
+            AppStreamDb::get_static()
+                .search_apps_with_locales(&q, &locales)
+                .into_iter()
+                .filter_map(|e| score_entry(&e, &q_lower).map(|s| (e, s)))
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
+    };
+
+    let (pwa_packages, lutris_packages) =
+        tokio::join!(pwa_provider().search(&p.q), lutris_provider().search(&p.q));
+
+    let mut merged: Vec<(serde_json::Value, u32)> = flatpak_results
         .into_iter()
-        .map(|(entry, score)| {
-            let mut v = serde_json::to_value(&entry).unwrap_or_default();
+        .map(|(entry, score)| (serde_json::to_value(&entry).unwrap_or_default(), score))
+        .collect();
+
+    for pkg in pwa_packages.unwrap_or_default().into_iter().chain(lutris_packages.unwrap_or_default()) {
+        if let Some(score) = score_package(&pkg, &q_lower) {
+            merged.push((serde_json::to_value(&pkg).unwrap_or_default(), score));
+        }
+    }
+
+    merged.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
+    let response: Vec<serde_json::Value> = merged
+        .into_iter()
+        .map(|(mut v, score)| {
             if let Some(obj) = v.as_object_mut() {
                 obj.insert("score".into(), score.into());
             }
@@ -155,6 +191,19 @@ async fn category(Path(name): Path<String>, Query(p): Query<CategoryParams>) -> 
 }
 
 async fn app_metadata(Path(id): Path<String>, Query(p): Query<AppParams>) -> Response {
+    if id.starts_with("pwa:") {
+        return match pwa_provider().get_app_info(&id).await {
+            Ok(Some(pkg)) => Json(pkg).into_response(),
+            _ => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
+    if id.starts_with("lutris:") {
+        return match lutris_provider().get_app_info(&id).await {
+            Ok(Some(pkg)) => Json(pkg).into_response(),
+            _ => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
+
     let locales = p.lang.locales();
     let result = tokio::task::spawn_blocking(move || {
         let db = AppStreamDb::get_static();
@@ -171,6 +220,25 @@ async fn app_metadata(Path(id): Path<String>, Query(p): Query<AppParams>) -> Res
 }
 
 async fn app_icon(Path(id): Path<String>) -> Response {
+    if id.starts_with("pwa:") {
+        let icon_url = pwa_provider().get_app_info(&id).await.ok().flatten().and_then(|pkg| pkg.icon_url);
+        return match icon_url {
+            Some(url) if url.starts_with("https://") || url.starts_with("http://") => {
+                fetch_and_forward(&url).await
+            }
+            _ => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
+    if id.starts_with("lutris:") {
+        let icon_url = lutris_provider().get_app_info(&id).await.ok().flatten().and_then(|pkg| pkg.icon_url);
+        return match icon_url {
+            Some(url) if url.starts_with("https://") || url.starts_with("http://") => {
+                fetch_and_forward(&url).await
+            }
+            _ => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
+
     let id_for_lookup = id.clone();
     let icon_url = tokio::task::spawn_blocking(move || {
         AppStreamDb::get_static()
