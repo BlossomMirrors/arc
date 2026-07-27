@@ -94,6 +94,8 @@ struct ForgePwa {
     widevine: bool,
     #[serde(default)]
     tray: bool,
+    #[serde(default)]
+    url_filter: String,
 }
 
 pub struct PwaProvider {
@@ -224,6 +226,9 @@ impl PwaProvider {
         }
         if pwa.tray {
             exec.push_str(" --tray");
+        }
+        if !pwa.url_filter.is_empty() {
+            exec.push_str(&format!(" --url-filter={}", pwa.url_filter));
         }
         exec
     }
