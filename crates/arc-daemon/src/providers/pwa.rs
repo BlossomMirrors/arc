@@ -7,6 +7,42 @@ use tracing::{info, warn};
 
 const FORGE_PWAS_BASE: &str = "https://forge.blossomos.org/api/pwas";
 
+/// Escape a value for storage as a string-type Desktop Entry value. This is
+/// the ini-level escaping the spec requires for every string value (applied
+/// when the file is parsed, before the Exec key's own argument quoting is
+/// interpreted) and is independent of `quote_exec_arg`'s escaping.
+fn escape_desktop_value(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace('\t', "\\t")
+        .replace('\r', "\\r")
+}
+
+/// Quote a value for use as an Exec argument in a .desktop file, per the
+/// Desktop Entry Specification's reserved character rules. If the value
+/// contains a reserved character it is wrapped in double quotes, with
+/// backslash, double quote, backtick and dollar sign escaped.
+fn quote_exec_arg(value: &str) -> String {
+    const RESERVED: &[char] = &[
+        ' ', '\t', '\n', '"', '\'', '\\', '>', '<', '~', '|', '&', ';', '$', '*', '?', '#', '(',
+        ')', '`',
+    ];
+    if !value.contains(RESERVED) {
+        return value.to_string();
+    }
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for c in value.chars() {
+        if matches!(c, '"' | '`' | '$' | '\\') {
+            quoted.push('\\');
+        }
+        quoted.push(c);
+    }
+    quoted.push('"');
+    quoted
+}
+
 const ICON_SIZE: u32 = 240;
 const CORNER_RADIUS: u32 = 45; // 45/240 ≈ 18.75%
 
@@ -199,27 +235,41 @@ impl PwaProvider {
         (icon_name, icon_path_str)
     }
 
+    /// Return a file:// URI for the locally cached (rounded) icon, if one has
+    /// already been downloaded for this appid.
+    fn local_icon_uri(&self, appid: &str) -> Option<String> {
+        for ext in ["png", "svg", "webp"] {
+            let path = self.icons_dir.join(format!("arc-pwa-{}.{}", appid, ext));
+            if path.exists() {
+                return Some(format!("file://{}", path.to_string_lossy()));
+            }
+        }
+        None
+    }
+
     fn build_exec(&self, pwa: &ForgePwa) -> String {
         let mut exec = format!(
             "blossomos-webapps -- --url={url} --name={name} --appid={appid}",
-            url = pwa.url,
-            name = pwa.name,
-            appid = pwa.appid,
+            url = quote_exec_arg(&pwa.url),
+            name = quote_exec_arg(&pwa.name),
+            appid = quote_exec_arg(&pwa.appid),
         );
         if !pwa.color.is_empty() && pwa.color != "#000000" {
-            exec.push_str(&format!(" --color={}", pwa.color));
+            exec.push_str(&format!(" --color={}", quote_exec_arg(&pwa.color)));
         }
-        if let Some(ref icon_url) = pwa.icon_url {
-            exec.push_str(&format!(" --icon={}", icon_url));
+        if let Some(icon_uri) = self.local_icon_uri(&pwa.appid) {
+            exec.push_str(&format!(" --icon={}", quote_exec_arg(&icon_uri)));
+        } else if let Some(ref icon_url) = pwa.icon_url {
+            exec.push_str(&format!(" --icon={}", quote_exec_arg(icon_url)));
         }
         if !pwa.css.is_empty() {
-            exec.push_str(&format!(" --css={}", pwa.css));
+            exec.push_str(&format!(" --css={}", quote_exec_arg(&pwa.css)));
         }
         if !pwa.js.is_empty() {
-            exec.push_str(&format!(" --js={}", pwa.js));
+            exec.push_str(&format!(" --js={}", quote_exec_arg(&pwa.js)));
         }
         if !pwa.useragent.is_empty() {
-            exec.push_str(&format!(" --useragent=\"{}\"", pwa.useragent));
+            exec.push_str(&format!(" --useragent={}", quote_exec_arg(&pwa.useragent)));
         }
         if pwa.widevine {
             exec.push_str(" --widevine");
@@ -228,7 +278,7 @@ impl PwaProvider {
             exec.push_str(" --tray");
         }
         if !pwa.url_filter.is_empty() {
-            exec.push_str(&format!(" --url-filter={}", pwa.url_filter));
+            exec.push_str(&format!(" --url-filter={}", quote_exec_arg(&pwa.url_filter)));
         }
         exec
     }
@@ -240,11 +290,11 @@ impl PwaProvider {
         let exec = self.build_exec(pwa);
         let content = format!(
             "[Desktop Entry]\nVersion=1.0\nType=Application\nName={name}\nComment={comment}\nExec={exec}\nIcon={icon}\nCategories=Network;WebApplication;\nStartupNotify=true\nStartupWMClass={appid}",
-            name = pwa.name,
-            comment = comment,
-            exec = exec,
-            icon = icon_name,
-            appid = pwa.appid
+            name = escape_desktop_value(&pwa.name),
+            comment = escape_desktop_value(&comment),
+            exec = escape_desktop_value(&exec),
+            icon = escape_desktop_value(icon_name),
+            appid = escape_desktop_value(&pwa.appid)
         );
 
         let path = self.desktop_path(&pwa.appid);
@@ -412,23 +462,22 @@ impl PackageProvider for PwaProvider {
 
     async fn run(&self, package_id: &str) -> Result<(), ArcError> {
         let appid = Self::strip_prefix(package_id);
-        let pwas = self.fetch_pwas().await;
-
-        let Some(pwa) = pwas.iter().find(|p| p.appid == appid) else {
+        if !self.is_installed(appid) {
             return Err(ArcError::PackageNotFound(appid.to_string()));
-        };
+        }
 
-        let exec = self.build_exec(pwa);
-
-        info!("Running PWA {}: {}", appid, exec);
-        let mut parts = exec.split_whitespace();
-        let bin = parts
-            .next()
-            .unwrap_or("/usr/lib/opt/blossomos-webapps/blossomos-webapps");
-        tokio::process::Command::new(bin)
-            .args(parts)
+        // Launch through the generated .desktop file instead of re-splitting
+        // build_exec()'s output ourselves: that string is quoted per the
+        // Desktop Entry Exec rules, and a plain split_whitespace() mangles
+        // any argument containing a space (e.g. --name="Microsoft Teams"
+        // becomes two broken arguments). gtk-launch defers to glib's own
+        // Exec parser, which already has to get this right.
+        let desktop_id = format!("arc-pwa-{}", appid);
+        info!("Launching PWA {} via {}", appid, desktop_id);
+        tokio::process::Command::new("gtk-launch")
+            .arg(&desktop_id)
             .spawn()
-            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+            .map_err(|e| ArcError::ProviderError(format!("gtk-launch: {}", e)))?;
 
         Ok(())
     }
