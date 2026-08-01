@@ -1,5 +1,4 @@
 use crate::dbus_interface::ArcDaemonInterface;
-use crate::download_queue::DownloadQueue;
 use crate::providers::appimage::AppImageProvider;
 use crate::providers::distrobox::DistroboxProvider;
 use crate::providers::flatpak::FlatpakProvider;
@@ -9,8 +8,8 @@ use crate::providers::{MultiProvider, PackageProvider};
 use crate::transaction_manager::TransactionManager;
 use anyhow::Result;
 use futures_util::StreamExt;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 use tokio::process::Command;
 use tracing::{info, warn};
 use zbus::connection::Builder as ConnectionBuilder;
@@ -113,26 +112,23 @@ impl Daemon {
         let au_provider = Arc::clone(&provider);
         tokio::spawn(async move {
             loop {
-                let auto_updates = libarc::Settings::load().auto_updates;
-                info!("Checking for updates...");
-                match au_provider.refresh_updates().await {
-                    Err(e) => warn!("Update check failed: {}", e),
-                    Ok(updates) if updates.is_empty() => {
-                        info!("No updates available");
-                    }
-                    Ok(updates) if !auto_updates => {
-                        info!("{} update(s) available", updates.len());
-                    }
-                    Ok(updates) => {
-                        info!("Auto-update: updating {} package(s)", updates.len());
-                        for pkg in updates {
-                            info!("Auto-update: updating {}", pkg.id);
-                            if let Err(e) = au_provider.update(&pkg.id).await {
-                                warn!("Auto-update: failed to update {}: {}", pkg.id, e);
-                            }
+                if libarc::Settings::load().auto_updates {
+                    info!("Auto-update: checking for updates...");
+                    match au_provider.list_updates().await {
+                        Err(e) => warn!("Auto-update: list_updates failed: {}", e),
+                        Ok(updates) if updates.is_empty() => {
+                            info!("Auto-update: nothing to update");
                         }
-                        info!("Auto-update: done");
-                        au_provider.invalidate_package_cache().await;
+                        Ok(updates) => {
+                            info!("Auto-update: updating {} package(s)", updates.len());
+                            for pkg in updates {
+                                info!("Auto-update: updating {}", pkg.id);
+                                if let Err(e) = au_provider.update(&pkg.id).await {
+                                    warn!("Auto-update: failed to update {}: {}", pkg.id, e);
+                                }
+                            }
+                            info!("Auto-update: done");
+                        }
                     }
                 }
                 tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
@@ -160,12 +156,12 @@ impl Daemon {
         }
 
         let settings = libarc::Settings::load();
+        let concurrent = (settings.concurrent_downloads as usize).max(1);
         let interface = ArcDaemonInterface {
             provider: self.provider,
             transaction_manager: self.transaction_manager.clone(),
-            download_queue: Arc::new(DownloadQueue::new(settings.concurrent_downloads as usize)),
+            download_semaphore: Arc::new(Semaphore::new(concurrent)),
             foreground_package: Arc::new(tokio::sync::RwLock::new(String::new())),
-            notifications_suppressed: Arc::new(AtomicBool::new(false)),
         };
 
         // the bus name was already claimed in claim_bus_name(), before the

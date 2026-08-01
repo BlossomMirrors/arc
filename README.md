@@ -49,11 +49,8 @@ Long-running background process that registers itself on the session D-Bus as
   are routed to the appropriate provider based on the package ID format.
 - **TransactionManager** -- Tracks in-flight and completed operations as
   `Transaction` objects keyed by UUID. The daemon emits D-Bus signals
-  (`TransactionStarted`, `TransactionActive`, `TransactionProgress`,
-  `TransactionFinished`, `UpdatesAvailable`) so clients can follow progress
-  asynchronously. Transactions queue up behind a download limit
-  (`concurrent_downloads`, live-adjustable via `SetConcurrentDownloads`);
-  `TransactionStarted` means queued, `TransactionActive` means it got a slot.
+  (`TransactionStarted`, `TransactionProgress`, `TransactionFinished`,
+  `UpdatesAvailable`) so clients can follow progress asynchronously.
 
 ### arc-cli
 

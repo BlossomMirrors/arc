@@ -1,7 +1,6 @@
 mod appstream_db;
 mod daemon;
 mod dbus_interface;
-mod download_queue;
 mod forge_cache;
 mod http_api;
 mod kio;

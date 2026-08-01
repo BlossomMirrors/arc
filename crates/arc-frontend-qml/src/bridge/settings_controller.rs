@@ -88,13 +88,6 @@ impl qobject::SettingsController {
         if let Err(e) = s.save() {
             tracing::warn!("failed to save settings: {e}");
         }
-
-        let limit = s.concurrent_downloads;
-        runtime::spawn(async move {
-            if let Some(proxy) = runtime::proxy().await {
-                let _ = proxy.set_concurrent_downloads(limit).await;
-            }
-        });
     }
 
     pub fn force_update(self: Pin<&mut Self>) {

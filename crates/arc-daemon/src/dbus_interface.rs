@@ -1,14 +1,10 @@
-use crate::download_queue::DownloadQueue;
 use crate::providers::flatpak::FlatpakProvider;
 use crate::providers::MultiProvider;
 use crate::providers::PackageProvider;
 use crate::transaction_manager::TransactionManager;
 use libarc::{Provider, TransactionType};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::OwnedSemaphorePermit;
-use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
+use tokio::sync::Semaphore;
 
 // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no slashes or semicolons).
 // distrobox ids look like "distrobox:container:name:type" or are file paths for installs.
@@ -47,50 +43,16 @@ const APP_INFO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15)
 pub struct ArcDaemonInterface {
     pub provider: Arc<MultiProvider>,
     pub transaction_manager: Arc<TransactionManager>,
-    pub download_queue: Arc<DownloadQueue>,
+    pub download_semaphore: Arc<Semaphore>,
     // package whose detail page the frontend currently shows so its
     // transactions skip the job notification
     pub foreground_package: Arc<tokio::sync::RwLock<String>>,
-    pub notifications_suppressed: Arc<AtomicBool>,
 }
 
 impl ArcDaemonInterface {
     async fn kio_hidden(&self, package_id: &str) -> bool {
         *self.foreground_package.read().await == package_id
     }
-}
-
-async fn wait_for_slot(
-    queue: &DownloadQueue,
-    tm: &TransactionManager,
-    emitter: &SignalEmitter<'_>,
-    cancel_token: &CancellationToken,
-    tx_id: Uuid,
-    package_id: &str,
-) -> Option<OwnedSemaphorePermit> {
-    let permit = tokio::select! {
-        permit = queue.acquire() => permit?,
-        _ = cancel_token.cancelled() => {
-            tm.complete(tx_id, false, "Cancelled".to_string()).await;
-            let _ = ArcDaemonInterface::transaction_finished(
-                emitter,
-                tx_id.to_string(),
-                false,
-                "Cancelled".to_string(),
-            )
-            .await;
-            return None;
-        }
-    };
-
-    tm.mark_running(tx_id).await;
-    let _ = ArcDaemonInterface::transaction_active(
-        emitter,
-        tx_id.to_string(),
-        package_id.to_string(),
-    )
-    .await;
-    Some(permit)
 }
 
 #[interface(name = "org.blossomos.arc.daemon")]
@@ -115,8 +77,7 @@ impl ArcDaemonInterface {
 
         let provider = self.provider.clone();
         let tm = self.transaction_manager.clone();
-        let queue = self.download_queue.clone();
-        let suppressed = self.notifications_suppressed.clone();
+        let semaphore = self.download_semaphore.clone();
         // emitter is tied to this request's lifetime so we have to own it
         // before spawning otherwise the borrow checker will not allow the move
         let emitter = emitter.to_owned();
@@ -127,17 +88,25 @@ impl ArcDaemonInterface {
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
-            let Some(_permit) = wait_for_slot(&queue, &tm, &emitter, &cancel_token, tx_id, &package_id).await
-            else {
-                return;
-            };
             let kio = crate::kio::KioJob::start(
                 &tr!("Installing application"),
                 &package_id,
                 Some(cancel_token.clone()),
                 kio_hidden,
-                suppressed,
             );
+
+            // Wait for a download slot; allow cancellation while queued
+            let _permit = tokio::select! {
+                result = semaphore.acquire_owned() => {
+                    match result { Ok(p) => p, Err(_) => return }
+                }
+                _ = cancel_token.cancelled() => {
+                    tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    kio.finish(false, &tr!("Cancelled"));
+                    let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
+                    return;
+                }
+            };
 
             let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
 
@@ -237,24 +206,30 @@ impl ArcDaemonInterface {
 
         let provider = self.provider.clone();
         let tm = self.transaction_manager.clone();
-        let queue = self.download_queue.clone();
-        let suppressed = self.notifications_suppressed.clone();
+        let semaphore = self.download_semaphore.clone();
         let emitter = emitter.to_owned();
 
         let kio_hidden = self.kio_hidden(&url).await;
         tokio::spawn(async move {
             let _ = Self::transaction_started(&emitter, tx_id.to_string(), url.clone()).await;
-            let Some(_permit) = wait_for_slot(&queue, &tm, &emitter, &cancel_token, tx_id, &url).await
-            else {
-                return;
-            };
             let kio = crate::kio::KioJob::start(
                 &tr!("Installing application"),
                 &url,
                 Some(cancel_token.clone()),
                 kio_hidden,
-                suppressed,
             );
+
+            let _permit = tokio::select! {
+                result = semaphore.acquire_owned() => {
+                    match result { Ok(p) => p, Err(_) => return }
+                }
+                _ = cancel_token.cancelled() => {
+                    tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    kio.finish(false, &tr!("Cancelled"));
+                    let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
+                    return;
+                }
+            };
 
             let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
 
@@ -353,20 +328,14 @@ impl ArcDaemonInterface {
 
         let provider = self.provider.clone();
         let tm = self.transaction_manager.clone();
-        let suppressed = self.notifications_suppressed.clone();
         let emitter = emitter.to_owned();
 
         let kio_hidden = self.kio_hidden(&package_id).await;
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
-            let kio = crate::kio::KioJob::start(
-                &tr!("Removing application"),
-                &package_id,
-                None,
-                kio_hidden,
-                suppressed,
-            );
+            let kio =
+                crate::kio::KioJob::start(&tr!("Removing application"), &package_id, None, kio_hidden);
 
             tm.update_progress(tx_id, 10).await;
             kio.progress(10);
@@ -424,20 +393,14 @@ impl ArcDaemonInterface {
 
         let provider = self.provider.clone();
         let tm = self.transaction_manager.clone();
-        let suppressed = self.notifications_suppressed.clone();
         let emitter = emitter.to_owned();
 
         let kio_hidden = self.kio_hidden(&package_id).await;
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
-            let kio = crate::kio::KioJob::start(
-                &tr!("Removing application"),
-                &package_id,
-                None,
-                kio_hidden,
-                suppressed,
-            );
+            let kio =
+                crate::kio::KioJob::start(&tr!("Removing application"), &package_id, None, kio_hidden);
             tm.update_progress(tx_id, 10).await;
             kio.progress(10);
             let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 10).await;
@@ -509,25 +472,31 @@ impl ArcDaemonInterface {
 
         let provider = self.provider.clone();
         let tm = self.transaction_manager.clone();
-        let queue = self.download_queue.clone();
-        let suppressed = self.notifications_suppressed.clone();
+        let semaphore = self.download_semaphore.clone();
         let emitter = emitter.to_owned();
 
         let kio_hidden = self.kio_hidden(&package_id).await;
         tokio::spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
-            let Some(_permit) = wait_for_slot(&queue, &tm, &emitter, &cancel_token, tx_id, &package_id).await
-            else {
-                return;
-            };
             let kio = crate::kio::KioJob::start(
                 &tr!("Updating application"),
                 &package_id,
                 Some(cancel_token.clone()),
                 kio_hidden,
-                suppressed,
             );
+
+            let _permit = tokio::select! {
+                result = semaphore.acquire_owned() => {
+                    match result { Ok(p) => p, Err(_) => return }
+                }
+                _ = cancel_token.cancelled() => {
+                    tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    kio.finish(false, &tr!("Cancelled"));
+                    let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
+                    return;
+                }
+            };
 
             let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
 
@@ -614,20 +583,8 @@ impl ArcDaemonInterface {
         *self.foreground_package.write().await = package_id;
     }
 
-    async fn set_frontend_visible(&self, visible: bool) {
-        self.notifications_suppressed.store(visible, Ordering::Relaxed);
-    }
-
-    async fn set_concurrent_downloads(&self, limit: u32) {
-        info!("SetConcurrentDownloads: {}", limit);
-        self.download_queue.set_limit(limit as usize).await;
-    }
-
     async fn refresh_cache(&self) -> bool {
         info!("RefreshCache");
-        if let Err(e) = self.provider.refresh_updates().await {
-            warn!("RefreshCache: update check failed: {}", e);
-        }
         match self.provider.refresh_cache().await {
             Ok(()) => true,
             Err(e) => {
@@ -869,24 +826,30 @@ impl ArcDaemonInterface {
 
         let provider = self.provider.clone();
         let tm = self.transaction_manager.clone();
-        let queue = self.download_queue.clone();
-        let suppressed = self.notifications_suppressed.clone();
+        let semaphore = self.download_semaphore.clone();
         let emitter = emitter.to_owned();
 
         let kio_hidden = self.kio_hidden(&path).await;
         tokio::spawn(async move {
             let _ = Self::transaction_started(&emitter, tx_id.to_string(), path.clone()).await;
-            let Some(_permit) = wait_for_slot(&queue, &tm, &emitter, &cancel_token, tx_id, &path).await
-            else {
-                return;
-            };
             let kio = crate::kio::KioJob::start(
                 &tr!("Installing application"),
                 &path,
                 Some(cancel_token.clone()),
                 kio_hidden,
-                suppressed,
             );
+
+            let _permit = tokio::select! {
+                result = semaphore.acquire_owned() => {
+                    match result { Ok(p) => p, Err(_) => return }
+                }
+                _ = cancel_token.cancelled() => {
+                    tm.complete(tx_id, false, "Cancelled".to_string()).await;
+                    kio.finish(false, &tr!("Cancelled"));
+                    let _ = Self::transaction_finished(&emitter, tx_id.to_string(), false, "Cancelled".to_string()).await;
+                    return;
+                }
+            };
 
             let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
             let emitter_fwd = emitter.clone();
@@ -939,15 +902,9 @@ impl ArcDaemonInterface {
         tx_id.to_string()
     }
 
+    // the next four are signal declarations, zbus generates the actual emit
     #[zbus(signal)]
     async fn transaction_started(
-        signal_emitter: &SignalEmitter<'_>,
-        transaction_id: String,
-        package_id: String,
-    ) -> zbus::Result<()>;
-
-    #[zbus(signal)]
-    async fn transaction_active(
         signal_emitter: &SignalEmitter<'_>,
         transaction_id: String,
         package_id: String,

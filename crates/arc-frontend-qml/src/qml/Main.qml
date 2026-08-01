@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Window
 import org.kde.kirigami as Kirigami
 import org.kde.kirigami.layouts as KL
 import org.blossomos.arc
@@ -92,9 +91,6 @@ Kirigami.ApplicationWindow {
         onDownloadsRequested: root.goDownloads()
         onSettingsRequested: root.goSettings()
     }
-
-    readonly property bool onScreen: visible && visibility !== Window.Minimized && visibility !== Window.Hidden
-    onOnScreenChanged: WindowController.setVisible(onScreen)
 
     Connections {
         target: NavController
@@ -202,7 +198,6 @@ Kirigami.ApplicationWindow {
 
     Component.onCompleted: {
         TransactionsModel.init();
-        WindowController.setVisible(root.onScreen);
         goHome();
         DeepLinkController.resolve();
     }

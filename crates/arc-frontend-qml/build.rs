@@ -42,7 +42,6 @@ fn main() {
         "src/bridge/settings_controller.rs",
         "src/bridge/deeplink_controller.rs",
         "src/bridge/nav_controller.rs",
-        "src/bridge/window_controller.rs",
     ])
     .cpp_file("src/cxx/i18n_setup.cpp");
 

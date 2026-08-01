@@ -341,30 +341,6 @@ fn invalidate_package_cache() {
     package_cache().lock().unwrap().clear();
 }
 
-fn no_op(_: &[Package]) {}
-
-async fn resolve_icons(mut packages: Vec<Package>) -> Vec<Package> {
-    tokio::task::spawn_blocking(move || {
-        for pkg in &mut packages {
-            pkg.icon_url = Some(crate::services::icons::resolve(&pkg.id, pkg.icon_url.as_deref()));
-        }
-        packages
-    })
-    .await
-    .unwrap_or_default()
-}
-
-fn set_updates_badge(packages: &[Package]) {
-    let count = packages.len() as i32;
-    crate::services::launcher::update_badge(count);
-    let Some(qt_thread) = QT_THREAD.get() else {
-        return;
-    };
-    let _ = qt_thread.queue(move |mut model| {
-        model.as_mut().set_updates_count(count);
-    });
-}
-
 impl qobject::PackageListModel {
     pub fn search(mut self: Pin<&mut Self>, query: QString) {
         let query = query.to_string();
@@ -378,7 +354,6 @@ impl qobject::PackageListModel {
                 Ok(serde_json::from_str(&json)?)
             },
             "search",
-            no_op,
         );
     }
 
@@ -392,7 +367,6 @@ impl qobject::PackageListModel {
                 Ok(serde_json::from_str(&json)?)
             },
             "load installed",
-            no_op,
         );
     }
 
@@ -408,7 +382,6 @@ impl qobject::PackageListModel {
                 Ok(serde_json::from_str(&json)?)
             },
             "search category",
-            no_op,
         );
     }
 
@@ -422,7 +395,6 @@ impl qobject::PackageListModel {
                 Ok(serde_json::from_str(&json)?)
             },
             "load updates",
-            set_updates_badge,
         );
     }
 
@@ -431,13 +403,11 @@ impl qobject::PackageListModel {
         cache_key: String,
         fetch: impl std::future::Future<Output = anyhow::Result<Vec<Package>>> + Send + 'static,
         what: &'static str,
-        loaded: fn(&[Package]),
     ) {
         let qt_thread = self.qt_thread();
         let _ = PACKAGE_LIST_QT_THREAD.set(qt_thread.clone());
 
         if let Some(cached) = package_cache().lock().unwrap().get(&cache_key).cloned() {
-            loaded(&cached);
             let rows: Vec<PackageRow> =
                 cached.into_iter().map(|pkg| PackageRow { pkg, busy: false, progress: 0.0 }).collect();
             unsafe {
@@ -452,19 +422,21 @@ impl qobject::PackageListModel {
         self.as_mut().set_loading(true);
 
         runtime::spawn(async move {
-            let result = fetch.await;
-            let failed = result.is_err();
-            let mut packages = result.unwrap_or_else(|e| {
+            let mut packages = fetch.await.unwrap_or_else(|e| {
                 tracing::warn!("{what} failed: {e}");
                 Vec::new()
             });
 
-            packages = resolve_icons(packages).await;
+            packages = tokio::task::spawn_blocking(move || {
+                for pkg in &mut packages {
+                    pkg.icon_url = Some(crate::services::icons::resolve(&pkg.id, pkg.icon_url.as_deref()));
+                }
+                packages
+            })
+            .await
+            .unwrap_or_default();
 
-            if !failed {
-                package_cache().lock().unwrap().insert(cache_key, packages.clone());
-                loaded(&packages);
-            }
+            package_cache().lock().unwrap().insert(cache_key, packages.clone());
 
             let rows: Vec<PackageRow> = packages
                 .into_iter()
@@ -672,15 +644,11 @@ impl qobject::TransactionsModel {
         }
 
         runtime::spawn(async move {
-            let Some(proxy) = runtime::proxy().await else {
-                return;
-            };
-            let startup = proxy.clone();
-            runtime::spawn(async move {
-                load_running_transactions(&startup).await;
-                refresh_updates_count(&startup).await;
-            });
-            run_signal_listener(proxy).await;
+            if let Some(proxy) = runtime::proxy().await {
+                load_running_transactions(&proxy).await;
+                refresh_updates_count(&proxy).await;
+                run_signal_listener(proxy).await;
+            }
         });
     }
 
@@ -836,6 +804,7 @@ impl qobject::TransactionsModel {
             match result {
                 Ok(tx_id) => queue_update(&pkg_id, move |tx| {
                     tx.id = tx_id.clone();
+                    tx.status = TxStatus::Running;
                 }),
                 Err(e) => queue_update(&pkg_id, move |tx| {
                     tx.status = TxStatus::Failed;
@@ -925,33 +894,6 @@ fn queue_update(pkg_id: &str, f: impl FnOnce(&mut Tx) + Send + 'static) {
             notify_row_changed(model);
             sync_package_row(&tx);
         }
-    });
-}
-
-fn queue_start(tx_id: String, pkg_id: String) {
-    let Some(qt_thread) = QT_THREAD.get() else {
-        return;
-    };
-    let _ = qt_thread.queue(move |mut model| {
-        let row = model
-            .transactions
-            .iter()
-            .position(|tx| tx.id == tx_id)
-            .or_else(|| {
-                model
-                    .transactions
-                    .iter()
-                    .position(|tx| tx.pkg_id == pkg_id && tx.status == TxStatus::Pending)
-            });
-        let Some(row) = row else { return };
-        {
-            let tx = &mut model.as_mut().rust_mut().transactions[row];
-            tx.id = tx_id;
-            tx.status = TxStatus::Running;
-        }
-        let tx = model.transactions[row].clone();
-        notify_row_changed(model);
-        sync_package_row(&tx);
     });
 }
 
@@ -1054,34 +996,28 @@ async fn refresh_updates_count(proxy: &ArcDaemonProxy<'static>) {
     let Ok(json) = proxy.list_updates().await else {
         return;
     };
-    let Ok(packages) = serde_json::from_str::<Vec<Package>>(&json) else {
+    let count = serde_json::from_str::<Vec<libarc::Package>>(&json).map(|v| v.len()).unwrap_or(0);
+    crate::services::launcher::update_badge(count as i32);
+    let Some(qt_thread) = QT_THREAD.get() else {
         return;
     };
-    let packages = resolve_icons(packages).await;
-    package_cache().lock().unwrap().insert("updates".to_string(), packages.clone());
-    set_updates_badge(&packages);
+    let _ = qt_thread.queue(move |mut model| {
+        model.as_mut().set_updates_count(count as i32);
+    });
 }
 
 async fn run_signal_listener(proxy: ArcDaemonProxy<'static>) {
-    let (Ok(mut progress_stream), Ok(mut finished_stream), Ok(mut updates_stream), Ok(mut stats_stream), Ok(mut active_stream)) = tokio::join!(
+    let (Ok(mut progress_stream), Ok(mut finished_stream), Ok(mut updates_stream), Ok(mut stats_stream)) = tokio::join!(
         proxy.receive_transaction_progress(),
         proxy.receive_transaction_finished(),
         proxy.receive_updates_available(),
         proxy.receive_transaction_stats(),
-        proxy.receive_transaction_active(),
     ) else {
         return;
     };
 
     loop {
         tokio::select! {
-            sig = active_stream.next() => {
-                let Some(sig) = sig else { break };
-                let Ok(args) = sig.args() else { continue };
-                let tx_id = args.transaction_id().to_string();
-                let pkg_id = args.package_id().to_string();
-                queue_start(tx_id, pkg_id);
-            }
             sig = stats_stream.next() => {
                 let Some(sig) = sig else { break };
                 let Ok(args) = sig.args() else { continue };
