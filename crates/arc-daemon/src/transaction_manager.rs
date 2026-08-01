@@ -36,6 +36,15 @@ impl TransactionManager {
         (tx, cancel_token)
     }
 
+    pub async fn mark_running(&self, id: Uuid) {
+        let mut map = self.transactions.write().await;
+        if let Some(tx) = map.get_mut(&id) {
+            if tx.status == TransactionStatus::Pending {
+                tx.status = TransactionStatus::Running;
+            }
+        }
+    }
+
     pub async fn update_progress(&self, id: Uuid, progress: u8) {
         let mut map = self.transactions.write().await;
         if let Some(tx) = map.get_mut(&id) {

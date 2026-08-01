@@ -28,10 +28,15 @@ Kirigami.ScrollablePage {
         return i18n("%1 s remaining", secs);
     }
 
+    ConveyorLoader {
+        anchors.centerIn: parent
+        visible: PackageListModel.loading && transactionsRepeater.count === 0
+    }
+
     Kirigami.PlaceholderMessage {
         anchors.centerIn: parent
         width: parent.width - Kirigami.Units.gridUnit * 4
-        visible: transactionsRepeater.count === 0 && updatesRepeater.count === 0
+        visible: !PackageListModel.loading && transactionsRepeater.count === 0 && updatesRepeater.count === 0
         icon.name: "download"
         text: i18n("Nothing to download")
         explanation: i18n("Installs, removals and updates show up here.")

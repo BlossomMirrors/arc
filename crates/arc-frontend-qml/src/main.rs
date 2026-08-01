@@ -49,19 +49,27 @@ fn main() {
     }
 
     services::launcher::clear_blocking();
-    clear_foreground_blocking();
+    clear_notification_blocking();
 }
 
 // the daemon suppresses notifications for the app whose detail page is open
 // so make sure that reservation dies with the frontend
-fn clear_foreground_blocking() {
-    if let Ok(conn) = zbus::blocking::Connection::session() {
-        let _ = conn.call_method(
-            Some("org.blossomos.arc.daemon"),
-            "/org/blossomos/arc/daemon",
-            Some("org.blossomos.arc.daemon"),
-            "SetForegroundPackage",
-            &("",),
-        );
-    }
+fn clear_notification_blocking() {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return;
+    };
+    let _ = conn.call_method(
+        Some("org.blossomos.arc.daemon"),
+        "/org/blossomos/arc/daemon",
+        Some("org.blossomos.arc.daemon"),
+        "SetForegroundPackage",
+        &("",),
+    );
+    let _ = conn.call_method(
+        Some("org.blossomos.arc.daemon"),
+        "/org/blossomos/arc/daemon",
+        Some("org.blossomos.arc.daemon"),
+        "SetFrontendVisible",
+        &(false,),
+    );
 }

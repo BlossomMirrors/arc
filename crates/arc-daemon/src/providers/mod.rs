@@ -14,6 +14,8 @@ use libflatpak::gio::prelude::CancellableExt;
 // newly installed packages show up without a manual refresh
 const PACKAGE_CACHE_TTL: Duration = Duration::from_secs(900);
 
+const UPDATES_CACHE_TTL: Duration = Duration::from_secs(90 * 60);
+
 // a single slow or unreachable provider (e.g. Lutris waiting on lutris.net)
 // must not block search results from every other provider
 const PROVIDER_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -128,6 +130,8 @@ pub struct MultiProvider {
     pub pwa: Arc<pwa::PwaProvider>,
     package_cache: RwLock<Option<(Instant, Vec<Package>)>>,
     fetch_lock: Mutex<()>,
+    updates_cache: RwLock<Option<(Instant, Vec<Package>)>>,
+    updates_lock: Mutex<()>,
 }
 
 impl MultiProvider {
@@ -153,6 +157,8 @@ impl MultiProvider {
             pwa: Arc::new(pwa),
             package_cache: RwLock::new(seeded),
             fetch_lock: Mutex::new(()),
+            updates_cache: RwLock::new(None),
+            updates_lock: Mutex::new(()),
         }
     }
 
@@ -219,9 +225,41 @@ impl MultiProvider {
         self.fetch_and_store().await.map(|_| ())
     }
 
+    pub async fn refresh_updates(&self) -> Result<Vec<Package>, ArcError> {
+        let _lock = self.updates_lock.lock().await;
+        self.fetch_updates().await
+    }
+
     pub async fn invalidate_package_cache(&self) {
         let mut cache = self.package_cache.write().await;
         *cache = None;
+        drop(cache);
+        self.invalidate_updates_cache().await;
+    }
+
+    pub async fn invalidate_updates_cache(&self) {
+        let mut cache = self.updates_cache.write().await;
+        *cache = None;
+    }
+
+    async fn cached_updates(&self) -> Option<Vec<Package>> {
+        let cache = self.updates_cache.read().await;
+        cache.as_ref().and_then(|(cached_at, packages)| {
+            (cached_at.elapsed() < UPDATES_CACHE_TTL).then(|| packages.clone())
+        })
+    }
+
+    async fn fetch_updates(&self) -> Result<Vec<Package>, ArcError> {
+        let (native, flatpak, appimage) = tokio::join!(
+            self.native.list_updates(),
+            self.flatpak.list_updates(),
+            self.appimage.list_updates(),
+        );
+        let mut results = native.unwrap_or_default();
+        results.extend(flatpak.unwrap_or_default());
+        results.extend(appimage.unwrap_or_default());
+        *self.updates_cache.write().await = Some((Instant::now(), results.clone()));
+        Ok(results)
     }
 
     pub async fn list_extensions(&self, app_id: &str) -> Result<Vec<Package>, ArcError> {
@@ -381,15 +419,14 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn list_updates(&self) -> Result<Vec<Package>, ArcError> {
-        let (native, flatpak, appimage) = tokio::join!(
-            self.native.list_updates(),
-            self.flatpak.list_updates(),
-            self.appimage.list_updates(),
-        );
-        let mut results = native.unwrap_or_default();
-        results.extend(flatpak.unwrap_or_default());
-        results.extend(appimage.unwrap_or_default());
-        Ok(results)
+        if let Some(cached) = self.cached_updates().await {
+            return Ok(cached);
+        }
+        let _lock = self.updates_lock.lock().await;
+        if let Some(cached) = self.cached_updates().await {
+            return Ok(cached);
+        }
+        self.fetch_updates().await
     }
 
     async fn install(&self, package_id: &str) -> Result<(), ArcError> {
