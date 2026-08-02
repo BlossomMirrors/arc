@@ -1,3 +1,4 @@
+use crate::appstream_db::AppStreamDb;
 use crate::dbus_interface::ArcDaemonInterface;
 use crate::providers::appimage::AppImageProvider;
 use crate::providers::distrobox::DistroboxProvider;
@@ -70,7 +71,7 @@ impl Daemon {
         let appimage = AppImageProvider::new();
         let pwa = PwaProvider::new();
 
-        let provider = Arc::new(MultiProvider::new(native, flatpak, lutris, appimage, pwa));
+        let provider = MultiProvider::new(native, flatpak, lutris, appimage, pwa);
 
         // both the appstream refresh (network + flatpak subprocess) and the
         // initial cache warm-up (e.g. Lutris's catalog fetch) can take a long
@@ -86,6 +87,8 @@ impl Daemon {
                 Ok(status) => warn!("flatpak update --appstream exited with {}", status),
                 Err(e) => warn!("Failed to run flatpak update --appstream: {}", e),
             }
+
+            tokio::task::spawn_blocking(AppStreamDb::refresh_if_stale).await.ok();
 
             info!("Pre-warming package cache...");
             if let Err(e) = warmup_provider.refresh_cache().await {
@@ -161,6 +164,7 @@ impl Daemon {
             provider: self.provider,
             transaction_manager: self.transaction_manager.clone(),
             download_semaphore: Arc::new(Semaphore::new(concurrent)),
+            download_permits: Arc::new(std::sync::atomic::AtomicUsize::new(concurrent)),
             foreground_package: Arc::new(tokio::sync::RwLock::new(String::new())),
         };
 

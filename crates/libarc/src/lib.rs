@@ -1,5 +1,6 @@
 pub mod errors;
 pub mod events;
+pub mod launcher;
 pub mod search;
 pub mod settings;
 pub mod types;
@@ -8,13 +9,14 @@ pub use errors::ArcError;
 pub use events::ArcEvent;
 pub use search::{is_subsequence, score_field, score_package, search_and_rank};
 pub use settings::Settings;
-pub use types::{Package, Provider, RemoteInfo, Transaction, TransactionStatus, TransactionType};
+pub use types::{AppMetadata, Package, Provider, RemoteInfo, Transaction, TransactionStatus, TransactionType};
 
 use anyhow::Result;
 use zbus::{proxy, Connection};
 
-// this macro generates a strongly typed rust client for our daemon's dbus api,
-// method calls become normal async functions and signals become streams
+pub const BUS_NAME: &str = "org.blossomos.arc.daemon";
+pub const OBJECT_PATH: &str = "/org/blossomos/arc/daemon";
+
 #[proxy(
     interface = "org.blossomos.arc.daemon",
     default_service = "org.blossomos.arc.daemon",
@@ -34,6 +36,7 @@ pub trait ArcDaemon {
     async fn update_package(&self, package_id: &str) -> zbus::Result<String>;
     async fn get_transaction(&self, transaction_id: &str) -> zbus::Result<String>;
     async fn list_transactions(&self) -> zbus::Result<String>;
+    async fn clear_transaction_history(&self) -> zbus::Result<()>;
     async fn refresh_cache(&self) -> zbus::Result<bool>;
     async fn set_foreground_package(&self, package_id: &str) -> zbus::Result<()>;
     async fn run_package(&self, package_id: &str) -> zbus::Result<String>;
@@ -45,9 +48,8 @@ pub trait ArcDaemon {
     async fn remove_remote(&self, name: &str) -> zbus::Result<bool>;
     async fn add_flatpakrepo(&self, content: &str) -> zbus::Result<bool>;
     async fn install_flatpak_bundle(&self, path: &str) -> zbus::Result<String>;
+    async fn set_concurrent_downloads(&self, count: u32) -> zbus::Result<()>;
 
-    // signals are one way messages the daemon sends to all connected clients
-    // without them having to ask, fire and forget from the daemon side
     #[zbus(signal)]
     fn transaction_started(&self, transaction_id: String, package_id: String) -> zbus::Result<()>;
 
@@ -74,10 +76,58 @@ pub trait ArcDaemon {
     fn updates_available(&self, count: u32) -> zbus::Result<()>;
 }
 
-// connects to the session bus (per user, not system wide) and returns a proxy
-// you can call methods on like normal async functions
 pub async fn connect() -> Result<ArcDaemonProxy<'static>> {
     let conn = Connection::session().await?;
     let proxy = ArcDaemonProxy::new(&conn).await?;
     Ok(proxy)
+}
+
+impl ArcDaemonProxy<'_> {
+    pub async fn search_packages(&self, query: &str) -> Result<Vec<Package>> {
+        Ok(serde_json::from_str(&self.search(query).await?)?)
+    }
+
+    pub async fn search_category_packages(&self, category: &str) -> Result<Vec<Package>> {
+        Ok(serde_json::from_str(&self.search_category(category).await?)?)
+    }
+
+    pub async fn installed_packages(&self) -> Result<Vec<Package>> {
+        Ok(serde_json::from_str(&self.list_installed().await?)?)
+    }
+
+    pub async fn updates_packages(&self) -> Result<Vec<Package>> {
+        Ok(serde_json::from_str(&self.list_updates().await?)?)
+    }
+
+    pub async fn transactions(&self) -> Result<Vec<Transaction>> {
+        Ok(serde_json::from_str(&self.list_transactions().await?)?)
+    }
+
+    pub async fn remotes(&self) -> Result<Vec<RemoteInfo>> {
+        Ok(serde_json::from_str(&self.list_remotes().await?)?)
+    }
+
+    pub async fn extensions(&self, app_id: &str) -> Result<Vec<Package>> {
+        Ok(serde_json::from_str(&self.list_extensions(app_id).await?)?)
+    }
+
+    pub async fn app_info(&self, package_id: &str) -> Result<Option<Package>> {
+        Ok(serde_json::from_str(&self.get_app_info(package_id).await?)?)
+    }
+
+    pub async fn app_metadata(&self, package_id: &str) -> Result<AppMetadata> {
+        Ok(serde_json::from_str(&self.get_app_metadata(package_id).await?)?)
+    }
+}
+
+pub fn clear_foreground_blocking() {
+    if let Ok(conn) = zbus::blocking::Connection::session() {
+        let _ = conn.call_method(
+            Some(BUS_NAME),
+            OBJECT_PATH,
+            Some(BUS_NAME),
+            "SetForegroundPackage",
+            &("",),
+        );
+    }
 }

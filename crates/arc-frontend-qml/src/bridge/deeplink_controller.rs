@@ -146,8 +146,7 @@ impl qobject::DeepLinkController {
 
 async fn find_flatpak_alternative(pkg_name: &str) -> Option<(String, String)> {
     let proxy = runtime::proxy().await?;
-    let json = proxy.search(pkg_name).await.ok()?;
-    let pkgs: Vec<libarc::Package> = serde_json::from_str(&json).ok()?;
+    let pkgs = proxy.search_packages(pkg_name).await.ok()?;
     pkgs.into_iter()
         .find(|p| p.provider == libarc::Provider::Flatpak)
         .map(|p| (p.id, p.name))

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls as Controls
+import org.kde.kirigami as Kirigami
 
 Item {
     id: root
@@ -20,7 +21,7 @@ Item {
         anchors.fill: parent
         orientation: ListView.Horizontal
         clip: true
-        spacing: 12
+        spacing: Kirigami.Units.largeSpacing
         snapMode: ListView.SnapToItem
         flickDeceleration: 4000
     }
@@ -45,7 +46,7 @@ Item {
     Controls.RoundButton {
         visible: hover.hovered && !list.atXBeginning
         anchors.left: parent.left
-        anchors.leftMargin: 8
+        anchors.leftMargin: Kirigami.Units.smallSpacing
         anchors.verticalCenter: parent.verticalCenter
         icon.name: "go-previous-symbolic"
         onClicked: root.stepBy(-root.width * 0.8)
@@ -54,7 +55,7 @@ Item {
     Controls.RoundButton {
         visible: hover.hovered && !list.atXEnd
         anchors.right: parent.right
-        anchors.rightMargin: 8
+        anchors.rightMargin: Kirigami.Units.smallSpacing
         anchors.verticalCenter: parent.verticalCenter
         icon.name: "go-next-symbolic"
         onClicked: root.stepBy(root.width * 0.8)

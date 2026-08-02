@@ -1,7 +1,8 @@
 use futures_util::future::join_all;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::OnceLock;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
 const FORGE_BASE: &str = "https://forge.blossomos.org";
@@ -22,10 +23,80 @@ struct Inner {
     icons: HashMap<String, (Vec<u8>, String)>,
 }
 
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct Persisted {
+    top_json: String,
+    new_json: String,
+    trending_json: String,
+    charts_json: String,
+    app_metadata_json: String,
+    original_icon_urls: HashMap<String, String>,
+}
+
 static CACHE: OnceLock<RwLock<Inner>> = OnceLock::new();
+static REFRESH_GATE: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn lock() -> &'static RwLock<Inner> {
     CACHE.get_or_init(|| RwLock::new(Inner::default()))
+}
+
+fn refresh_gate() -> &'static Mutex<()> {
+    REFRESH_GATE.get_or_init(|| Mutex::new(()))
+}
+
+fn disk_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".cache/arc-daemon/forge_cache.json"))
+}
+
+pub async fn warm_from_disk() {
+    let Some(path) = disk_path() else { return };
+    let Ok(bytes) = std::fs::read(&path) else { return };
+    let Ok(p) = serde_json::from_slice::<Persisted>(&bytes) else { return };
+    let mut w = lock().write().await;
+    w.top_json = p.top_json;
+    w.new_json = p.new_json;
+    w.trending_json = p.trending_json;
+    w.charts_json = p.charts_json;
+    w.app_metadata_json = p.app_metadata_json;
+    w.original_icon_urls = p.original_icon_urls;
+    info!("Forge cache warmed from disk");
+}
+
+async fn save_to_disk() {
+    let Some(path) = disk_path() else { return };
+    let p = {
+        let r = lock().read().await;
+        Persisted {
+            top_json: r.top_json.clone(),
+            new_json: r.new_json.clone(),
+            trending_json: r.trending_json.clone(),
+            charts_json: r.charts_json.clone(),
+            app_metadata_json: r.app_metadata_json.clone(),
+            original_icon_urls: r.original_icon_urls.clone(),
+        }
+    };
+    tokio::task::spawn_blocking(move || {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(bytes) = serde_json::to_vec(&p) {
+            let _ = std::fs::write(&path, bytes);
+        }
+    })
+    .await
+    .ok();
+}
+
+async fn ensure_fresh() {
+    let empty = lock().read().await.top_json.is_empty();
+    if !empty {
+        return;
+    }
+    let _guard = refresh_gate().lock().await;
+    if lock().read().await.top_json.is_empty() {
+        refresh().await;
+    }
 }
 
 async fn fetch_text(client: &reqwest::Client, url: &str) -> Option<String> {
@@ -114,7 +185,7 @@ pub async fn refresh() {
     // db scan is CPU-bound, and returns (metadata_json, original_icon_urls)
     let app_ids_for_db = app_ids.clone();
     let (app_metadata_json, original_icon_urls) = tokio::task::spawn_blocking(move || {
-        let db = crate::appstream_db::AppStreamDb::get_static();
+        let db = crate::appstream_db::AppStreamDb::get();
         let mut original_urls: HashMap<String, String> = HashMap::new();
         let entries: Vec<serde_json::Value> = app_ids_for_db
             .iter()
@@ -165,6 +236,8 @@ pub async fn refresh() {
         info!("Forge cache refreshed ({} apps resolved)", icon_url_count);
     }
 
+    save_to_disk().await;
+
     // Download icon bytes in the background so the cache is warm for the
     // next request without blocking startup
     tokio::spawn(async move {
@@ -204,18 +277,23 @@ pub async fn refresh() {
 }
 
 pub async fn top() -> String {
+    ensure_fresh().await;
     lock().read().await.top_json.clone()
 }
 pub async fn new_apps() -> String {
+    ensure_fresh().await;
     lock().read().await.new_json.clone()
 }
 pub async fn trending() -> String {
+    ensure_fresh().await;
     lock().read().await.trending_json.clone()
 }
 pub async fn charts() -> String {
+    ensure_fresh().await;
     lock().read().await.charts_json.clone()
 }
 pub async fn app_metadata() -> String {
+    ensure_fresh().await;
     lock().read().await.app_metadata_json.clone()
 }
 

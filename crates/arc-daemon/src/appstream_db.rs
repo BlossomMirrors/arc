@@ -3,9 +3,44 @@ use appstream::{Collection, Component, MarkupTranslatableString, TranslatableStr
 use libarc::{Package, Provider};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
-static FLATPAK_DB: OnceLock<AppStreamDb> = OnceLock::new();
+// bumped whenever the on-disk Snapshot shape changes to invalidate old caches
+const SNAPSHOT_SCHEMA: u32 = 1;
+
+static FLATPAK_DB: OnceLock<RwLock<Arc<AppStreamDb>>> = OnceLock::new();
+// flips once every catalog file has been folded into FLATPAK_DB
+static FULLY_LOADED: AtomicBool = AtomicBool::new(false);
+// a plain flag plus a detached thread lets try_get() kick the load off
+// without waiting on it
+static LOAD_KICKED_OFF: AtomicBool = AtomicBool::new(false);
+// set once a loaded snapshot's key no longer matches the live catalog files
+static SNAPSHOT_STALE: AtomicBool = AtomicBool::new(false);
+static CURRENT_KEY: Mutex<Option<SnapshotKey>> = Mutex::new(None);
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone)]
+struct SourceStamp {
+    path: PathBuf,
+    mtime_secs: i64,
+    size: u64,
+}
+
+// identifies exactly which catalog files (and versions of them) a parse covers
+// a mismatch against the live filesystem means the snapshot is stale
+#[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone)]
+struct SnapshotKey {
+    schema: u32,
+    sources: Vec<SourceStamp>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Snapshot {
+    key: SnapshotKey,
+    components: Vec<(Component, Option<String>)>,
+    descriptions: HashMap<String, HashMap<String, String>>,
+    verifications: HashMap<String, bool>,
+}
 
 // appstream is a big xml catalog of apps that distros ship alongside their packages
 // so you get descriptions, icons and categories without hitting the network
@@ -38,6 +73,7 @@ pub struct AppStreamEntry {
     pub content_rating: String,
     pub developer_name: Option<String>,
     pub verified: bool,
+    pub categories: Vec<String>,
 }
 
 // Build a priority list of locale codes from the process environment.
@@ -116,32 +152,81 @@ fn localize_mts<'a>(ts: &'a MarkupTranslatableString, locales: &[String]) -> Opt
         .map(|s| s.as_str())
 }
 
+fn slot() -> &'static RwLock<Arc<AppStreamDb>> {
+    FLATPAK_DB.get_or_init(|| {
+        RwLock::new(Arc::new(AppStreamDb {
+            components: Vec::new(),
+            locales: detect_locales(),
+            descriptions: HashMap::new(),
+            verifications: HashMap::new(),
+        }))
+    })
+}
+
+// kicks the load off once on a detached thread and returns right away
+fn ensure_load_started() {
+    if LOAD_KICKED_OFF.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        return;
+    }
+    std::thread::spawn(|| {
+        let live_key = compute_snapshot_key();
+        if let Some(snapshot) = load_snapshot_from_disk() {
+            *CURRENT_KEY.lock().unwrap() = Some(snapshot.key.clone());
+            if snapshot.key != live_key {
+                SNAPSHOT_STALE.store(true, Ordering::Relaxed);
+            }
+            *slot().write().unwrap() = Arc::new(AppStreamDb {
+                components: snapshot.components,
+                locales: detect_locales(),
+                descriptions: snapshot.descriptions,
+                verifications: snapshot.verifications,
+            });
+            FULLY_LOADED.store(true, Ordering::Relaxed);
+            return;
+        }
+
+        let db = load_flatpak_progressive();
+        persist_snapshot(&db, &live_key);
+        *CURRENT_KEY.lock().unwrap() = Some(live_key);
+        FULLY_LOADED.store(true, Ordering::Relaxed);
+    });
+}
+
 impl AppStreamDb {
-    pub fn get_static() -> &'static AppStreamDb {
-        FLATPAK_DB.get_or_init(Self::load_flatpak)
+    // blocks until every catalog file is loaded
+    pub fn get() -> Arc<AppStreamDb> {
+        ensure_load_started();
+        while !FULLY_LOADED.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+        slot().read().unwrap().clone()
     }
 
-    pub fn load_flatpak() -> Self {
-        let locales = detect_locales();
-        let mut components = Vec::new();
-        let mut descriptions: HashMap<String, HashMap<String, String>> = HashMap::new();
-        let mut verifications: HashMap<String, bool> = HashMap::new();
-        load_flatpak_root(
-            "/var/lib/flatpak/appstream",
-            &mut components,
-            &mut descriptions,
-            &mut verifications,
-        );
-        if let Some(home) = std::env::var_os("HOME") {
-            let path = PathBuf::from(home).join(".local/share/flatpak/appstream");
-            load_flatpak_root(&path, &mut components, &mut descriptions, &mut verifications);
+    // never blocks and returns whatever has been folded in so far
+    pub fn try_get() -> Arc<AppStreamDb> {
+        ensure_load_started();
+        slot().read().unwrap().clone()
+    }
+
+    pub fn snapshot_was_stale() -> bool {
+        SNAPSHOT_STALE.load(Ordering::Relaxed)
+    }
+
+    // true once every catalog file has been folded in
+    pub fn fully_loaded() -> bool {
+        FULLY_LOADED.load(Ordering::Relaxed)
+    }
+
+    // re-parses and swaps in a fresh db if the catalog files changed
+    pub fn refresh_if_stale() {
+        let fresh_key = compute_snapshot_key();
+        if CURRENT_KEY.lock().unwrap().as_ref() == Some(&fresh_key) {
+            return;
         }
-        Self {
-            components,
-            locales,
-            descriptions,
-            verifications,
-        }
+        let db = load_flatpak_progressive();
+        persist_snapshot(&db, &fresh_key);
+        *CURRENT_KEY.lock().unwrap() = Some(fresh_key);
+        SNAPSHOT_STALE.store(false, Ordering::Relaxed);
     }
 
     pub fn get_popular_apps(&self, limit: usize) -> Vec<AppStreamEntry> {
@@ -228,14 +313,88 @@ impl AppStreamDb {
     }
 }
 
-// Standalone (not AppStreamDb::get_static()-gated) lookup for a single
-// installed app's own exported metainfo file. Reads one small local XML
-// file, so it stays fast even while the shared FLATPAK_DB OnceLock is still
-// doing its one-time full-catalog parse — letting GetAppInfo/GetAppMetadata
-// answer instantly for whatever the user is actually looking at (almost
-// always something installed) instead of queuing behind the bulk warm-up.
+// standalone lookup for a single installed app's own exported metainfo file
+// stays fast independent of the shared db's parse state
 pub fn load_local_metainfo(id: &str) -> Option<AppStreamEntry> {
     scan_exported_metainfo(id, &detect_locales())
+}
+
+// resolves one id right now instead of waiting for the progressive bulk load
+// checks whatever is already loaded first then decompresses and scans only
+// the catalog files not yet folded in
+pub fn resolve_now(id: &str) -> Option<AppStreamEntry> {
+    if let Some(entry) = AppStreamDb::try_get().find_by_id(id) {
+        return Some(entry);
+    }
+
+    let locales = detect_locales();
+    let mut catalogs = Vec::new();
+    collect_catalog_paths("/var/lib/flatpak/appstream", &mut catalogs);
+    if let Some(home) = std::env::var_os("HOME") {
+        let path = PathBuf::from(home).join(".local/share/flatpak/appstream");
+        collect_catalog_paths(&path, &mut catalogs);
+    }
+    catalogs.sort_by_key(|(_, _, size)| *size);
+
+    for (remote_name, path, _) in catalogs {
+        let Some(bytes) = cached_raw_bytes(&path) else { continue };
+        if let Some(entry) = resolve_from_catalog_bytes(&bytes, id, Some(remote_name), &locales) {
+            return Some(entry);
+        }
+    }
+    None
+}
+
+// gz/xml bytes for a catalog not yet folded into the shared db
+// decoded at most once per file for the lifetime of the process
+static RAW_CATALOG_CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<Vec<u8>>>>> = OnceLock::new();
+
+fn cached_raw_bytes(path: &Path) -> Option<Arc<Vec<u8>>> {
+    let cache = RAW_CATALOG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(bytes) = cache.lock().unwrap().get(path) {
+        return Some(bytes.clone());
+    }
+    let is_gz = path.extension().and_then(|e| e.to_str()) == Some("gz");
+    let bytes = if is_gz { read_gz_bytes(path).ok()? } else { std::fs::read(path).ok()? };
+    let bytes = Arc::new(bytes);
+    cache.lock().unwrap().insert(path.to_path_buf(), bytes.clone());
+    Some(bytes)
+}
+
+// pulls just the one <component>...</component> block matching id out of a
+// full catalog's xml text and parses only that instead of the whole file
+fn resolve_from_catalog_bytes(
+    xml_bytes: &[u8],
+    id: &str,
+    remote: Option<String>,
+    locales: &[String],
+) -> Option<AppStreamEntry> {
+    let block = extract_component_block(xml_bytes, id)?;
+    let element = xmltree::Element::parse(block.as_slice()).ok()?;
+    let collection = Collection::try_from(&element).ok()?;
+    let component = collection.components.into_iter().next()?;
+    let mut descriptions = HashMap::new();
+    extract_descriptions(&block, &mut descriptions);
+    let mut verifications = HashMap::new();
+    extract_verifications(&block, &mut verifications);
+    Some(component_to_entry(&component, remote, locales, &descriptions, &verifications))
+}
+
+fn extract_component_block(xml_bytes: &[u8], id: &str) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(xml_bytes).ok()?;
+    let needle_plain = format!("<id>{id}</id>");
+    let needle_desktop = format!("<id>{id}.desktop</id>");
+    let id_pos = text.find(&needle_plain).or_else(|| text.find(&needle_desktop))?;
+    // components are siblings under <components> and never nested
+    // so the nearest preceding opening tag is this component's own
+    let start = text[..id_pos].rfind("<component")?;
+    let end_tag = "</component>";
+    let end = text[id_pos..].find(end_tag)? + id_pos + end_tag.len();
+    let wrapped = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?><components version="0.8">{}</components>"#,
+        &text[start..end]
+    );
+    Some(wrapped.into_bytes())
 }
 
 fn scan_exported_metainfo(id: &str, locales: &[String]) -> Option<AppStreamEntry> {
@@ -372,6 +531,7 @@ fn parse_metainfo_bytes(id: &str, bytes: &[u8], locales: &[String]) -> Option<Ap
         content_rating,
         developer_name,
         verified: false,
+        categories: Vec::new(),
     })
 }
 
@@ -653,6 +813,7 @@ fn component_to_entry(
             .and_then(|d| localize_ts(d, locales))
             .map(|s| s.to_string()),
         verified,
+        categories: c.categories.iter().map(|cat| format!("{:?}", cat).to_lowercase()).collect(),
     }
 }
 
@@ -724,12 +885,8 @@ fn extract_verifications(xml_bytes: &[u8], out: &mut HashMap<String, bool>) {
     }
 }
 
-fn load_flatpak_root(
-    root: impl AsRef<Path>,
-    out: &mut Vec<(Component, Option<String>)>,
-    out_descriptions: &mut HashMap<String, HashMap<String, String>>,
-    out_verifications: &mut HashMap<String, bool>,
-) {
+// Flatpak lays out appstream data as <root>/<remote>/<arch>/active/appstream.xml[.gz]
+fn collect_catalog_paths(root: impl AsRef<Path>, out: &mut Vec<(String, PathBuf, u64)>) {
     let Ok(remotes) = std::fs::read_dir(root.as_ref()) else {
         return;
     };
@@ -742,33 +899,172 @@ fn load_flatpak_root(
             let base = arch.path().join("active");
             let gz = base.join("appstream.xml.gz");
             let xml = base.join("appstream.xml");
-
-            if gz.exists() {
-                if let Ok(col) = Collection::from_gzipped(gz.clone()) {
-                    out.extend(
-                        col.components
-                            .into_iter()
-                            .map(|c| (c, Some(remote_name.clone()))),
-                    );
-                }
-                if let Ok(bytes) = read_gz_bytes(&gz) {
-                    extract_descriptions(&bytes, out_descriptions);
-                    extract_verifications(&bytes, out_verifications);
-                }
+            let path = if gz.exists() {
+                gz
             } else if xml.exists() {
-                if let Ok(col) = Collection::from_path(xml.clone()) {
-                    out.extend(
-                        col.components
-                            .into_iter()
-                            .map(|c| (c, Some(remote_name.clone()))),
-                    );
-                }
-                if let Ok(bytes) = std::fs::read(&xml) {
-                    extract_descriptions(&bytes, out_descriptions);
-                    extract_verifications(&bytes, out_verifications);
-                }
-            }
+                xml
+            } else {
+                continue;
+            };
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            out.push((remote_name.clone(), path, size));
         }
+    }
+}
+
+fn load_one_catalog(
+    path: &Path,
+    remote_name: &str,
+    out: &mut Vec<(Component, Option<String>)>,
+    out_descriptions: &mut HashMap<String, HashMap<String, String>>,
+    out_verifications: &mut HashMap<String, bool>,
+) {
+    let is_gz = path.extension().and_then(|e| e.to_str()) == Some("gz");
+    if is_gz {
+        if let Ok(col) = Collection::from_gzipped(path.to_path_buf()) {
+            out.extend(col.components.into_iter().map(|c| (c, Some(remote_name.to_string()))));
+        }
+        if let Ok(bytes) = read_gz_bytes(path) {
+            extract_descriptions(&bytes, out_descriptions);
+            extract_verifications(&bytes, out_verifications);
+        }
+    } else {
+        if let Ok(col) = Collection::from_path(path.to_path_buf()) {
+            out.extend(col.components.into_iter().map(|c| (c, Some(remote_name.to_string()))));
+        }
+        if let Ok(bytes) = std::fs::read(path) {
+            extract_descriptions(&bytes, out_descriptions);
+            extract_verifications(&bytes, out_verifications);
+        }
+    }
+}
+
+// parses smallest catalogs first and publishes to the shared slot after each
+// one so callers see growing real results instead of nothing until the
+// (possibly huge) last remote is done
+fn load_flatpak_progressive() -> AppStreamDb {
+    let mut catalogs = Vec::new();
+    collect_catalog_paths("/var/lib/flatpak/appstream", &mut catalogs);
+    if let Some(home) = std::env::var_os("HOME") {
+        let path = PathBuf::from(home).join(".local/share/flatpak/appstream");
+        collect_catalog_paths(&path, &mut catalogs);
+    }
+    catalogs.sort_by_key(|(_, _, size)| *size);
+
+    let locales = detect_locales();
+    let mut components = Vec::new();
+    let mut descriptions: HashMap<String, HashMap<String, String>> = HashMap::new();
+    let mut verifications: HashMap<String, bool> = HashMap::new();
+
+    for (remote_name, path, _) in catalogs {
+        load_one_catalog(&path, &remote_name, &mut components, &mut descriptions, &mut verifications);
+        *slot().write().unwrap() = Arc::new(AppStreamDb {
+            components: components.clone(),
+            locales: locales.clone(),
+            descriptions: descriptions.clone(),
+            verifications: verifications.clone(),
+        });
+    }
+
+    AppStreamDb { components, locales, descriptions, verifications }
+}
+
+fn snapshot_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".cache/arc-daemon/appstream_db.json"))
+}
+
+// walks the same active/appstream.xml[.gz] files collect_catalog_paths does
+// a stamp changing means that remote redeployed a new catalog
+fn collect_source_stamps(root: impl AsRef<Path>, out: &mut Vec<SourceStamp>) {
+    let Ok(remotes) = std::fs::read_dir(root.as_ref()) else {
+        return;
+    };
+    for remote_dir in remotes.flatten() {
+        let Ok(arches) = std::fs::read_dir(remote_dir.path()) else {
+            continue;
+        };
+        for arch in arches.flatten() {
+            let base = arch.path().join("active");
+            let gz = base.join("appstream.xml.gz");
+            let xml = base.join("appstream.xml");
+            let path = if gz.exists() { gz } else { xml };
+            let Ok(canonical) = path.canonicalize() else {
+                continue;
+            };
+            let Ok(meta) = std::fs::metadata(&canonical) else {
+                continue;
+            };
+            let mtime_secs = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            out.push(SourceStamp { path: canonical, mtime_secs, size: meta.len() });
+        }
+    }
+}
+
+fn compute_snapshot_key() -> SnapshotKey {
+    let mut sources = Vec::new();
+    collect_source_stamps("/var/lib/flatpak/appstream", &mut sources);
+    if let Some(home) = std::env::var_os("HOME") {
+        let path = PathBuf::from(home).join(".local/share/flatpak/appstream");
+        collect_source_stamps(&path, &mut sources);
+    }
+    sources.sort_by(|a, b| a.path.cmp(&b.path));
+    SnapshotKey { schema: SNAPSHOT_SCHEMA, sources }
+}
+
+fn load_snapshot_from_disk() -> Option<Snapshot> {
+    let path = snapshot_path()?;
+    let bytes = std::fs::read(path).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn persist_snapshot(db: &AppStreamDb, key: &SnapshotKey) {
+    let Some(path) = snapshot_path() else { return };
+    let Some(parent) = path.parent() else { return };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let snapshot = Snapshot {
+        key: key.clone(),
+        components: db.components.clone(),
+        descriptions: db.descriptions.clone(),
+        verifications: db.verifications.clone(),
+    };
+    let Ok(bytes) = serde_json::to_vec(&snapshot) else { return };
+    // write to a tmp file then rename since the rename is atomic
+    // a crash mid-write never leaves a torn snapshot behind
+    let tmp_path = path.with_extension("json.tmp");
+    if std::fs::write(&tmp_path, bytes).is_err() {
+        return;
+    }
+    let _ = std::fs::rename(&tmp_path, &path);
+}
+
+// bypass entry for GetAppMetadata while the real appstream data for this id
+// hasn't been resolved yet
+// built from whatever the disk-seeded package cache already has so the
+// detail page shows something instead of nothing
+pub fn partial_entry_from_package(pkg: &Package) -> AppStreamEntry {
+    AppStreamEntry {
+        id: pkg.id.clone(),
+        name: pkg.name.clone(),
+        summary: pkg.description.clone(),
+        description: String::new(),
+        icon_url: pkg.icon_url.clone(),
+        remote: pkg.remote.clone(),
+        screenshots: pkg.screenshots.clone(),
+        license: None,
+        eula_url: None,
+        homepage_url: pkg.homepage_url.clone(),
+        content_rating: pkg.content_rating.clone().unwrap_or_default(),
+        developer_name: pkg.developer_name.clone(),
+        verified: false,
+        categories: pkg.categories.clone(),
     }
 }
 
@@ -792,5 +1088,82 @@ pub fn entry_to_flatpak_package(entry: AppStreamEntry, installed: bool) -> Packa
         homepage_url: entry.homepage_url,
         content_rating: Some(entry.content_rating).filter(|s| !s.is_empty()),
         is_runtime: false,
+        categories: entry.categories,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CATALOG_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<components version="0.8">
+  <component type="desktop-application">
+    <id>org.example.Foo</id>
+    <name>Foo</name>
+    <summary>A test app</summary>
+    <categories>
+      <category>Utility</category>
+    </categories>
+  </component>
+  <component type="desktop-application">
+    <id>org.example.Bar</id>
+    <name>Bar</name>
+    <summary>Another test app</summary>
+  </component>
+</components>"#;
+
+    fn parse_catalog() -> Vec<(Component, Option<String>)> {
+        let element = xmltree::Element::parse(CATALOG_XML.as_bytes()).unwrap();
+        let collection = Collection::try_from(&element).unwrap();
+        collection.components.into_iter().map(|c| (c, Some("testremote".to_string()))).collect()
+    }
+
+    #[test]
+    fn snapshot_roundtrips_through_json() {
+        let components = parse_catalog();
+        let key = SnapshotKey {
+            schema: SNAPSHOT_SCHEMA,
+            sources: vec![SourceStamp { path: PathBuf::from("/tmp/a.xml"), mtime_secs: 42, size: 7 }],
+        };
+        let snapshot = Snapshot {
+            key: key.clone(),
+            components: components.clone(),
+            descriptions: HashMap::new(),
+            verifications: HashMap::new(),
+        };
+        let bytes = serde_json::to_vec(&snapshot).unwrap();
+        let restored: Snapshot = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(restored.key, key);
+        assert_eq!(restored.components.len(), components.len());
+        assert_eq!(restored.components[0].0.id, components[0].0.id);
+    }
+
+    #[test]
+    fn snapshot_key_detects_changed_stamp() {
+        let a = SnapshotKey {
+            schema: SNAPSHOT_SCHEMA,
+            sources: vec![SourceStamp { path: PathBuf::from("/tmp/a.xml"), mtime_secs: 1, size: 1 }],
+        };
+        let mut b = a.clone();
+        b.sources[0].mtime_secs = 2;
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn extract_component_block_finds_matching_component_only() {
+        let block = extract_component_block(CATALOG_XML.as_bytes(), "org.example.Bar").unwrap();
+        let text = std::str::from_utf8(&block).unwrap();
+        assert!(text.contains("org.example.Bar"));
+        assert!(!text.contains("org.example.Foo"));
+    }
+
+    #[test]
+    fn resolve_from_catalog_bytes_returns_full_entry() {
+        let entry = resolve_from_catalog_bytes(CATALOG_XML.as_bytes(), "org.example.Foo", Some("testremote".to_string()), &[])
+            .unwrap();
+        assert_eq!(entry.name, "Foo");
+        assert_eq!(entry.summary, "A test app");
+        assert_eq!(entry.categories, vec!["utility".to_string()]);
     }
 }

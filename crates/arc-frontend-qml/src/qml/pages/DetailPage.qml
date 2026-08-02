@@ -18,6 +18,10 @@ Kirigami.ScrollablePage {
 
     readonly property var extensions: JSON.parse(DetailController.extensionsJson.length > 0 ? DetailController.extensionsJson : "[]")
 
+    readonly property var busyMap: JSON.parse(TransactionsModel.busyPackagesJson || "{}")
+    readonly property bool liveBusy: root.busyMap[DetailController.id] !== undefined
+    readonly property real liveProgress: root.busyMap[DetailController.id] ?? 0
+
     title: DetailController.name
 
     Component.onCompleted: {
@@ -30,9 +34,55 @@ Kirigami.ScrollablePage {
 
     Component.onDestruction: DetailController.pageClosed(pkgId)
 
-    ConveyorLoader {
-        anchors.centerIn: parent
+    ColumnLayout {
         visible: DetailController.loading
+        width: root.width
+        spacing: 0
+
+        ColumnLayout {
+            Layout.alignment: Qt.AlignHCenter
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 48
+            spacing: Kirigami.Units.largeSpacing
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.largeSpacing
+
+                SkeletonBlock {
+                    Layout.preferredWidth: 96
+                    Layout.preferredHeight: 96
+                    Layout.alignment: Qt.AlignTop
+                    radius: 48
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    SkeletonBlock { Layout.preferredWidth: 220; Layout.preferredHeight: 28 }
+                    SkeletonBlock { Layout.preferredWidth: 140; Layout.preferredHeight: 16 }
+
+                    RowLayout {
+                        spacing: Kirigami.Units.smallSpacing
+                        SkeletonBlock { Layout.preferredWidth: 60; Layout.preferredHeight: 22; radius: 11 }
+                        SkeletonBlock { Layout.preferredWidth: 80; Layout.preferredHeight: 22; radius: 11 }
+                    }
+                }
+
+                SkeletonBlock { Layout.preferredWidth: 110; Layout.preferredHeight: 36 }
+            }
+
+            Kirigami.Separator { Layout.fillWidth: true }
+
+            SkeletonBlock { Layout.fillWidth: true; Layout.preferredHeight: 16 }
+            SkeletonBlock { Layout.fillWidth: true; Layout.preferredHeight: 16 }
+            SkeletonBlock { Layout.preferredWidth: parent.width * 0.6; Layout.preferredHeight: 16 }
+
+            SkeletonBlock { Layout.fillWidth: true; Layout.preferredHeight: Kirigami.Units.gridUnit * 14 }
+
+            Item { Layout.preferredHeight: Kirigami.Units.gridUnit * 2 }
+        }
     }
 
     ColumnLayout {
@@ -51,14 +101,13 @@ Kirigami.ScrollablePage {
                 hasExtensions: root.extensions.length > 0
 
                 onRemoveClicked: removeDialog.open()
-                onStartClicked: DetailController.launch()
                 onAddonsClicked: extensionsSheet.open()
             }
 
             ItemProgressBar {
                 Layout.fillWidth: true
-                visible: DetailController.busy
-                progress: DetailController.progress
+                visible: root.liveBusy
+                progress: root.liveProgress
             }
 
             Kirigami.Separator {
@@ -128,6 +177,21 @@ Kirigami.ScrollablePage {
                 }
             }
 
+            ColumnLayout {
+                Layout.fillWidth: true
+                visible: DetailController.refining
+                spacing: Kirigami.Units.smallSpacing
+
+                SkeletonBlock { Layout.fillWidth: true; Layout.preferredHeight: 14 }
+                SkeletonBlock { Layout.fillWidth: true; Layout.preferredHeight: 14 }
+                SkeletonBlock { Layout.preferredWidth: parent.width * 0.7; Layout.preferredHeight: 14 }
+                SkeletonBlock {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Kirigami.Units.smallSpacing
+                    Layout.preferredHeight: Kirigami.Units.gridUnit * 12
+                }
+            }
+
             Controls.Label {
                 Layout.fillWidth: true
                 visible: DetailController.description.length > 0
@@ -176,7 +240,7 @@ Kirigami.ScrollablePage {
         customFooterActions: [
             Kirigami.Action {
                 text: i18n("Remove")
-                icon.name: "edit-delete-symbolic"
+                icon.name: "delete"
                 onTriggered: {
                     TransactionsModel.removePackage(DetailController.id);
                     removeDialog.close();

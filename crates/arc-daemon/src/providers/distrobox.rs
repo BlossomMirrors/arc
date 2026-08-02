@@ -481,6 +481,7 @@ fn parse_info(content: &str, home: &str) -> Option<Package> {
             homepage_url: None,
             content_rating: None,
             is_runtime: false,
+            categories: vec![],
     })
 }
 

@@ -13,7 +13,7 @@ Kirigami.ScrollablePage {
 
     title: i18n("Downloads")
 
-    Component.onCompleted: PackageListModel.loadUpdates()
+    function load() { PackageListModel.loadUpdates() }
 
     function formatBytes(bytes) {
         if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + " GB";
@@ -28,13 +28,29 @@ Kirigami.ScrollablePage {
         return i18n("%1 s remaining", secs);
     }
 
+    function txTypeLabel(txType) {
+        if (txType === "remove") return i18n("Removing");
+        if (txType === "update") return i18n("Updating");
+        return i18n("Installing");
+    }
+
     Kirigami.PlaceholderMessage {
         anchors.centerIn: parent
         width: parent.width - Kirigami.Units.gridUnit * 4
-        visible: transactionsRepeater.count === 0 && updatesRepeater.count === 0
-        icon.name: "download"
-        text: i18n("Nothing to download")
-        explanation: i18n("Installs, removals and updates show up here.")
+        visible: !PackageListModel.loading
+            && TransactionsModel.runningCount === 0
+            && TransactionsModel.queuedCount === 0
+            && TransactionsModel.doneCount === 0
+            && updatesRepeater.count === 0
+        icon.name: "checkmark"
+        text: i18n("Everything is up to date")
+        explanation: i18n("No updates available. Installs, removals and updates show up here.")
+
+        helpfulAction: Kirigami.Action {
+            icon.name: "view-refresh-symbolic"
+            text: i18n("Check for Updates")
+            onTriggered: PackageListModel.loadUpdates()
+        }
     }
 
     ColumnLayout {
@@ -48,42 +64,37 @@ Kirigami.ScrollablePage {
             spacing: Kirigami.Units.largeSpacing
 
             Repeater {
-                id: transactionsRepeater
                 model: TransactionsModel
 
                 delegate: Kirigami.AbstractCard {
-                    id: delegate
+                    id: heroDelegate
 
                     required property int index
                     required property string txId
-                    required property string pkgId
                     required property string name
                     required property string iconUrl
                     required property real progress
                     required property string status
                     required property string txType
-                    required property string error
                     required property real bytesDone
                     required property real bytesTotal
                     required property real speedBps
                     required property int etaSecs
 
-                    readonly property bool running: status === "running"
-                    readonly property bool queued: status === "pending"
-
+                    visible: status === "running"
                     Layout.fillWidth: true
 
                     contentItem: ColumnLayout {
-                        spacing: Kirigami.Units.smallSpacing
+                        spacing: Kirigami.Units.largeSpacing
 
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: Kirigami.Units.largeSpacing
 
                             Kirigami.Icon {
-                                source: delegate.iconUrl.length > 0 ? delegate.iconUrl : "application-x-executable"
-                                Layout.preferredWidth: delegate.running ? Kirigami.Units.iconSizes.huge : Kirigami.Units.iconSizes.large
-                                Layout.preferredHeight: Layout.preferredWidth
+                                source: heroDelegate.iconUrl.length > 0 ? heroDelegate.iconUrl : "application-x-executable"
+                                Layout.preferredWidth: Kirigami.Units.iconSizes.huge
+                                Layout.preferredHeight: Kirigami.Units.iconSizes.huge
                             }
 
                             ColumnLayout {
@@ -92,71 +103,143 @@ Kirigami.ScrollablePage {
 
                                 Kirigami.Heading {
                                     Layout.fillWidth: true
-                                    level: delegate.running ? 2 : 3
-                                    text: delegate.name
+                                    level: 1
+                                    text: heroDelegate.name
                                     elide: Text.ElideRight
                                 }
 
                                 Controls.Label {
-                                    Layout.fillWidth: true
-                                    text: delegate.status === "failed"
-                                        ? (delegate.error.length > 0 ? delegate.error : i18n("Failed"))
-                                        : delegate.queued ? i18n("Queued")
-                                        : delegate.status === "completed" ? i18n("Done")
-                                        : delegate.txType === "remove" ? i18n("Removing")
-                                        : delegate.txType === "update" ? i18n("Updating")
-                                        : i18n("Installing")
-                                    color: delegate.status === "failed" ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
-                                    opacity: delegate.status === "failed" ? 1 : 0.7
-                                    elide: Text.ElideRight
+                                    text: root.txTypeLabel(heroDelegate.txType)
+                                    opacity: 0.7
                                 }
                             }
 
-                            Controls.Label {
-                                visible: delegate.running && delegate.speedBps > 0
-                                text: root.formatBytes(delegate.speedBps) + "/s"
-                                font.bold: true
+                            Kirigami.Heading {
+                                visible: heroDelegate.progress > 0
+                                level: 1
+                                text: Math.round(heroDelegate.progress * 100) + "%"
                                 color: Kirigami.Theme.highlightColor
                             }
 
                             Controls.Button {
                                 Layout.alignment: Qt.AlignVCenter
-                                visible: delegate.running || delegate.queued
                                 icon.name: "process-stop-symbolic"
                                 display: Controls.Button.IconOnly
                                 text: i18n("Cancel")
                                 Controls.ToolTip.text: i18n("Cancel")
                                 Controls.ToolTip.visible: hovered
                                 Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                                onClicked: TransactionsModel.cancel(delegate.txId)
+                                onClicked: TransactionsModel.cancel(heroDelegate.txId)
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Kirigami.Units.gridUnit * 0.7
+                            visible: heroDelegate.progress > 0
+                            radius: height / 2
+                            color: Kirigami.Theme.alternateBackgroundColor
+
+                            Rectangle {
+                                width: parent.width * Math.min(1, heroDelegate.progress)
+                                height: parent.height
+                                radius: parent.radius
+                                color: Kirigami.Theme.highlightColor
+
+                                Behavior on width {
+                                    NumberAnimation { duration: 250; easing.type: Easing.OutQuad }
+                                }
                             }
                         }
 
                         ItemProgressBar {
                             Layout.fillWidth: true
-                            visible: delegate.running || delegate.queued
-                            progress: delegate.queued ? 0 : delegate.progress
+                            visible: heroDelegate.progress <= 0
+                            progress: 0
                         }
 
                         RowLayout {
                             Layout.fillWidth: true
-                            visible: delegate.running && delegate.bytesTotal > 0
                             spacing: Kirigami.Units.largeSpacing
 
                             Controls.Label {
-                                text: i18n("%1 of %2", root.formatBytes(delegate.bytesDone), root.formatBytes(delegate.bytesTotal))
+                                visible: heroDelegate.bytesTotal > 0
+                                text: i18n("%1 of %2", root.formatBytes(heroDelegate.bytesDone), root.formatBytes(heroDelegate.bytesTotal))
                                 opacity: 0.7
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            }
+
+                            Controls.Label {
+                                visible: heroDelegate.speedBps > 0
+                                text: root.formatBytes(heroDelegate.speedBps) + "/s"
+                                font.bold: true
+                                color: Kirigami.Theme.highlightColor
                             }
 
                             Item { Layout.fillWidth: true }
 
                             Controls.Label {
-                                visible: delegate.etaSecs > 0
-                                text: root.formatEta(delegate.etaSecs)
+                                visible: heroDelegate.etaSecs > 0
+                                text: root.formatEta(heroDelegate.etaSecs)
                                 opacity: 0.7
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
                             }
+                        }
+                    }
+                }
+            }
+
+            Kirigami.Heading {
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.largeSpacing
+                level: 2
+                visible: TransactionsModel.queuedCount > 0
+                text: i18n("Up Next")
+            }
+
+            Repeater {
+                model: TransactionsModel
+
+                delegate: Kirigami.AbstractCard {
+                    id: queuedDelegate
+
+                    required property int index
+                    required property string txId
+                    required property string name
+                    required property string iconUrl
+                    required property string status
+                    required property string txType
+
+                    visible: status === "pending"
+                    Layout.fillWidth: true
+
+                    contentItem: RowLayout {
+                        spacing: Kirigami.Units.largeSpacing
+
+                        Kirigami.Icon {
+                            source: queuedDelegate.iconUrl.length > 0 ? queuedDelegate.iconUrl : "application-x-executable"
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.medium
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+                        }
+
+                        Kirigami.Heading {
+                            Layout.fillWidth: true
+                            level: 3
+                            text: queuedDelegate.name
+                            elide: Text.ElideRight
+                        }
+
+                        Controls.Label {
+                            text: i18n("Queued")
+                            opacity: 0.7
+                        }
+
+                        Controls.Button {
+                            icon.name: "process-stop-symbolic"
+                            display: Controls.Button.IconOnly
+                            text: i18n("Cancel")
+                            Controls.ToolTip.text: i18n("Cancel")
+                            Controls.ToolTip.visible: hovered
+                            Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                            onClicked: TransactionsModel.cancel(queuedDelegate.txId)
                         }
                     }
                 }
@@ -164,8 +247,12 @@ Kirigami.ScrollablePage {
 
             RowLayout {
                 Layout.fillWidth: true
-                Layout.topMargin: transactionsRepeater.count > 0 ? Kirigami.Units.gridUnit : 0
-                visible: updatesRepeater.count > 0
+                Layout.topMargin: Kirigami.Units.largeSpacing
+                visible: !PackageListModel.loading
+                    && (updatesRepeater.count > 0
+                        || TransactionsModel.runningCount > 0
+                        || TransactionsModel.queuedCount > 0
+                        || TransactionsModel.doneCount > 0)
 
                 Kirigami.Heading {
                     Layout.fillWidth: true
@@ -173,11 +260,62 @@ Kirigami.ScrollablePage {
                     text: i18n("Available Updates")
                 }
 
+                Controls.ToolButton {
+                    icon.name: "view-refresh-symbolic"
+                    text: i18n("Check")
+                    onClicked: PackageListModel.loadUpdates()
+                }
+
                 Controls.Button {
+                    visible: updatesRepeater.count > 0
                     icon.name: "update-none-symbolic"
                     text: i18n("Update All")
                     highlighted: true
                     onClicked: TransactionsModel.updateAll()
+                }
+            }
+
+            Controls.Label {
+                Layout.fillWidth: true
+                visible: !PackageListModel.loading && updatesRepeater.count === 0
+                    && (TransactionsModel.runningCount > 0
+                        || TransactionsModel.queuedCount > 0
+                        || TransactionsModel.doneCount > 0)
+                text: i18n("Everything is up to date.")
+                opacity: 0.7
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.largeSpacing
+                visible: PackageListModel.loading
+                spacing: Kirigami.Units.largeSpacing
+
+                Repeater {
+                    model: 3
+
+                    delegate: Kirigami.AbstractCard {
+                        Layout.fillWidth: true
+
+                        contentItem: RowLayout {
+                            spacing: Kirigami.Units.largeSpacing
+
+                            SkeletonBlock {
+                                Layout.preferredWidth: Kirigami.Units.iconSizes.large
+                                Layout.preferredHeight: Kirigami.Units.iconSizes.large
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: Kirigami.Units.smallSpacing
+
+                                SkeletonBlock { Layout.preferredWidth: 160; Layout.preferredHeight: 16 }
+                                SkeletonBlock { Layout.preferredWidth: 80; Layout.preferredHeight: 12 }
+                            }
+
+                            SkeletonBlock { Layout.preferredWidth: 90; Layout.preferredHeight: 32 }
+                        }
+                    }
                 }
             }
 
@@ -206,11 +344,21 @@ Kirigami.ScrollablePage {
                         installed: true
                     })
 
+                    HoverHandler {
+                        id: updateRowHover
+                    }
+
+                    Timer {
+                        interval: 200
+                        running: updateRowHover.hovered
+                        onTriggered: DetailController.prefetch(updateDelegate.pkgId)
+                    }
+
                     contentItem: RowLayout {
                         spacing: Kirigami.Units.largeSpacing
 
-                        Kirigami.Icon {
-                            source: updateDelegate.iconUrl.length > 0 ? updateDelegate.iconUrl : "application-x-executable"
+                        AppIcon {
+                            source: updateDelegate.iconUrl
                             Layout.preferredWidth: Kirigami.Units.iconSizes.large
                             Layout.preferredHeight: Kirigami.Units.iconSizes.large
                         }
@@ -241,6 +389,77 @@ Kirigami.ScrollablePage {
                             name: updateDelegate.name
                             iconUrl: updateDelegate.iconUrl
                             mode: "update"
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.largeSpacing
+                visible: TransactionsModel.doneCount > 0
+
+                Kirigami.Heading {
+                    Layout.fillWidth: true
+                    level: 2
+                    text: i18n("Completed")
+                }
+
+                Controls.ToolButton {
+                    icon.name: "edit-clear-history-symbolic"
+                    text: i18n("Clear")
+                    onClicked: TransactionsModel.clearFinished()
+                }
+            }
+
+            Repeater {
+                model: TransactionsModel
+
+                delegate: Kirigami.AbstractCard {
+                    id: doneDelegate
+
+                    required property int index
+                    required property string name
+                    required property string iconUrl
+                    required property string status
+                    required property string txType
+                    required property string error
+
+                    readonly property bool failed: status === "failed"
+
+                    visible: status === "completed" || failed
+                    Layout.fillWidth: true
+                    opacity: failed ? 1 : 0.7
+
+                    contentItem: RowLayout {
+                        spacing: Kirigami.Units.largeSpacing
+
+                        Kirigami.Icon {
+                            source: doneDelegate.iconUrl.length > 0 ? doneDelegate.iconUrl : "application-x-executable"
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.medium
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+                        }
+
+                        Kirigami.Heading {
+                            level: 3
+                            text: doneDelegate.name
+                            elide: Text.ElideRight
+                        }
+
+                        Controls.Label {
+                            Layout.fillWidth: true
+                            text: doneDelegate.failed
+                                ? (doneDelegate.error.length > 0 ? doneDelegate.error : i18n("Failed"))
+                                : ""
+                            color: Kirigami.Theme.negativeTextColor
+                            elide: Text.ElideRight
+                        }
+
+                        Kirigami.Icon {
+                            source: doneDelegate.failed ? "dialog-error-symbolic" : "checkmark-symbolic"
+                            color: doneDelegate.failed ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.positiveTextColor
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
                         }
                     }
                 }

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls as Controls
+import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.formcard as FormCard
 import org.blossomos.arc
@@ -20,6 +21,18 @@ FormCard.FormCardPage {
         SettingsController.load();
         RemotesModel.load();
         ready = true;
+    }
+
+    Connections {
+        target: RemotesModel
+        function onActionFailed(message) { applicationWindow().showPassiveNotification(message); }
+        function onActionSucceeded(message) { applicationWindow().showPassiveNotification(message); }
+    }
+
+    Connections {
+        target: SettingsController
+        function onActionFailed(message) { applicationWindow().showPassiveNotification(message); }
+        function onActionSucceeded(message) { applicationWindow().showPassiveNotification(message); }
     }
 
     FormCard.FormHeader {
@@ -97,31 +110,16 @@ FormCard.FormCardPage {
                 text: name
                 description: url
 
-                trailing: remoteDelegate.isProtected ? protectedMarker : removeButton
-
-                Kirigami.Icon {
-                    id: protectedMarker
-                    visible: false
-                    source: "object-locked-symbolic"
-                    implicitWidth: Kirigami.Units.iconSizes.smallMedium
-                    implicitHeight: Kirigami.Units.iconSizes.smallMedium
-
-                    Controls.ToolTip.text: i18n("Protected system repository")
-                    Controls.ToolTip.visible: protectedHover.hovered
-                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-
-                    HoverHandler {
-                        id: protectedHover
+                trailing: Controls.ToolButton {
+                    icon.name: remoteDelegate.isProtected ? "object-locked-symbolic" : "delete"
+                    enabled: !remoteDelegate.isProtected
+                    onClicked: {
+                        removeRepoDialog.repoName = remoteDelegate.name;
+                        removeRepoDialog.open();
                     }
-                }
-
-                Controls.ToolButton {
-                    id: removeButton
-                    visible: false
-                    icon.name: "edit-delete-symbolic"
-                    onClicked: RemotesModel.remove(remoteDelegate.name)
-
-                    Controls.ToolTip.text: i18n("Remove repository")
+                    Controls.ToolTip.text: remoteDelegate.isProtected
+                        ? i18n("Protected system repository")
+                        : i18n("Remove repository")
                     Controls.ToolTip.visible: hovered
                     Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                 }
@@ -145,9 +143,10 @@ FormCard.FormCardPage {
         FormCard.FormButtonDelegate {
             id: forceUpdateDelegate
             icon.name: "update-none-symbolic"
+            icon.color: Kirigami.Theme.negativeTextColor
             text: i18n("Force update")
             description: i18n("Runs flatpak update directly, bypassing the daemon")
-            onClicked: SettingsController.forceUpdate()
+            onClicked: forceUpdateDialog.open()
         }
 
         FormCard.FormDelegateSeparator {
@@ -158,9 +157,10 @@ FormCard.FormCardPage {
         FormCard.FormButtonDelegate {
             id: restartDelegate
             icon.name: "system-reboot-symbolic"
+            icon.color: Kirigami.Theme.negativeTextColor
             text: i18n("Restart daemon")
             description: i18n("Kills the running arc-daemon and starts a fresh one")
-            onClicked: SettingsController.restartDaemon()
+            onClicked: restartDaemonDialog.open()
         }
     }
 
@@ -193,5 +193,67 @@ FormCard.FormCardPage {
             label: i18n("URL")
             placeholderText: "https://example.com/repo"
         }
+    }
+
+    Kirigami.PromptDialog {
+        id: removeRepoDialog
+
+        property string repoName: ""
+
+        title: i18n("Remove %1?", removeRepoDialog.repoName)
+        subtitle: i18n("Apps installed from this repository keep working, but it will no longer offer updates or new installs.")
+        standardButtons: Kirigami.Dialog.Cancel
+        showCloseButton: false
+
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18n("Remove")
+                icon.name: "delete"
+                onTriggered: {
+                    RemotesModel.remove(removeRepoDialog.repoName);
+                    removeRepoDialog.close();
+                }
+            }
+        ]
+    }
+
+    Kirigami.PromptDialog {
+        id: forceUpdateDialog
+
+        title: i18n("Force update now?")
+        subtitle: i18n("Runs flatpak update directly, bypassing the daemon and its progress tracking.")
+        standardButtons: Kirigami.Dialog.Cancel
+        showCloseButton: false
+
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18n("Update")
+                icon.name: "update-none-symbolic"
+                onTriggered: {
+                    SettingsController.forceUpdate();
+                    forceUpdateDialog.close();
+                }
+            }
+        ]
+    }
+
+    Kirigami.PromptDialog {
+        id: restartDaemonDialog
+
+        title: i18n("Restart the daemon?")
+        subtitle: i18n("Cancels every running install, remove and update right now.")
+        standardButtons: Kirigami.Dialog.Cancel
+        showCloseButton: false
+
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18n("Restart")
+                icon.name: "system-reboot-symbolic"
+                onTriggered: {
+                    SettingsController.restartDaemon();
+                    restartDaemonDialog.close();
+                }
+            }
+        ]
     }
 }

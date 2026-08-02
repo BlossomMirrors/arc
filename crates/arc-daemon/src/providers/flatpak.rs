@@ -6,6 +6,7 @@ use libflatpak::glib;
 use libflatpak::prelude::*;
 use std::sync::Arc;
 use tokio::sync::{mpsc::UnboundedSender, Semaphore};
+use tracing::warn;
 
 pub struct FlatpakProvider {
     network_sem: Arc<Semaphore>,
@@ -191,6 +192,7 @@ fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
         homepage_url: None,
         content_rating: None,
         is_runtime,
+        categories: vec![],
     }
 }
 
@@ -203,7 +205,7 @@ impl FlatpakProvider {
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
         tokio::task::spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
-            let db = AppStreamDb::get_static();
+            let db = AppStreamDb::get();
 
             // collect installed app ids so we can mark them correctly in search results
             let mut installed_ids: std::collections::HashSet<String> =
@@ -265,6 +267,7 @@ impl FlatpakProvider {
                                 homepage_url: None,
                                 content_rating: None,
                                 is_runtime: false,
+                                categories: vec![],
                             });
                         Some(pkg)
                     } else {
@@ -295,7 +298,7 @@ impl FlatpakProvider {
                     }
                 }
             }
-            Ok(AppStreamDb::get_static()
+            Ok(AppStreamDb::get()
                 .get_apps_by_category(&category)
                 .into_iter()
                 .map(|e| {
@@ -375,7 +378,7 @@ impl FlatpakProvider {
                 }
             }
 
-            let db = AppStreamDb::get_static();
+            let db = AppStreamDb::try_get();
             let mut extensions: Vec<Package> = Vec::new();
             let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -422,6 +425,7 @@ impl FlatpakProvider {
                             homepage_url: None,
                             content_rating: None,
                             is_runtime: false,
+                            categories: vec![],
                         });
                     }
                 }
@@ -444,6 +448,7 @@ impl FlatpakProvider {
                         homepage_url: None,
                         content_rating: None,
                         is_runtime: false,
+                        categories: vec![],
                     });
                 }
             }
@@ -473,7 +478,7 @@ impl FlatpakProvider {
             // clicking into something you already have installed doesn't
             // queue behind that bulk warm-up
             let entry = crate::appstream_db::load_local_metainfo(&app_id)
-                .or_else(|| AppStreamDb::get_static().find_by_id(&app_id));
+                .or_else(|| AppStreamDb::try_get().find_by_id(&app_id));
             Ok(entry.map(|e| entry_to_flatpak_package(e, installed)))
         })
         .await
@@ -489,11 +494,9 @@ impl FlatpakProvider {
         let app_id = app_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = Some(&gio_cancel);
-            let db = AppStreamDb::get_static();
-
-            // Build a list of remotes to try: primary from AppStream DB first,
-            // then every configured remote (covers extensions which aren't in the DB)
-            let primary_remote = db.find_by_id(&app_id).and_then(|e| e.remote);
+            let primary_remote = AppStreamDb::try_get()
+                .find_by_id(&app_id)
+                .and_then(|e| e.remote);
 
             let mut remotes_to_try: Vec<String> = Vec::new();
             if let Some(ref r) = primary_remote {
@@ -937,7 +940,7 @@ impl PackageProvider for FlatpakProvider {
     async fn search(&self, query: &str) -> Result<Vec<Package>, ArcError> {
         let query = query.to_string();
         tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
-            Ok(AppStreamDb::get_static()
+            Ok(AppStreamDb::get()
                 .search_apps(&query)
                 .into_iter()
                 .map(|e| entry_to_flatpak_package(e, false))
@@ -981,10 +984,24 @@ impl PackageProvider for FlatpakProvider {
             let cancel = libflatpak::gio::Cancellable::NONE;
             let mut packages = Vec::new();
             for inst in all_installations() {
-                let refs = inst
-                    .list_installed_refs_for_update(cancel)
-                    .unwrap_or_default();
-                packages.extend(refs.iter().map(installed_ref_to_package));
+                let mut attempt = 0;
+                loop {
+                    match inst.list_installed_refs_for_update(cancel) {
+                        Ok(refs) => {
+                            packages.extend(refs.iter().map(installed_ref_to_package));
+                            break;
+                        }
+                        Err(e) if attempt < 2 => {
+                            attempt += 1;
+                            warn!("list_installed_refs_for_update failed, retrying: {e}");
+                            std::thread::sleep(std::time::Duration::from_millis(300));
+                        }
+                        Err(e) => {
+                            warn!("list_installed_refs_for_update failed: {e}");
+                            break;
+                        }
+                    }
+                }
             }
             Ok(packages)
         })
@@ -997,9 +1014,10 @@ impl PackageProvider for FlatpakProvider {
         tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
 
-            // Get the package info to determine which remote it comes from
-            let db = AppStreamDb::get_static();
-            let primary_remote = db.find_by_id(&package_id).and_then(|e| e.remote);
+            // a cold miss falls through to the flathub fallback below
+            let primary_remote = AppStreamDb::try_get()
+                .find_by_id(&package_id)
+                .and_then(|e| e.remote);
 
             // Build a list of remotes to try: primary from AppStream DB, then flathub as fallback
             let mut remotes_to_try = Vec::new();

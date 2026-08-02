@@ -37,6 +37,28 @@ async fn main() {
     unsafe { libc::_exit(code) };
 }
 
+// sends SIGTERM to every other arc-daemon process so a fresh start replaces
+// a stale one instead of racing it for the http port
+fn terminate_stale_daemons() {
+    let self_pid = std::process::id();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        if pid == self_pid {
+            continue;
+        }
+        let comm = std::fs::read_to_string(entry.path().join("comm")).unwrap_or_default();
+        if comm.trim() == "arc-daemon" {
+            info!("Terminating stale daemon pid {pid}");
+            let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
+        }
+    }
+}
+
 async fn run() -> Result<()> {
     let locale = sys_locale::get_locale().unwrap_or_else(|| "en".to_string());
     translators::set_locale(&locale);
@@ -50,6 +72,10 @@ async fn run() -> Result<()> {
 
     info!("Arc Communication Daemon (ACD) starting");
 
+    terminate_stale_daemons();
+
+    forge_cache::warm_from_disk().await;
+
     // ARC_HTTP_ONLY runs without a session bus (e.g. in a container), so it
     // can't claim the D-Bus name and doesn't need to replace anything.
     let bus_claim = if std::env::var_os("ARC_HTTP_ONLY").is_none() {
@@ -58,15 +84,9 @@ async fn run() -> Result<()> {
         None
     };
 
-    // AppStreamDb::get_static() is a lazy, self-memoizing OnceLock: whichever
-    // caller (this warm-up or a live search) reaches it first pays the parse
-    // cost, everyone else gets the cached result instantly. Warm it in the
-    // background instead of blocking D-Bus/HTTP startup on it, so the daemon
-    // (and search) are usable immediately; the first search after a cold
-    // start just pays the parse cost inline instead of the whole app.
     info!("Loading appstream database in the background...");
     tokio::spawn(async {
-        tokio::task::spawn_blocking(appstream_db::AppStreamDb::get_static)
+        tokio::task::spawn_blocking(appstream_db::AppStreamDb::get)
             .await
             .ok();
         info!("Appstream database ready");
@@ -74,8 +94,20 @@ async fn run() -> Result<()> {
         info!("Pre-fetching Forge home page...");
         forge_cache::refresh().await;
 
+        // a loaded snapshot older than the live catalog files still answers
+        // instantly so this catches it up once in the background
+        if appstream_db::AppStreamDb::snapshot_was_stale() {
+            tokio::task::spawn_blocking(appstream_db::AppStreamDb::refresh_if_stale)
+                .await
+                .ok();
+            forge_cache::refresh().await;
+        }
+
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+            tokio::task::spawn_blocking(appstream_db::AppStreamDb::refresh_if_stale)
+                .await
+                .ok();
             forge_cache::refresh().await;
         }
     });

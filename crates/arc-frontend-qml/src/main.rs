@@ -10,6 +10,8 @@ use std::pin::Pin;
 
 extern "C" {
     fn arc_setup_i18n(engine: *mut c_void, domain: *const std::ffi::c_char);
+    fn arc_install_message_handler();
+    fn arc_engine_has_root(engine: *mut c_void) -> bool;
 }
 
 fn main() {
@@ -19,6 +21,8 @@ fn main() {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+
+    unsafe { arc_install_message_handler() };
 
     runtime::init();
     services::deeplink::init();
@@ -39,29 +43,24 @@ fn main() {
             arc_setup_i18n(raw as *mut c_void, domain.as_ptr());
         }
 
-        engine.load(&QUrl::from(
+        Pin::as_mut(&mut engine).load(&QUrl::from(
             "qrc:/qt/qml/org/blossomos/arc/src/qml/Main.qml",
         ));
+
+        let has_root = unsafe {
+            let raw: *mut QQmlApplicationEngine = Pin::as_mut(&mut engine).get_unchecked_mut();
+            arc_engine_has_root(raw as *mut c_void)
+        };
+        if !has_root {
+            tracing::error!("Main.qml failed to load, see the qml errors above");
+            std::process::exit(1);
+        }
     }
 
     if let Some(app) = app.as_mut() {
         app.exec();
     }
 
-    services::launcher::clear_blocking();
-    clear_foreground_blocking();
-}
-
-// the daemon suppresses notifications for the app whose detail page is open
-// so make sure that reservation dies with the frontend
-fn clear_foreground_blocking() {
-    if let Ok(conn) = zbus::blocking::Connection::session() {
-        let _ = conn.call_method(
-            Some("org.blossomos.arc.daemon"),
-            "/org/blossomos/arc/daemon",
-            Some("org.blossomos.arc.daemon"),
-            "SetForegroundPackage",
-            &("",),
-        );
-    }
+    libarc::launcher::clear_blocking();
+    libarc::clear_foreground_blocking();
 }

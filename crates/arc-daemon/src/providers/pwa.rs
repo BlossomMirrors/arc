@@ -156,6 +156,7 @@ impl PwaProvider {
             homepage_url: pwa.homepage_url.clone(),
             content_rating: pwa.content_rating.clone(),
             is_runtime: false,
+            categories: vec![],
         }
     }
 
@@ -351,6 +352,7 @@ impl PackageProvider for PwaProvider {
                         homepage_url: None,
                         content_rating: None,
                         is_runtime: false,
+                        categories: vec![],
                     })
             })
             .collect();

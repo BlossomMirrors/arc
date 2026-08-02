@@ -4,7 +4,7 @@ use futures_util::future::join_all;
 use libarc::ArcDaemonProxy;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, serde::Serialize, Default)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct Card {
     pub id: String,
     pub name: String,
@@ -13,7 +13,7 @@ pub struct Card {
     pub installed: bool,
 }
 
-#[derive(Clone, serde::Serialize, Default)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct HeroItem {
     pub id: String,
     pub banner_url: String,
@@ -24,7 +24,7 @@ pub struct HeroItem {
     pub story_index: i32,
 }
 
-#[derive(Clone, serde::Serialize, Default)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct LinkItem {
     pub text: String,
     pub href: String,
@@ -32,7 +32,7 @@ pub struct LinkItem {
     pub app_id: String,
 }
 
-#[derive(Clone, serde::Serialize, Default)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct Category {
     pub id: String,
     pub label: String,
@@ -70,7 +70,7 @@ impl Default for HomeSection {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Story {
     pub id: String,
     pub title: String,
@@ -157,13 +157,7 @@ async fn resolve_ids(
             let pwa = pwa_map.get(&id).cloned();
             async move {
                 let daemon = if let Some(p) = p {
-                    let pkgs: Vec<libarc::Package> = p
-                        .search(&id)
-                        .await
-                        .ok()
-                        .and_then(|j| serde_json::from_str(&j).ok())
-                        .unwrap_or_default();
-                    pkgs.into_iter().find(|pkg| pkg.id == id).map(|pkg| AppEntry {
+                    p.app_info(&id).await.ok().flatten().map(|pkg| AppEntry {
                         id: pkg.id,
                         name: pkg.name,
                         summary: pkg.description,
@@ -215,10 +209,8 @@ pub async fn load_home(proxy: Option<ArcDaemonProxy<'static>>) -> (Vec<HomeSecti
         forge::fetch_frontpage(),
         async {
             if let Some(ref p) = proxy {
-                p.list_installed()
+                p.installed_packages()
                     .await
-                    .ok()
-                    .and_then(|json| serde_json::from_str::<Vec<libarc::Package>>(&json).ok())
                     .unwrap_or_default()
                     .into_iter()
                     .map(|pkg| pkg.id)
@@ -373,6 +365,9 @@ pub async fn load_home(proxy: Option<ArcDaemonProxy<'static>>) -> (Vec<HomeSecti
             if li.story_index >= 0 {
                 li.story_index += offset;
             }
+        }
+        for (local_idx, story) in so.stories.iter_mut().enumerate() {
+            story.id = format!("story-{}", offset + local_idx as i32);
         }
         stories.extend(so.stories);
         sections.push(so.item);

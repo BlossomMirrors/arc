@@ -3,6 +3,7 @@ use crate::providers::MultiProvider;
 use crate::providers::PackageProvider;
 use crate::transaction_manager::TransactionManager;
 use libarc::{Provider, TransactionType};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
@@ -44,6 +45,7 @@ pub struct ArcDaemonInterface {
     pub provider: Arc<MultiProvider>,
     pub transaction_manager: Arc<TransactionManager>,
     pub download_semaphore: Arc<Semaphore>,
+    pub download_permits: Arc<AtomicUsize>,
     // package whose detail page the frontend currently shows so its
     // transactions skip the job notification
     pub foreground_package: Arc<tokio::sync::RwLock<String>>,
@@ -583,6 +585,16 @@ impl ArcDaemonInterface {
         *self.foreground_package.write().await = package_id;
     }
 
+    async fn set_concurrent_downloads(&self, count: u32) {
+        let target = count.max(1) as usize;
+        let current = self.download_permits.swap(target, Ordering::SeqCst);
+        if target > current {
+            self.download_semaphore.add_permits(target - current);
+        } else if target < current {
+            self.download_semaphore.forget_permits(current - target);
+        }
+    }
+
     async fn refresh_cache(&self) -> bool {
         info!("RefreshCache");
         match self.provider.refresh_cache().await {
@@ -620,11 +632,6 @@ impl ArcDaemonInterface {
 
     async fn get_app_info(&self, package_id: String) -> String {
         info!("GetAppInfo: {}", package_id);
-        // AppStreamDb::get_static() is a lazy OnceLock: on a cold daemon this
-        // call can otherwise block for as long as the one-time parse takes
-        // (over a minute), making the UI look permanently stuck instead of
-        // just slow. Bound it so a click during that window fails fast
-        // rather than hanging indefinitely.
         match tokio::time::timeout(APP_INFO_TIMEOUT, self.provider.get_app_info(&package_id)).await
         {
             Ok(Ok(Some(package))) => {
@@ -648,11 +655,6 @@ impl ArcDaemonInterface {
             return self.provider.pwa.get_metadata_json(&package_id).await;
         }
 
-        // fast path first: an installed app's own exported metainfo file is
-        // a single small local XML read, independent of the shared
-        // AppStreamDb OnceLock, so it answers instantly even while that
-        // OnceLock is still mid-parse. This covers the common case (looking
-        // at something already installed) without waiting on the bulk scan.
         let fast_id = package_id.clone();
         if let Ok(Some(json)) = tokio::task::spawn_blocking(move || {
             crate::appstream_db::load_local_metainfo(&fast_id).and_then(|e| serde_json::to_string(&e).ok())
@@ -662,16 +664,31 @@ impl ArcDaemonInterface {
             return json;
         }
 
+        // resolve_now checks the already-loaded db first then decompresses
+        // and scans just the catalog files not yet folded in
+        // stays well under APP_INFO_TIMEOUT instead of waiting on the full parse
+        let resolve_id = package_id.clone();
         let fetch = tokio::task::spawn_blocking(move || {
-            let db = crate::appstream_db::AppStreamDb::get_static();
-            db.find_by_id(&package_id)
-                .or_else(|| db.load_from_exported_metainfo(&package_id))
-                .and_then(|e| serde_json::to_string(&e).ok())
-                .unwrap_or_else(|| "null".to_string())
+            crate::appstream_db::resolve_now(&resolve_id)
+                .or_else(|| crate::appstream_db::AppStreamDb::try_get().load_from_exported_metainfo(&resolve_id))
         });
-        match tokio::time::timeout(APP_INFO_TIMEOUT, fetch).await {
-            Ok(Ok(json)) => json,
-            _ => "null".to_string(),
+        let entry = tokio::time::timeout(APP_INFO_TIMEOUT, fetch)
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .flatten();
+        if let Some(entry) = entry {
+            if let Ok(json) = serde_json::to_string(&entry) {
+                return json;
+            }
+        }
+
+        // id missing from every catalog file
+        // fall back to the disk-seeded package cache for a partial answer
+        match self.provider.cached_package(&package_id).await {
+            Some(pkg) => serde_json::to_string(&crate::appstream_db::partial_entry_from_package(&pkg))
+                .unwrap_or_else(|_| "null".to_string()),
+            None => "null".to_string(),
         }
     }
 
@@ -709,6 +726,11 @@ impl ArcDaemonInterface {
         info!("ListTransactions");
         let txs = self.transaction_manager.list().await;
         serde_json::to_string(&txs).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    async fn clear_transaction_history(&self) {
+        info!("ClearTransactionHistory");
+        self.transaction_manager.clear_history().await;
     }
 
     async fn get_transaction(&self, transaction_id: String) -> String {
@@ -759,7 +781,7 @@ impl ArcDaemonInterface {
 
     async fn get_home_apps(&self, popular_count: u32, recent_count: u32) -> String {
         tokio::task::spawn_blocking(move || {
-            let db = crate::appstream_db::AppStreamDb::get_static();
+            let db = crate::appstream_db::AppStreamDb::try_get();
             let popular = db.get_popular_apps(popular_count as usize);
             let recent = db.get_recent_apps(recent_count as usize);
             serde_json::json!({ "popular": popular, "recent": recent }).to_string()

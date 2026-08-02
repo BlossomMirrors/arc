@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as Controls
 import org.kde.kirigami as Kirigami
 import org.kde.kirigami.layouts as KL
 import org.blossomos.arc
@@ -12,123 +13,155 @@ Kirigami.ApplicationWindow {
     width: Kirigami.Units.gridUnit * 66
     height: Kirigami.Units.gridUnit * 44
 
-    property string currentView: "home"
-
-    property var navSpec: []
-    property bool navRestoring: false
+    readonly property string currentView: NavController.currentView
 
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
-    pageStack.defaultColumnWidth: Kirigami.Units.gridUnit * 25
-
-    readonly property bool splitAllowed: pageStack.depth >= 2
-        && pageStack.width >= pageStack.defaultColumnWidth * 2
-        && pageStack.get(pageStack.depth - 2).isListPage === true
 
     Binding {
         target: root.pageStack.columnView
         property: "columnResizeMode"
-        value: root.splitAllowed ? KL.ColumnView.FixedColumns : KL.ColumnView.SingleColumn
+        value: KL.ColumnView.SingleColumn
+    }
+
+    pageStack.initialPage: Kirigami.Page {
+        padding: 0
+
+        Controls.SwipeView {
+            id: tabView
+            anchors.fill: parent
+            interactive: false
+
+            HomePage {}
+            SearchPage { id: searchPageItem }
+            InstalledPage { id: installedPageItem }
+            DownloadsPage { id: downloadsPageItem }
+            SettingsPage {}
+
+            // InstalledPage and DownloadsPage share the PackageListModel singleton,
+            // so only the active tab may trigger a load or their requests race
+            // and clobber each other's results.
+            onCurrentIndexChanged: {
+                if (currentIndex === root.tabIndex.installed) {
+                    installedPageItem.load();
+                } else if (currentIndex === root.tabIndex.downloads) {
+                    downloadsPageItem.load();
+                }
+            }
+        }
+    }
+
+    function entryComponent(entry) {
+        switch (entry.kind) {
+        case "category": return categoryPageComponent;
+        case "detail": return detailPageComponent;
+        case "story": return storyPageComponent;
+        case "flatpakref": return installFlatpakrefPageComponent;
+        case "addrepo": return addRepoPageComponent;
+        case "installfile": return installFilePageComponent;
+        }
+        return categoryPageComponent;
+    }
+
+    function entryProps(entry) {
+        switch (entry.kind) {
+        case "category": return { categoryId: entry.a, categoryLabel: entry.b, categoryColor: entry.c ?? "", categoryIcon: entry.d ?? "" };
+        case "detail": return { pkgId: entry.a, seed: entry.c ?? null };
+        case "story": return { storyId: entry.a };
+        }
+        return {};
     }
 
     function pushEntry(entry) {
-        switch (entry.kind) {
-        case "home": pageStack.push(homePageComponent); break;
-        case "search": pageStack.push(searchPageComponent, { query: entry.a ?? "" }); break;
-        case "installed": pageStack.push(installedPageComponent); break;
-        case "category": pageStack.push(categoryPageComponent, { categoryId: entry.a, categoryLabel: entry.b }); break;
-        case "downloads": pageStack.push(downloadsPageComponent); break;
-        case "settings": pageStack.push(settingsPageComponent); break;
-        case "detail": pageStack.push(detailPageComponent, { pkgId: entry.a, seed: entry.c ?? null }); break;
-        case "story": pageStack.push(storyPageComponent, { storyId: entry.a }); break;
-        }
+        pageStack.push(entryComponent(entry), entryProps(entry));
     }
 
-    function sameEntry(x, y) {
-        return x.kind === y.kind && (x.a ?? "") === (y.a ?? "") && (x.b ?? "") === (y.b ?? "");
-    }
+    readonly property var tabIndex: ({ home: 0, search: 1, installed: 2, downloads: 3, settings: 4 })
 
     function navigate(spec) {
-        var common = 0;
-        while (common < navSpec.length && common < spec.length && sameEntry(navSpec[common], spec[common])) {
-            common++;
-        }
-        if (common === navSpec.length && spec.length > navSpec.length && pageStack.depth === navSpec.length) {
-            for (var i = common; i < spec.length; i++) {
-                pushEntry(spec[i]);
+        NavController.navigate(JSON.stringify(spec));
+    }
+
+    function runNavOp(json) {
+        var op = JSON.parse(json);
+        switch (op.action) {
+        case "tab":
+            if (pageStack.depth > 1) {
+                pageStack.pop(pageStack.get(0));
             }
-        } else {
-            while (pageStack.depth > 0) {
-                pageStack.pop();
+            tabView.currentIndex = root.tabIndex[op.entry.kind] ?? 0;
+            if (op.entry.kind === "search") {
+                searchPageItem.query = op.entry.a ?? "";
             }
-            for (var j = 0; j < spec.length; j++) {
-                pushEntry(spec[j]);
+            break;
+        case "push":
+            pushEntry(op.entry);
+            break;
+        case "pop":
+            pageStack.pop();
+            break;
+        case "popTo":
+            if (pageStack.depth > op.depth) {
+                pageStack.pop(pageStack.get(op.depth - 1));
             }
-        }
-        navSpec = spec;
-        currentView = spec.length > 0
-            ? (spec[0].kind === "category" ? "search" : spec[0].kind)
-            : "home";
-        if (!navRestoring) {
-            NavController.record(JSON.stringify(spec));
+            break;
         }
     }
 
     function goHome() { navigate([{ kind: "home" }]) }
     function goSearch(query) { navigate([{ kind: "search", a: query }]) }
+    function liveSearch(query) {
+        if (currentView === "search") {
+            searchPageItem.query = query;
+            NavController.updateQuery(query);
+            return;
+        }
+        goSearch(query);
+    }
     function goInstalled() { navigate([{ kind: "installed" }]) }
     function goDownloads() { navigate([{ kind: "downloads" }]) }
     function goSettings() { navigate([{ kind: "settings" }]) }
-    function openCategory(categoryId, categoryLabel) { navigate([{ kind: "category", a: categoryId, b: categoryLabel }]) }
-    function openApp(pkgId, seed) { navigate(navSpec.concat([{ kind: "detail", a: pkgId, c: seed ?? null }])) }
-    function openStory(storyId) { navigate(navSpec.concat([{ kind: "story", a: storyId }])) }
+    function openCategory(categoryId, categoryLabel, categoryColor, categoryIcon) { navigate([{ kind: "category", a: categoryId, b: categoryLabel, c: categoryColor ?? "", d: categoryIcon ?? "" }]) }
+    function openApp(pkgId, seed) { NavController.openChild(JSON.stringify({ kind: "detail", a: pkgId, c: seed ?? null })) }
+    function openStory(storyId) { NavController.openChild(JSON.stringify({ kind: "story", a: storyId })) }
 
     header: TopBar {
+        id: topBar
         currentView: root.currentView
 
         onHomeRequested: root.goHome()
         onSearchRequested: query => root.goSearch(query)
+        onSearchTextEdited: query => root.liveSearch(query)
         onInstalledRequested: root.goInstalled()
         onDownloadsRequested: root.goDownloads()
         onSettingsRequested: root.goSettings()
     }
 
+    function handleTypeAhead(event) {
+        if (event.modifiers !== Qt.NoModifier && event.modifiers !== Qt.ShiftModifier) {
+            return;
+        }
+        if (event.key === Qt.Key_Escape || event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab
+            || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            return;
+        }
+        var t = event.text;
+        if (t.length === 0 || t.charCodeAt(0) < 0x20 || t.charCodeAt(0) === 0x7f) {
+            return;
+        }
+        topBar.focusSearch(t);
+        event.accepted = true;
+    }
+
     Connections {
         target: NavController
-        function onRestoreRequested(state) {
-            root.navRestoring = true;
-            root.navigate(JSON.parse(state));
-            root.navRestoring = false;
+        function onNavOp(op) {
+            root.runNavOp(op);
         }
-    }
-
-    Component {
-        id: homePageComponent
-        HomePage {}
-    }
-
-    Component {
-        id: searchPageComponent
-        SearchPage {}
-    }
-
-    Component {
-        id: installedPageComponent
-        InstalledPage {}
     }
 
     Component {
         id: categoryPageComponent
         CategoryPage {}
-    }
-
-    Component {
-        id: downloadsPageComponent
-        DownloadsPage {}
-    }
-
-    Component {
-        id: settingsPageComponent
-        SettingsPage {}
     }
 
     Component {
@@ -181,16 +214,13 @@ Kirigami.ApplicationWindow {
                 root.navigate([{ kind: "detail", a: DeepLinkController.pkgId }]);
                 break;
             case "flatpakref":
-                root.pageStack.clear();
-                root.pageStack.push(installFlatpakrefPageComponent);
+                root.navigate([{ kind: "flatpakref" }]);
                 break;
             case "addrepo":
-                root.pageStack.clear();
-                root.pageStack.push(addRepoPageComponent);
+                root.navigate([{ kind: "addrepo" }]);
                 break;
             case "installfile":
-                root.pageStack.clear();
-                root.pageStack.push(installFilePageComponent);
+                root.navigate([{ kind: "installfile" }]);
                 break;
             }
         }
@@ -200,5 +230,6 @@ Kirigami.ApplicationWindow {
         TransactionsModel.init();
         goHome();
         DeepLinkController.resolve();
+        pageStack.Keys.pressed.connect(handleTypeAhead);
     }
 }

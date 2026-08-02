@@ -29,10 +29,21 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "restartDaemon"]
         fn restart_daemon(self: Pin<&mut SettingsController>);
+
+        #[qsignal]
+        #[cxx_name = "actionFailed"]
+        fn action_failed(self: Pin<&mut SettingsController>, message: QString);
+
+        #[qsignal]
+        #[cxx_name = "actionSucceeded"]
+        fn action_succeeded(self: Pin<&mut SettingsController>, message: QString);
     }
+
+    impl cxx_qt::Threading for SettingsController {}
 }
 
 use crate::runtime;
+use cxx_qt::{CxxQtThread, Threading};
 use cxx_qt_lib::QString;
 use libarc::{Provider, Settings};
 use std::pin::Pin;
@@ -44,6 +55,16 @@ pub struct SettingsControllerRust {
     auto_updates: bool,
     concurrent_downloads: i32,
     show_security_warnings: bool,
+}
+
+fn emit_result(qt_thread: &CxxQtThread<qobject::SettingsController>, message: String, success: bool) {
+    let _ = qt_thread.queue(move |mut this| {
+        if success {
+            this.as_mut().action_succeeded(QString::from(&message));
+        } else {
+            this.as_mut().action_failed(QString::from(&message));
+        }
+    });
 }
 
 fn provider_to_string(p: &Provider) -> &'static str {
@@ -78,39 +99,71 @@ impl qobject::SettingsController {
     }
 
     pub fn save(self: Pin<&mut Self>) {
+        let concurrent_downloads = self.concurrent_downloads.max(1) as u32;
         let s = Settings {
             preferred_provider: provider_from_string(&self.preferred_provider.to_string()),
             ignore_native_preference: self.ignore_native_preference,
             auto_updates: self.auto_updates,
-            concurrent_downloads: self.concurrent_downloads.max(1) as u32,
+            concurrent_downloads,
             show_security_warnings: self.show_security_warnings,
         };
         if let Err(e) = s.save() {
             tracing::warn!("failed to save settings: {e}");
         }
+
+        runtime::spawn(async move {
+            if let Some(proxy) = runtime::proxy().await {
+                let _ = proxy.set_concurrent_downloads(concurrent_downloads).await;
+            }
+        });
     }
 
-    pub fn force_update(self: Pin<&mut Self>) {
+    pub fn force_update(mut self: Pin<&mut Self>) {
+        let qt_thread = self.as_mut().qt_thread();
         runtime::spawn(async move {
-            let _ = tokio::process::Command::new("flatpak")
+            let result = tokio::process::Command::new("flatpak")
                 .args(["update", "-y"])
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
-                .spawn();
+                .status()
+                .await;
+            match result {
+                Ok(status) if status.success() => {
+                    emit_result(&qt_thread, "Update finished".into(), true);
+                }
+                Ok(status) => {
+                    emit_result(&qt_thread, format!("flatpak update exited with {status}"), false);
+                }
+                Err(e) => emit_result(&qt_thread, format!("Failed to run flatpak update: {e}"), false),
+            }
         });
     }
 
-    pub fn restart_daemon(self: Pin<&mut Self>) {
+    pub fn restart_daemon(mut self: Pin<&mut Self>) {
+        let qt_thread = self.as_mut().qt_thread();
         runtime::spawn(async move {
             let _ = tokio::process::Command::new("pkill").args(["-x", "arc-daemon"]).status().await;
             tokio::time::sleep(std::time::Duration::from_millis(800)).await;
-            let _ = std::process::Command::new("setsid")
+            let spawned = std::process::Command::new("setsid")
                 .args(["--fork", "/usr/bin/arc-daemon"])
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn();
+            if let Err(e) = spawned {
+                emit_result(&qt_thread, format!("Failed to start arc-daemon: {e}"), false);
+                return;
+            }
+
+            for _ in 0..20 {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                if libarc::connect().await.is_ok() {
+                    emit_result(&qt_thread, "Daemon restarted".into(), true);
+                    return;
+                }
+            }
+            emit_result(&qt_thread, "Daemon restart timed out".into(), false);
         });
     }
 }

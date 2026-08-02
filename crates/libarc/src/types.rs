@@ -37,6 +37,22 @@ pub struct Package {
     pub content_rating: Option<String>,
     #[serde(default)]
     pub is_runtime: bool,
+    #[serde(default)]
+    pub categories: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppMetadata {
+    pub summary: String,
+    pub description: String,
+    pub icon_url: Option<String>,
+    pub screenshots: Vec<String>,
+    pub homepage_url: Option<String>,
+    pub content_rating: String,
+    pub developer_name: Option<String>,
+    pub license: Option<String>,
+    pub eula_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

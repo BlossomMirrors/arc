@@ -6,6 +6,7 @@ ItemList {
 
     title: i18n("Installed")
     emptyText: i18n("Nothing installed yet")
+    markInstalled: false
 
-    Component.onCompleted: PackageListModel.loadInstalled()
+    function load() { PackageListModel.loadInstalled() }
 }

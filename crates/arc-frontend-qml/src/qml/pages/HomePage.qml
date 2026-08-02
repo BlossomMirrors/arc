@@ -11,9 +11,28 @@ Kirigami.ScrollablePage {
 
     Kirigami.ColumnView.fillWidth: true
 
+    leftPadding: Kirigami.Units.largeSpacing * 2
+    rightPadding: Kirigami.Units.largeSpacing * 2
+    topPadding: Kirigami.Units.largeSpacing
+
     title: i18n("Home")
 
     Component.onCompleted: HomeFeedModel.load()
+
+    Timer {
+        id: coldStartRetry
+        property int attempts: 0
+        interval: 30000
+        running: true
+        repeat: true
+        onTriggered: {
+            attempts += 1;
+            HomeFeedModel.refresh();
+            if (attempts >= 4) {
+                stop();
+            }
+        }
+    }
 
     function openApp(pkgId, seed) {
         applicationWindow().openApp(pkgId, seed);
@@ -23,8 +42,8 @@ Kirigami.ScrollablePage {
         applicationWindow().openStory(storyId);
     }
 
-    function openCategory(categoryId, categoryLabel) {
-        applicationWindow().openCategory(categoryId, categoryLabel);
+    function openCategory(categoryId, categoryLabel, categoryColor, categoryIcon) {
+        applicationWindow().openCategory(categoryId, categoryLabel, categoryColor, categoryIcon);
     }
 
     ConveyorLoader {
@@ -34,7 +53,7 @@ Kirigami.ScrollablePage {
 
     ColumnLayout {
         visible: !HomeFeedModel.loading
-        width: root.width
+        width: root.availableWidth
         spacing: 0
 
         ColumnLayout {
@@ -63,8 +82,8 @@ Kirigami.ScrollablePage {
                 Layout.fillWidth: true
                 Layout.topMargin: index === 0 ? 0
                     : ["carousel", "app-row", "app-grid", "categories"].indexOf(itemType) >= 0
-                        ? Kirigami.Units.gridUnit * 1.5
-                        : Kirigami.Units.smallSpacing
+                        ? Kirigami.Units.gridUnit * 2.5
+                        : Kirigami.Units.largeSpacing
 
                 sourceComponent: {
                     switch (rowLoader.itemType) {
@@ -72,7 +91,7 @@ Kirigami.ScrollablePage {
                     case "h2": return headingComponent;
                     case "h3": return headingComponent;
                     case "p": return paragraphComponent;
-                    case "br": return spacerComponent;
+                    case "br": return rowLoader.index === 0 ? null : spacerComponent;
                     case "categories": return categoriesComponent;
                     case "app-row": return appRowComponent;
                     case "app-grid": return appGridComponent;
@@ -120,8 +139,8 @@ Kirigami.ScrollablePage {
                             Layout.fillWidth: true
                             Layout.maximumWidth: Kirigami.Units.gridUnit * 41
                             columns: 3
-                            columnSpacing: Kirigami.Units.smallSpacing
-                            rowSpacing: Kirigami.Units.smallSpacing
+                            columnSpacing: Kirigami.Units.largeSpacing
+                            rowSpacing: Kirigami.Units.largeSpacing
 
                             Repeater {
                                 model: JSON.parse(rowLoader.categoriesJson)
@@ -134,7 +153,7 @@ Kirigami.ScrollablePage {
                                     label: modelData.label
                                     iconName: modelData.icon_name
                                     bgColor: modelData.color
-                                    onActivated: root.openCategory(modelData.id, modelData.label)
+                                    onActivated: root.openCategory(modelData.id, modelData.label, modelData.color, modelData.icon_name)
                                 }
                             }
                         }
@@ -154,13 +173,13 @@ Kirigami.ScrollablePage {
 
                         CardCarousel {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: Kirigami.Units.gridUnit * 9
+                            Layout.preferredHeight: Kirigami.Units.gridUnit * 10
                             model: JSON.parse(rowLoader.cardsJson)
 
                             delegate: AppCard {
                                 required property var modelData
                                 width: Kirigami.Units.gridUnit * 10
-                                height: Kirigami.Units.gridUnit * 9
+                                height: Kirigami.Units.gridUnit * 10
                                 pkgId: modelData.id
                                 appName: modelData.name
                                 summary: modelData.summary
@@ -192,8 +211,8 @@ Kirigami.ScrollablePage {
                             id: grid
                             Layout.fillWidth: true
                             columns: Math.max(2, Math.floor(width / (Kirigami.Units.gridUnit * 12)))
-                            columnSpacing: Kirigami.Units.smallSpacing
-                            rowSpacing: Kirigami.Units.smallSpacing
+                            columnSpacing: Kirigami.Units.largeSpacing
+                            rowSpacing: Kirigami.Units.largeSpacing
 
                             Repeater {
                                 model: JSON.parse(rowLoader.cardsJson)
@@ -201,7 +220,7 @@ Kirigami.ScrollablePage {
                                 delegate: AppCard {
                                     required property var modelData
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: Kirigami.Units.gridUnit * 9
+                                    Layout.preferredHeight: Kirigami.Units.gridUnit * 10
                                     pkgId: modelData.id
                                     appName: modelData.name
                                     summary: modelData.summary
@@ -255,14 +274,14 @@ Kirigami.ScrollablePage {
 
                         CardCarousel {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: Kirigami.Units.gridUnit * 9
+                            Layout.preferredHeight: Kirigami.Units.gridUnit * 10
                             visible: count > 0
                             model: JSON.parse(rowLoader.cardsJson)
 
                             delegate: AppCard {
                                 required property var modelData
                                 width: Kirigami.Units.gridUnit * 10
-                                height: Kirigami.Units.gridUnit * 9
+                                height: Kirigami.Units.gridUnit * 10
                                 pkgId: modelData.id
                                 appName: modelData.name
                                 summary: modelData.summary

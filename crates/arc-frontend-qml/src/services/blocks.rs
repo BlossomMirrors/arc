@@ -245,14 +245,7 @@ pub async fn resolve_app_blocks(blocks: &mut [DescBlock], proxy: Option<&ArcDaem
         let proxy = proxy.cloned();
         async move {
             let pkg = match proxy {
-                Some(p) => p
-                    .search(&id)
-                    .await
-                    .ok()
-                    .and_then(|j| serde_json::from_str::<Vec<libarc::Package>>(&j).ok())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .find(|pkg| pkg.id == id),
+                Some(p) => p.app_info(&id).await.ok().flatten(),
                 None => None,
             };
             (id, pkg)

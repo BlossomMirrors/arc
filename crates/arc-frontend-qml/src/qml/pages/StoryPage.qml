@@ -11,6 +11,10 @@ Kirigami.ScrollablePage {
 
     Kirigami.ColumnView.fillWidth: true
 
+    leftPadding: 0
+    rightPadding: 0
+    topPadding: 0
+
     required property string storyId
 
     title: StoryController.title

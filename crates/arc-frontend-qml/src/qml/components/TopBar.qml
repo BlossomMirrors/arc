@@ -9,12 +9,22 @@ Controls.ToolBar {
 
     property alias searchText: searchField.text
     property string currentView: "home"
+    readonly property bool onSearchPage: currentView === "search"
 
     signal homeRequested()
     signal searchRequested(string query)
+    signal searchTextEdited(string query)
     signal installedRequested()
     signal downloadsRequested()
     signal settingsRequested()
+
+    function focusSearch(prefill) {
+        searchField.forceActiveFocus();
+        if (prefill !== undefined) {
+            searchField.text = prefill;
+        }
+        searchField.cursorPosition = searchField.text.length;
+    }
 
     position: Controls.ToolBar.Header
     padding: Kirigami.Units.smallSpacing
@@ -145,9 +155,11 @@ Controls.ToolBar {
                 id: searchField
 
                 Layout.preferredWidth: activeFocus || text.length > 0
-                    ? Kirigami.Units.gridUnit * 15
-                    : Kirigami.Units.gridUnit * 10
+                    ? Kirigami.Units.gridUnit * 24
+                    : Kirigami.Units.gridUnit * 16
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 1.8
                 placeholderText: i18n("Search apps…")
+                font.pointSize: Kirigami.Theme.defaultFont.pointSize + 1
 
                 Behavior on Layout.preferredWidth {
                     NumberAnimation {
@@ -157,10 +169,55 @@ Controls.ToolBar {
                 }
 
                 autoAccept: false
+
+                property bool pendingFocusRestore: false
+
+                onTextChanged: {
+                    if (text.length === 0) {
+                        liveSearchTimer.stop();
+                        return;
+                    }
+                    if (!root.onSearchPage) {
+                        liveSearchTimer.stop();
+                        pendingFocusRestore = true;
+                        root.searchRequested(text);
+                    } else {
+                        liveSearchTimer.restart();
+                    }
+                }
+
                 onAccepted: {
-                    if (text.length > 0) {
+                    liveSearchTimer.stop();
+                    if (text.length === 0) {
+                        return;
+                    }
+                    if (root.onSearchPage) {
+                        root.searchTextEdited(text);
+                    } else {
+                        pendingFocusRestore = true;
                         root.searchRequested(text);
                     }
+                }
+
+                onActiveFocusChanged: {
+                    if (!activeFocus && pendingFocusRestore) {
+                        pendingFocusRestore = false;
+                        focusRestoreTimer.start();
+                    }
+                }
+
+                Keys.onEscapePressed: applicationWindow().pageStack.forceActiveFocus()
+
+                Timer {
+                    id: liveSearchTimer
+                    interval: 220
+                    onTriggered: root.searchTextEdited(searchField.text)
+                }
+
+                Timer {
+                    id: focusRestoreTimer
+                    interval: 0
+                    onTriggered: searchField.forceActiveFocus()
                 }
             }
 

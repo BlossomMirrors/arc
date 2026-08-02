@@ -13,6 +13,7 @@ pub mod qobject {
         #[qml_element]
         #[qml_singleton]
         #[qproperty(bool, loading)]
+        #[qproperty(bool, refining)]
         #[qproperty(QString, id)]
         #[qproperty(QString, name)]
         #[qproperty(QString, summary)]
@@ -46,6 +47,10 @@ pub mod qobject {
             installed: bool,
         );
 
+        // warms detail_cache for a hovered app without touching the current page
+        #[qinvokable]
+        fn prefetch(self: Pin<&mut DetailController>, pkg_id: QString);
+
         #[qinvokable]
         fn launch(self: Pin<&mut DetailController>);
 
@@ -66,14 +71,13 @@ pub mod qobject {
 use crate::runtime;
 use cxx_qt::{CxxQtThread, Threading};
 use cxx_qt_lib::{QList, QString};
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
 
-#[derive(Default)]
 pub struct DetailControllerRust {
     loading: bool,
+    refining: bool,
     id: QString,
     name: QString,
     summary: QString,
@@ -90,6 +94,33 @@ pub struct DetailControllerRust {
     busy: bool,
     progress: f32,
     screenshots: QList<QString>,
+}
+
+impl Default for DetailControllerRust {
+    // starts true so the skeleton covers the very first frame too
+    // load()/loadWithSeed() haven't run yet at construction time
+    fn default() -> Self {
+        Self {
+            loading: true,
+            refining: false,
+            id: QString::default(),
+            name: QString::default(),
+            summary: QString::default(),
+            description: QString::default(),
+            icon_url: QString::default(),
+            developer_name: QString::default(),
+            homepage_url: QString::default(),
+            content_rating: QString::default(),
+            version: QString::default(),
+            license: QString::default(),
+            eula_url: QString::default(),
+            extensions_json: QString::default(),
+            installed: false,
+            busy: false,
+            progress: 0.0,
+            screenshots: QList::default(),
+        }
+    }
 }
 
 static QT_THREAD: OnceLock<CxxQtThread<qobject::DetailController>> = OnceLock::new();
@@ -166,20 +197,6 @@ pub fn sync_installed(pkg_id: &str, installed: bool) {
     });
 }
 
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct AppMetadata {
-    summary: String,
-    description: String,
-    icon_url: Option<String>,
-    screenshots: Vec<String>,
-    homepage_url: Option<String>,
-    content_rating: String,
-    developer_name: Option<String>,
-    license: Option<String>,
-    eula_url: Option<String>,
-}
-
 #[derive(serde::Serialize)]
 struct ExtensionRow {
     id: String,
@@ -189,10 +206,8 @@ struct ExtensionRow {
 
 async fn fetch_extensions_json(proxy: &libarc::ArcDaemonProxy<'static>, pkg_id: &str) -> String {
     let rows: Vec<ExtensionRow> = proxy
-        .list_extensions(pkg_id)
+        .extensions(pkg_id)
         .await
-        .ok()
-        .and_then(|j| serde_json::from_str::<Vec<libarc::Package>>(&j).ok())
         .unwrap_or_default()
         .into_iter()
         .map(|p| ExtensionRow {
@@ -233,6 +248,16 @@ pub fn refresh_extensions_for_current() {
 }
 
 impl qobject::DetailController {
+    pub fn prefetch(self: Pin<&mut Self>, pkg_id: QString) {
+        let pkg_id_str = pkg_id.to_string();
+        if detail_cache().lock().unwrap().contains_key(&pkg_id_str) {
+            return;
+        }
+        let qt_thread = self.qt_thread();
+        let _ = QT_THREAD.set(qt_thread.clone());
+        start_fetch(qt_thread, pkg_id_str);
+    }
+
     pub fn launch(self: Pin<&mut Self>) {
         let pkg_id = self.id.to_string();
         runtime::spawn(async move {
@@ -252,8 +277,10 @@ impl qobject::DetailController {
         if let Some(cached) = cached {
             apply_cached(self.as_mut(), &cached);
             self.as_mut().set_loading(false);
+            self.as_mut().set_refining(false);
         } else {
             self.as_mut().set_loading(true);
+            self.as_mut().set_refining(false);
         }
 
         set_foreground(pkg_id_str.clone());
@@ -277,11 +304,22 @@ impl qobject::DetailController {
         let cached = detail_cache().lock().unwrap().get(&pkg_id_str).cloned();
         if let Some(cached) = cached {
             apply_cached(self.as_mut(), &cached);
+            self.as_mut().set_refining(false);
         } else {
             self.as_mut().set_name(name);
             self.as_mut().set_summary(summary);
             self.as_mut().set_icon_url(icon_url);
             self.as_mut().set_installed(installed);
+            self.as_mut().set_description(QString::default());
+            self.as_mut().set_developer_name(QString::default());
+            self.as_mut().set_homepage_url(QString::default());
+            self.as_mut().set_content_rating(QString::default());
+            self.as_mut().set_version(QString::default());
+            self.as_mut().set_license(QString::default());
+            self.as_mut().set_eula_url(QString::default());
+            self.as_mut().set_extensions_json(QString::default());
+            self.as_mut().set_screenshots(QList::default());
+            self.as_mut().set_refining(true);
         }
         self.as_mut().set_loading(false);
 
@@ -315,24 +353,33 @@ fn set_foreground(pkg_id: String) {
 fn start_fetch(qt_thread: CxxQtThread<qobject::DetailController>, pkg_id: String) {
     runtime::spawn(async move {
         let Some(proxy) = runtime::proxy().await else {
-            qt_thread.queue(|mut this| this.as_mut().set_loading(false)).ok();
+            qt_thread
+                .queue(|mut this| {
+                    this.as_mut().set_loading(false);
+                    this.as_mut().set_refining(false);
+                })
+                .ok();
             return;
         };
-
-        let (info_json, meta_json, extensions_json) = tokio::join!(
-            proxy.get_app_info(&pkg_id),
-            proxy.get_app_metadata(&pkg_id),
-            fetch_extensions_json(&proxy, &pkg_id),
-        );
-
-        let package: Option<libarc::Package> = info_json
-            .ok()
-            .and_then(|j| serde_json::from_str(&j).ok())
-            .flatten();
-        let meta: AppMetadata = meta_json
-            .ok()
-            .and_then(|j| serde_json::from_str(&j).ok())
-            .unwrap_or_default();
+        let mut package = None;
+        let mut meta = libarc::AppMetadata::default();
+        let mut extensions_json = String::new();
+        for attempt in 0..4 {
+            let (info, m, ext) = tokio::join!(
+                proxy.app_info(&pkg_id),
+                proxy.app_metadata(&pkg_id),
+                fetch_extensions_json(&proxy, &pkg_id),
+            );
+            package = info.ok().flatten();
+            meta = m.unwrap_or_default();
+            extensions_json = ext;
+            if package.is_some() || !meta.description.is_empty() {
+                break;
+            }
+            if attempt < 3 {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            }
+        }
 
         let pkg_id_for_icon = pkg_id.clone();
         let raw_icon_url = meta
@@ -379,6 +426,7 @@ fn start_fetch(qt_thread: CxxQtThread<qobject::DetailController>, pkg_id: String
                 }
                 apply_cached(this.as_mut(), &cached);
                 this.as_mut().set_loading(false);
+                this.as_mut().set_refining(false);
             })
             .ok();
     });

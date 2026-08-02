@@ -37,13 +37,24 @@ pub fn stash_stories(stories: Vec<Story>) {
     *STORIES.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap() = stories;
 }
 
-#[derive(Default)]
 pub struct StoryControllerRust {
     loading: bool,
     story_id: QString,
     title: QString,
     banner_url: QString,
     blocks_json: QString,
+}
+
+impl Default for StoryControllerRust {
+    fn default() -> Self {
+        Self {
+            loading: true,
+            story_id: QString::default(),
+            title: QString::default(),
+            banner_url: QString::default(),
+            blocks_json: QString::default(),
+        }
+    }
 }
 
 impl qobject::StoryController {

@@ -473,15 +473,21 @@ fn extract_carousel_items(xml: &str) -> Vec<CarouselItem> {
     let preferred: &str = if has_user_lang { &user_lang } else { "en" };
 
     let mut items = Vec::new();
+    let mut hide_following_apps = false;
     for item in raw {
         match item {
-            RawCarouselItem::App(id) => items.push(CarouselItem::App(id)),
+            RawCarouselItem::App(id) => {
+                if !hide_following_apps {
+                    items.push(CarouselItem::App(id));
+                }
+            }
             RawCarouselItem::Story(s) => {
                 let title = s
                     .titles
                     .iter()
                     .find(|(l, _)| l.as_str() == preferred)
                     .map(|(_, t)| t.clone());
+                hide_following_apps = title.is_none();
 
                 if let Some(title) = title {
                     items.push(CarouselItem::Story(ForgeStory {
@@ -621,17 +627,28 @@ fn extract_links_items(xml: &str) -> Vec<FpLinksItem> {
     let preferred: &str = if has_user_lang { &user_lang } else { "en" };
 
     let mut items = Vec::new();
+    let mut hide_following = false;
     for item in raw {
         match item {
-            RawLinksItem::Url { text, href } => items.push(FpLinksItem::Url { text, href }),
-            RawLinksItem::App(id) => items.push(FpLinksItem::App(id)),
+            RawLinksItem::Url { text, href } => {
+                if !hide_following {
+                    items.push(FpLinksItem::Url { text, href });
+                }
+            }
+            RawLinksItem::App(id) => {
+                if !hide_following {
+                    items.push(FpLinksItem::App(id));
+                }
+            }
             RawLinksItem::Story(s) => {
-                if let Some(title) = s
+                let title = s
                     .titles
                     .iter()
                     .find(|(l, _)| l.as_str() == preferred)
-                    .map(|(_, t)| t.clone())
-                {
+                    .map(|(_, t)| t.clone());
+                hide_following = title.is_none();
+
+                if let Some(title) = title {
                     items.push(FpLinksItem::Story(ForgeStory {
                         banner_url: s.banner_url,
                         title,

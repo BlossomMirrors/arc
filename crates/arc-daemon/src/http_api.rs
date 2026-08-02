@@ -105,7 +105,7 @@ struct ImageParams {
 async fn search(Query(p): Query<SearchParams>) -> impl IntoResponse {
     let locales = p.lang.locales();
     let mut results: Vec<(AppStreamEntry, u32)> = tokio::task::spawn_blocking(move || {
-        AppStreamDb::get_static()
+        AppStreamDb::get()
             .search_apps_with_locales(&p.q, &locales)
             .into_iter()
             .filter_map(|e| score_entry(&e, &p.q.to_lowercase()).map(|s| (e, s)))
@@ -130,7 +130,7 @@ async fn search(Query(p): Query<SearchParams>) -> impl IntoResponse {
 async fn home(Query(p): Query<HomeParams>) -> impl IntoResponse {
     let locales = p.lang.locales();
     let (popular, recent) = tokio::task::spawn_blocking(move || {
-        let db = AppStreamDb::get_static();
+        let db = AppStreamDb::get();
         (
             db.get_popular_apps_with_locales(p.popular as usize, &locales),
             db.get_recent_apps_with_locales(p.recent as usize, &locales),
@@ -145,7 +145,7 @@ async fn home(Query(p): Query<HomeParams>) -> impl IntoResponse {
 async fn category(Path(name): Path<String>, Query(p): Query<CategoryParams>) -> impl IntoResponse {
     let locales = p.lang.locales();
     let results = tokio::task::spawn_blocking(move || {
-        AppStreamDb::get_static().get_apps_by_category_with_locales(&name, &locales)
+        AppStreamDb::get().get_apps_by_category_with_locales(&name, &locales)
     })
     .await
     .unwrap_or_default();
@@ -155,7 +155,7 @@ async fn category(Path(name): Path<String>, Query(p): Query<CategoryParams>) -> 
 async fn app_metadata(Path(id): Path<String>, Query(p): Query<AppParams>) -> Response {
     let locales = p.lang.locales();
     let result = tokio::task::spawn_blocking(move || {
-        let db = AppStreamDb::get_static();
+        let db = AppStreamDb::get();
         db.find_by_id_with_locales(&id, &locales)
             .or_else(|| db.load_from_exported_metainfo_with_locales(&id, &locales))
     })
@@ -170,7 +170,7 @@ async fn app_metadata(Path(id): Path<String>, Query(p): Query<AppParams>) -> Res
 
 async fn app_icon(Path(id): Path<String>) -> Response {
     let icon_url = tokio::task::spawn_blocking(move || {
-        AppStreamDb::get_static()
+        AppStreamDb::get()
             .find_by_id(&id)
             .and_then(|e| e.icon_url)
     })

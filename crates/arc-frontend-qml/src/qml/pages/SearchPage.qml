@@ -8,6 +8,7 @@ ItemList {
 
     title: i18n("Search")
     emptyText: i18n("Search for apps to install")
+    showFilters: true
 
-    Component.onCompleted: if (query.length > 0) PackageListModel.search(query)
+    onQueryChanged: if (query.length > 0) PackageListModel.search(query)
 }

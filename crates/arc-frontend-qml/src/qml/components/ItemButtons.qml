@@ -13,51 +13,72 @@ RowLayout {
     property bool installed: false
     property bool busy: false
 
-    // "install" or "update"
+    // "install" | "update"
     property string mode: "install"
 
-    property bool showStart: false
-    property bool compactRemove: false
+    property bool tonal: false
+    property bool allowRemove: true
+    property bool fillWidth: false
+
+    property bool highlightStart: true
 
     signal removeRequested()
-    signal startRequested()
 
     readonly property bool showUpdate: mode === "update"
-    readonly property bool showRemove: !showUpdate && installed
+    readonly property bool showRemove: !showUpdate && installed && allowRemove
     readonly property bool showInstall: !showUpdate && !installed
+    readonly property bool showStart: !showUpdate && installed
+
+    function triggerInstall() {
+        root.showUpdate
+            ? TransactionsModel.update(root.pkgId, root.name, root.iconUrl)
+            : TransactionsModel.requestInstall(root.pkgId, root.name, root.iconUrl);
+    }
 
     spacing: Kirigami.Units.smallSpacing
 
-    Controls.Button {
-        visible: root.busy
-        text: i18n("Cancel")
-        onClicked: TransactionsModel.cancelForPackage(root.pkgId)
+    Loader {
+        Layout.fillWidth: root.fillWidth
+        active: root.busy
+        visible: active
+        sourceComponent: Controls.Button {
+            text: i18n("Cancel")
+            onClicked: TransactionsModel.cancelForPackage(root.pkgId)
+        }
     }
 
-    Controls.Button {
-        visible: !root.busy && root.showRemove
-        icon.name: root.compactRemove ? "edit-delete-symbolic" : ""
-        display: root.compactRemove ? Controls.Button.IconOnly : Controls.Button.TextOnly
-        text: i18n("Remove")
-        Controls.ToolTip.text: text
-        Controls.ToolTip.visible: root.compactRemove && hovered
-        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-        onClicked: root.removeRequested()
+    Loader {
+        active: !root.busy && root.showRemove
+        visible: active
+        sourceComponent: Controls.Button {
+            icon.name: "delete"
+            display: Controls.Button.IconOnly
+            text: i18n("Remove")
+            Controls.ToolTip.text: text
+            Controls.ToolTip.visible: hovered
+            Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+            onClicked: root.removeRequested()
+        }
     }
 
-    Controls.Button {
-        visible: !root.busy && root.showRemove && root.showStart
-        highlighted: true
-        text: i18n("Start")
-        onClicked: root.startRequested()
+    Loader {
+        active: !root.busy && root.showStart
+        visible: active
+        sourceComponent: Controls.Button {
+            highlighted: root.highlightStart
+            text: i18n("Start")
+            onClicked: TransactionsModel.launch(root.pkgId)
+        }
     }
 
-    Controls.Button {
-        visible: !root.busy && (root.showInstall || root.showUpdate)
-        highlighted: true
-        text: root.showUpdate ? i18n("Update") : i18n("Install")
-        onClicked: root.showUpdate
-            ? TransactionsModel.update(root.pkgId, root.name, root.iconUrl)
-            : TransactionsModel.requestInstall(root.pkgId, root.name, root.iconUrl)
+    Loader {
+        Layout.fillWidth: root.fillWidth
+        active: !root.busy && (root.showInstall || root.showUpdate)
+        visible: active
+        sourceComponent: Controls.Button {
+            highlighted: !root.tonal
+            text: root.showUpdate ? i18n("Update") : i18n("Install")
+            onClicked: root.triggerInstall()
+        }
     }
 }

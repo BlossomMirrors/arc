@@ -127,7 +127,8 @@ pub struct MultiProvider {
     pub appimage: Arc<appimage::AppImageProvider>,
     pub pwa: Arc<pwa::PwaProvider>,
     package_cache: RwLock<Option<(Instant, Vec<Package>)>>,
-    fetch_lock: Mutex<()>,
+    fetch_lock: Arc<Mutex<()>>,
+    self_weak: std::sync::Weak<MultiProvider>,
 }
 
 impl MultiProvider {
@@ -137,7 +138,7 @@ impl MultiProvider {
         lutris: lutris::LutrisProvider,
         appimage: appimage::AppImageProvider,
         pwa: pwa::PwaProvider,
-    ) -> Self {
+    ) -> Arc<Self> {
         // pre-seed the cache from disk (if any) so the very first search
         // after startup doesn't have to wait for a live provider fetch;
         // treated as fresh (full TTL) since the background warm-up spawned
@@ -145,15 +146,25 @@ impl MultiProvider {
         // will overwrite this with live data regardless
         let seeded = load_disk_cache().map(|packages| (Instant::now(), packages));
 
-        Self {
+        Arc::new_cyclic(|weak| Self {
             native: Arc::new(native),
             flatpak: Arc::new(flatpak),
             lutris: Arc::new(lutris),
             appimage: Arc::new(appimage),
             pwa: Arc::new(pwa),
             package_cache: RwLock::new(seeded),
-            fetch_lock: Mutex::new(()),
-        }
+            fetch_lock: Arc::new(Mutex::new(())),
+            self_weak: weak.clone(),
+        })
+    }
+
+    fn trigger_background_refresh(&self) {
+        let Some(strong) = self.self_weak.upgrade() else { return };
+        let Ok(guard) = Arc::clone(&self.fetch_lock).try_lock_owned() else { return };
+        tokio::spawn(async move {
+            let _ = strong.fetch_and_store().await;
+            drop(guard);
+        });
     }
 
     fn is_lutris_id(id: &str) -> bool {
@@ -221,7 +232,14 @@ impl MultiProvider {
 
     pub async fn invalidate_package_cache(&self) {
         let mut cache = self.package_cache.write().await;
-        *cache = None;
+        if let Some((cached_at, _)) = cache.as_mut() {
+            *cached_at = Instant::now() - PACKAGE_CACHE_TTL;
+        }
+    }
+
+    pub async fn cached_package(&self, id: &str) -> Option<Package> {
+        let cache = self.package_cache.read().await;
+        cache.as_ref()?.1.iter().find(|p| p.id == id).cloned()
     }
 
     pub async fn list_extensions(&self, app_id: &str) -> Result<Vec<Package>, ArcError> {
@@ -336,24 +354,31 @@ impl MultiProvider {
     }
 
     async fn all_packages(&self) -> Result<Vec<Package>, ArcError> {
-        {
+        let cached = {
             let cache = self.package_cache.read().await;
-            if let Some((cached_at, packages)) = cache.as_ref() {
-                if cached_at.elapsed() < PACKAGE_CACHE_TTL {
-                    return Ok(packages.clone());
-                }
+            cache
+                .as_ref()
+                .map(|(cached_at, packages)| (cached_at.elapsed() < PACKAGE_CACHE_TTL, packages.clone()))
+        };
+        if let Some((fresh, packages)) = cached {
+            if !fresh {
+                self.trigger_background_refresh();
             }
+            return Ok(packages);
         }
-        let _lock = self.fetch_lock.lock().await;
+
+        let lock = self.fetch_lock.lock().await;
+        if let Some((_, packages)) = self.package_cache.read().await.as_ref() {
+            return Ok(packages.clone());
+        }
+        let (flatpak_packages, _) = bounded("flatpak", FLATPAK_FETCH_TIMEOUT, self.flatpak.fetch_all()).await;
         {
-            let cache = self.package_cache.read().await;
-            if let Some((cached_at, packages)) = cache.as_ref() {
-                if cached_at.elapsed() < PACKAGE_CACHE_TTL {
-                    return Ok(packages.clone());
-                }
-            }
+            let mut cache = self.package_cache.write().await;
+            *cache = Some((Instant::now() - PACKAGE_CACHE_TTL, flatpak_packages.clone()));
         }
-        self.fetch_and_store().await
+        drop(lock);
+        self.trigger_background_refresh();
+        Ok(flatpak_packages)
     }
 }
 
@@ -447,7 +472,15 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn search_category(&self, category: &str) -> Result<Vec<Package>, ArcError> {
-        self.flatpak.search_category(category).await
+        if crate::appstream_db::AppStreamDb::fully_loaded() {
+            return self.flatpak.search_category(category).await;
+        }
+        let cat_lower = category.to_lowercase();
+        let all = self.all_packages().await?;
+        Ok(all
+            .into_iter()
+            .filter(|p| p.categories.iter().any(|c| c.eq_ignore_ascii_case(&cat_lower)))
+            .collect())
     }
 
     async fn get_app_info(&self, package_id: &str) -> Result<Option<Package>, ArcError> {
@@ -458,7 +491,11 @@ impl PackageProvider for MultiProvider {
         } else if Self::is_lutris_id(package_id) {
             self.lutris.get_app_info(package_id).await
         } else if Self::is_flatpak_id(package_id) {
-            self.flatpak.get_app_info(package_id).await
+            match self.flatpak.get_app_info(package_id).await {
+                Ok(Some(pkg)) => Ok(Some(pkg)),
+
+                _ => Ok(self.cached_package(package_id).await),
+            }
         } else {
             self.native.get_app_info(package_id).await
         }

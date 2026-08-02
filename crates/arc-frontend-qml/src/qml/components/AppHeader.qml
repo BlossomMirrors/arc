@@ -8,10 +8,13 @@ RowLayout {
     id: root
 
     signal removeClicked()
-    signal startClicked()
     signal addonsClicked()
 
     property bool hasExtensions: false
+
+    readonly property var busyMap: JSON.parse(TransactionsModel.busyPackagesJson || "{}")
+    readonly property bool liveBusy: root.busyMap[DetailController.id] !== undefined
+    readonly property real liveProgress: root.busyMap[DetailController.id] ?? 0
 
     spacing: Kirigami.Units.largeSpacing
 
@@ -34,8 +37,8 @@ RowLayout {
         }
     }
 
-    Kirigami.Icon {
-        source: DetailController.iconUrl.length > 0 ? DetailController.iconUrl : "application-x-executable"
+    AppIcon {
+        source: DetailController.iconUrl
         Layout.preferredWidth: 96
         Layout.preferredHeight: 96
         Layout.alignment: Qt.AlignTop
@@ -93,7 +96,7 @@ RowLayout {
         spacing: Kirigami.Units.smallSpacing
 
         Controls.Button {
-            visible: !DetailController.busy && DetailController.installed && root.hasExtensions
+            visible: !root.liveBusy && DetailController.installed && root.hasExtensions
             icon.name: "list-add-symbolic"
             display: Controls.Button.IconOnly
             text: i18n("Add-ons")
@@ -108,11 +111,9 @@ RowLayout {
             name: DetailController.name
             iconUrl: DetailController.iconUrl
             installed: DetailController.installed
-            busy: DetailController.busy
-            showStart: true
-            compactRemove: true
+            busy: root.liveBusy
+            highlightStart: false
             onRemoveRequested: root.removeClicked()
-            onStartRequested: root.startClicked()
         }
     }
 }

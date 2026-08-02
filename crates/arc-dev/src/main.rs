@@ -3,7 +3,7 @@ use std::process::Command;
 use std::time::Duration;
 
 fn main() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
 
     let profile = if std::env::args().any(|a| a == "--release") {
         "release"
