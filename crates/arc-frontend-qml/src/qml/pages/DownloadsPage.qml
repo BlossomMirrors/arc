@@ -13,7 +13,11 @@ Kirigami.ScrollablePage {
 
     title: i18n("Downloads")
 
-    function load() { PackageListModel.loadUpdates() }
+    PackageListModel {
+        id: downloadListModel
+    }
+
+    function load() { downloadListModel.loadUpdates() }
 
     function formatBytes(bytes) {
         if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + " GB";
@@ -37,7 +41,7 @@ Kirigami.ScrollablePage {
     Kirigami.PlaceholderMessage {
         anchors.centerIn: parent
         width: parent.width - Kirigami.Units.gridUnit * 4
-        visible: !PackageListModel.loading
+        visible: !downloadListModel.loading
             && TransactionsModel.runningCount === 0
             && TransactionsModel.queuedCount === 0
             && TransactionsModel.doneCount === 0
@@ -49,7 +53,7 @@ Kirigami.ScrollablePage {
         helpfulAction: Kirigami.Action {
             icon.name: "view-refresh-symbolic"
             text: i18n("Check for Updates")
-            onTriggered: PackageListModel.loadUpdates()
+            onTriggered: downloadListModel.loadUpdates()
         }
     }
 
@@ -248,7 +252,7 @@ Kirigami.ScrollablePage {
             RowLayout {
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.largeSpacing
-                visible: !PackageListModel.loading
+                visible: !downloadListModel.loading
                     && (updatesRepeater.count > 0
                         || TransactionsModel.runningCount > 0
                         || TransactionsModel.queuedCount > 0
@@ -263,7 +267,7 @@ Kirigami.ScrollablePage {
                 Controls.ToolButton {
                     icon.name: "view-refresh-symbolic"
                     text: i18n("Check")
-                    onClicked: PackageListModel.loadUpdates()
+                    onClicked: downloadListModel.loadUpdates()
                 }
 
                 Controls.Button {
@@ -277,7 +281,7 @@ Kirigami.ScrollablePage {
 
             Controls.Label {
                 Layout.fillWidth: true
-                visible: !PackageListModel.loading && updatesRepeater.count === 0
+                visible: !downloadListModel.loading && updatesRepeater.count === 0
                     && (TransactionsModel.runningCount > 0
                         || TransactionsModel.queuedCount > 0
                         || TransactionsModel.doneCount > 0)
@@ -288,7 +292,7 @@ Kirigami.ScrollablePage {
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.largeSpacing
-                visible: PackageListModel.loading
+                visible: downloadListModel.loading
                 spacing: Kirigami.Units.largeSpacing
 
                 Repeater {
@@ -321,7 +325,7 @@ Kirigami.ScrollablePage {
 
             Repeater {
                 id: updatesRepeater
-                model: PackageListModel
+                model: downloadListModel
 
                 delegate: Kirigami.AbstractCard {
                     id: updateDelegate

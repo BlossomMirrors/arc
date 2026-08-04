@@ -9,6 +9,7 @@ import org.blossomos.arc
 Kirigami.ScrollablePage {
     id: root
 
+    property PackageListModel packageListModel
     property string emptyText: ""
     property bool showFilters: false
     property bool markInstalled: true
@@ -64,7 +65,7 @@ Kirigami.ScrollablePage {
                 spacing: Kirigami.Units.smallSpacing
 
                 function applyFilters() {
-                    PackageListModel.setFilters(
+                    packageListModel.setFilters(
                         sourceCombo.currentIndex === 0 ? "" : sourceCombo.currentText,
                         stateCombo.currentIndex,
                         sortCombo.currentIndex === 1);
@@ -72,8 +73,8 @@ Kirigami.ScrollablePage {
 
                 Controls.ComboBox {
                     id: sourceCombo
-                    visible: PackageListModel.providers.length > 1
-                    model: [i18n("All sources")].concat(PackageListModel.providers)
+                    visible: packageListModel.providers.length > 1
+                    model: [i18n("All sources")].concat(packageListModel.providers)
                     onActivated: parent.applyFilters()
                 }
 
@@ -92,7 +93,7 @@ Kirigami.ScrollablePage {
                 Item { Layout.fillWidth: true }
 
                 Controls.Label {
-                    visible: !PackageListModel.loading
+                    visible: !packageListModel.loading
                     text: i18np("%1 app", "%1 apps", listView.count)
                     opacity: 0.7
                 }
@@ -101,7 +102,7 @@ Kirigami.ScrollablePage {
     }
 
     ColumnLayout {
-        visible: PackageListModel.loading
+        visible: packageListModel.loading
         width: parent.width
         spacing: Kirigami.Units.largeSpacing * 2
 
@@ -138,14 +139,14 @@ Kirigami.ScrollablePage {
     Kirigami.PlaceholderMessage {
         anchors.centerIn: parent
         width: parent.width - Kirigami.Units.gridUnit * 4
-        visible: !PackageListModel.loading && listView.count === 0
+        visible: !packageListModel.loading && listView.count === 0
         text: root.emptyText
     }
 
     Kirigami.CardsListView {
         id: listView
-        visible: !PackageListModel.loading
-        model: PackageListModel
+        visible: !packageListModel.loading
+        model: packageListModel
 
         reuseItems: true
 

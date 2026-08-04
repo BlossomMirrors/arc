@@ -64,6 +64,7 @@ RowLayout {
     Loader {
         active: !root.busy && root.showStart
         visible: active
+        Layout.fillWidth: root.fillWidth
         sourceComponent: Controls.Button {
             highlighted: root.highlightStart
             text: i18n("Start")

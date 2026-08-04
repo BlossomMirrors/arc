@@ -8,5 +8,11 @@ ItemList {
     emptyText: i18n("Nothing installed yet")
     markInstalled: false
 
-    function load() { PackageListModel.loadInstalled() }
+    PackageListModel {
+        id: installListModel
+    }
+
+    packageListModel: installListModel
+
+    function load() { installListModel.loadInstalled() }
 }

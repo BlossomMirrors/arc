@@ -43,7 +43,6 @@ pub mod qobject {
         #[qobject]
         #[base = QAbstractListModel]
         #[qml_element]
-        #[qml_singleton]
         #[qproperty(bool, loading)]
         #[qproperty(QStringList, providers)]
         type PackageListModel = super::PackageListModelRust;
@@ -65,7 +64,12 @@ pub mod qobject {
 
         #[qinvokable]
         #[cxx_name = "setFilters"]
-        fn set_filters(self: Pin<&mut PackageListModel>, provider: QString, installed: i32, sort_by_name: bool);
+        fn set_filters(
+            self: Pin<&mut PackageListModel>,
+            provider: QString,
+            installed: i32,
+            sort_by_name: bool,
+        );
     }
 
     extern "RustQt" {
@@ -93,21 +97,41 @@ pub mod qobject {
         unsafe fn end_reset_model(self: Pin<&mut PackageListModel>);
         #[inherit]
         #[cxx_name = "beginRemoveRows"]
-        unsafe fn begin_remove_rows(self: Pin<&mut PackageListModel>, parent: &QModelIndex, first: i32, last: i32);
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut PackageListModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
         #[inherit]
         #[cxx_name = "endRemoveRows"]
         unsafe fn end_remove_rows(self: Pin<&mut PackageListModel>);
         #[inherit]
         #[cxx_name = "beginInsertRows"]
-        unsafe fn begin_insert_rows(self: Pin<&mut PackageListModel>, parent: &QModelIndex, first: i32, last: i32);
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut PackageListModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
         #[inherit]
         #[cxx_name = "endInsertRows"]
         unsafe fn end_insert_rows(self: Pin<&mut PackageListModel>);
         #[inherit]
-        fn index(self: &PackageListModel, row: i32, column: i32, parent: &QModelIndex) -> QModelIndex;
+        fn index(
+            self: &PackageListModel,
+            row: i32,
+            column: i32,
+            parent: &QModelIndex,
+        ) -> QModelIndex;
         #[inherit]
         #[cxx_name = "dataChanged"]
-        fn data_changed(self: Pin<&mut PackageListModel>, top_left: &QModelIndex, bottom_right: &QModelIndex, roles: &QList_i32);
+        fn data_changed(
+            self: Pin<&mut PackageListModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QList_i32,
+        );
     }
 
     impl cxx_qt::Threading for PackageListModel {}
@@ -147,7 +171,12 @@ pub mod qobject {
         fn init(self: Pin<&mut TransactionsModel>);
 
         #[qinvokable]
-        fn install(self: Pin<&mut TransactionsModel>, pkg_id: QString, name: QString, icon_url: QString);
+        fn install(
+            self: Pin<&mut TransactionsModel>,
+            pkg_id: QString,
+            name: QString,
+            icon_url: QString,
+        );
 
         #[qinvokable]
         #[cxx_name = "updateAll"]
@@ -156,22 +185,42 @@ pub mod qobject {
         // install() with EULA check which emits eulaRequired instead if needed
         #[qinvokable]
         #[cxx_name = "requestInstall"]
-        fn request_install(self: Pin<&mut TransactionsModel>, pkg_id: QString, name: QString, icon_url: QString);
+        fn request_install(
+            self: Pin<&mut TransactionsModel>,
+            pkg_id: QString,
+            name: QString,
+            icon_url: QString,
+        );
 
         #[qsignal]
         #[cxx_name = "eulaRequired"]
-        fn eula_required(self: Pin<&mut TransactionsModel>, pkg_id: QString, name: QString, icon_url: QString, eula_url: QString);
+        fn eula_required(
+            self: Pin<&mut TransactionsModel>,
+            pkg_id: QString,
+            name: QString,
+            icon_url: QString,
+            eula_url: QString,
+        );
 
         #[qinvokable]
         #[cxx_name = "installFlatpakref"]
-        fn install_flatpakref(self: Pin<&mut TransactionsModel>, url_or_path: QString, name: QString);
+        fn install_flatpakref(
+            self: Pin<&mut TransactionsModel>,
+            url_or_path: QString,
+            name: QString,
+        );
 
         #[qinvokable]
         #[cxx_name = "installBundle"]
         fn install_bundle(self: Pin<&mut TransactionsModel>, path: QString, name: QString);
 
         #[qinvokable]
-        fn update(self: Pin<&mut TransactionsModel>, pkg_id: QString, name: QString, icon_url: QString);
+        fn update(
+            self: Pin<&mut TransactionsModel>,
+            pkg_id: QString,
+            name: QString,
+            icon_url: QString,
+        );
 
         #[qinvokable]
         fn launch(self: Pin<&mut TransactionsModel>, pkg_id: QString);
@@ -211,13 +260,23 @@ pub mod qobject {
     unsafe extern "RustQt" {
         #[inherit]
         #[cxx_name = "beginInsertRows"]
-        unsafe fn begin_insert_rows(self: Pin<&mut TransactionsModel>, parent: &QModelIndex, first: i32, last: i32);
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut TransactionsModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
         #[inherit]
         #[cxx_name = "endInsertRows"]
         unsafe fn end_insert_rows(self: Pin<&mut TransactionsModel>);
         #[inherit]
         #[cxx_name = "beginRemoveRows"]
-        unsafe fn begin_remove_rows(self: Pin<&mut TransactionsModel>, parent: &QModelIndex, first: i32, last: i32);
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut TransactionsModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
         #[inherit]
         #[cxx_name = "endRemoveRows"]
         unsafe fn end_remove_rows(self: Pin<&mut TransactionsModel>);
@@ -228,10 +287,20 @@ pub mod qobject {
         #[cxx_name = "endResetModel"]
         unsafe fn end_reset_model(self: Pin<&mut TransactionsModel>);
         #[inherit]
-        fn index(self: &TransactionsModel, row: i32, column: i32, parent: &QModelIndex) -> QModelIndex;
+        fn index(
+            self: &TransactionsModel,
+            row: i32,
+            column: i32,
+            parent: &QModelIndex,
+        ) -> QModelIndex;
         #[inherit]
         #[cxx_name = "dataChanged"]
-        fn data_changed(self: Pin<&mut TransactionsModel>, top_left: &QModelIndex, bottom_right: &QModelIndex, roles: &QList_i32);
+        fn data_changed(
+            self: Pin<&mut TransactionsModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QList_i32,
+        );
     }
 
     impl cxx_qt::Threading for TransactionsModel {}
@@ -361,7 +430,9 @@ pub mod qobject {
 
 use crate::runtime;
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
-use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QList, QModelIndex, QString, QStringList, QVariant};
+use cxx_qt_lib::{
+    QByteArray, QHash, QHashPair_i32_QByteArray, QList, QModelIndex, QString, QStringList, QVariant,
+};
 use futures_util::StreamExt;
 use libarc::{ArcDaemonProxy, Package};
 use std::collections::HashMap;
@@ -445,7 +516,9 @@ impl qobject::PackageListModel {
         self.as_mut().load_with(
             cache_key,
             async move {
-                let proxy = runtime::proxy().await.ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
+                let proxy = runtime::proxy()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
                 proxy.search_packages(&query).await
             },
             "search",
@@ -457,7 +530,9 @@ impl qobject::PackageListModel {
         self.as_mut().load_with(
             "installed".to_string(),
             async move {
-                let proxy = runtime::proxy().await.ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
+                let proxy = runtime::proxy()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
                 proxy.installed_packages().await
             },
             "load installed",
@@ -471,7 +546,9 @@ impl qobject::PackageListModel {
         self.as_mut().load_with(
             cache_key,
             async move {
-                let proxy = runtime::proxy().await.ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
+                let proxy = runtime::proxy()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
                 proxy.search_category_packages(&category).await
             },
             "search category",
@@ -483,14 +560,21 @@ impl qobject::PackageListModel {
         self.as_mut().load_with(
             "updates".to_string(),
             async move {
-                let proxy = runtime::proxy().await.ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
+                let proxy = runtime::proxy()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
                 proxy.updates_packages().await
             },
             "load updates",
         );
     }
 
-    pub fn set_filters(mut self: Pin<&mut Self>, provider: QString, installed: i32, sort_by_name: bool) {
+    pub fn set_filters(
+        mut self: Pin<&mut Self>,
+        provider: QString,
+        installed: i32,
+        sort_by_name: bool,
+    ) {
         {
             let mut rust = self.as_mut().rust_mut();
             rust.filter_provider = provider.to_string();
@@ -507,7 +591,8 @@ impl qobject::PackageListModel {
             .all_packages
             .iter()
             .filter(|r| {
-                self.filter_provider.is_empty() || provider_str(&r.pkg.provider) == self.filter_provider
+                self.filter_provider.is_empty()
+                    || provider_str(&r.pkg.provider) == self.filter_provider
             })
             .filter(|r| match self.filter_installed {
                 1 => r.pkg.installed,
@@ -554,7 +639,9 @@ impl qobject::PackageListModel {
             let had_cache = cached.is_some();
             if let Some(cached) = cached {
                 let qt = qt_thread.clone();
-                if let Ok(built) = tokio::task::spawn_blocking(move || rows_and_providers(cached)).await {
+                if let Ok(built) =
+                    tokio::task::spawn_blocking(move || rows_and_providers(cached)).await
+                {
                     fill_incrementally(qt, seq, built, false);
                 }
             }
@@ -578,9 +665,15 @@ impl qobject::PackageListModel {
             let built = tokio::task::spawn_blocking(move || {
                 let mut packages = packages;
                 for pkg in &mut packages {
-                    pkg.icon_url = Some(crate::services::icons::resolve(&pkg.id, pkg.icon_url.as_deref()));
+                    pkg.icon_url = Some(crate::services::icons::resolve(
+                        &pkg.id,
+                        pkg.icon_url.as_deref(),
+                    ));
                 }
-                package_cache().lock().unwrap().insert(cache_key, packages.clone());
+                package_cache()
+                    .lock()
+                    .unwrap()
+                    .insert(cache_key, packages.clone());
                 rows_and_providers(packages)
             })
             .await
@@ -601,7 +694,9 @@ impl qobject::PackageListModel {
             qobject::PackageRoles::Name => QVariant::from(&QString::from(&pkg.name)),
             qobject::PackageRoles::Version => QVariant::from(&QString::from(&pkg.version)),
             qobject::PackageRoles::Description => QVariant::from(&QString::from(&pkg.description)),
-            qobject::PackageRoles::Provider => QVariant::from(&QString::from(provider_str(&pkg.provider))),
+            qobject::PackageRoles::Provider => {
+                QVariant::from(&QString::from(provider_str(&pkg.provider)))
+            }
             qobject::PackageRoles::Installed => QVariant::from(&pkg.installed),
             qobject::PackageRoles::IconUrl => {
                 QVariant::from(&QString::from(pkg.icon_url.as_deref().unwrap_or("")))
@@ -617,19 +712,31 @@ impl qobject::PackageListModel {
 
         roles.insert(qobject::PackageRoles::Id.repr, QByteArray::from("pkgId"));
         roles.insert(qobject::PackageRoles::Name.repr, QByteArray::from("name"));
-        roles.insert(qobject::PackageRoles::Version.repr, QByteArray::from("version"));
+        roles.insert(
+            qobject::PackageRoles::Version.repr,
+            QByteArray::from("version"),
+        );
         roles.insert(
             qobject::PackageRoles::Description.repr,
             QByteArray::from("description"),
         );
-        roles.insert(qobject::PackageRoles::Provider.repr, QByteArray::from("provider"));
+        roles.insert(
+            qobject::PackageRoles::Provider.repr,
+            QByteArray::from("provider"),
+        );
         roles.insert(
             qobject::PackageRoles::Installed.repr,
             QByteArray::from("installed"),
         );
-        roles.insert(qobject::PackageRoles::IconUrl.repr, QByteArray::from("iconUrl"));
+        roles.insert(
+            qobject::PackageRoles::IconUrl.repr,
+            QByteArray::from("iconUrl"),
+        );
         roles.insert(qobject::PackageRoles::Busy.repr, QByteArray::from("busy"));
-        roles.insert(qobject::PackageRoles::Progress.repr, QByteArray::from("progress"));
+        roles.insert(
+            qobject::PackageRoles::Progress.repr,
+            QByteArray::from("progress"),
+        );
         roles
     }
 
@@ -667,7 +774,11 @@ fn provider_qlist(names: &[String]) -> QStringList {
 fn rows_and_providers(packages: Vec<Package>) -> (Vec<PackageRow>, Vec<String>) {
     let rows: Vec<PackageRow> = packages
         .into_iter()
-        .map(|pkg| PackageRow { pkg, busy: false, progress: 0.0 })
+        .map(|pkg| PackageRow {
+            pkg,
+            busy: false,
+            progress: 0.0,
+        })
         .collect();
     let mut names: Vec<&'static str> = Vec::new();
     for row in &rows {
@@ -780,11 +891,17 @@ fn sync_package_finished(pkg_id: &str, tx_type: &str, success: bool) {
     let pkg_id = pkg_id.to_string();
     let is_update = tx_type == "update";
     let _ = qt_thread.queue(move |mut model| {
-        if !model.packages.iter().chain(model.all_packages.iter()).any(|r| r.pkg.id == pkg_id) {
+        if !model
+            .packages
+            .iter()
+            .chain(model.all_packages.iter())
+            .any(|r| r.pkg.id == pkg_id)
+        {
             return;
         }
         let drop_row = success
-            && ((is_remove && model.mode == ListMode::Installed) || (is_update && model.mode == ListMode::Updates));
+            && ((is_remove && model.mode == ListMode::Installed)
+                || (is_update && model.mode == ListMode::Updates));
 
         {
             let mut rust = model.as_mut().rust_mut();
@@ -807,7 +924,9 @@ fn sync_package_finished(pkg_id: &str, tx_type: &str, success: bool) {
         let Some(row) = visible_row else { return };
         if drop_row {
             unsafe {
-                model.as_mut().begin_remove_rows(&QModelIndex::default(), row as i32, row as i32);
+                model
+                    .as_mut()
+                    .begin_remove_rows(&QModelIndex::default(), row as i32, row as i32);
                 model.as_mut().rust_mut().packages.remove(row);
                 model.as_mut().end_remove_rows();
             }
@@ -914,7 +1033,9 @@ impl qobject::TransactionsModel {
         }
 
         runtime::spawn(async move {
-            let Some(proxy) = runtime::proxy().await else { return };
+            let Some(proxy) = runtime::proxy().await else {
+                return;
+            };
             load_running_transactions(&proxy).await;
             refresh_updates_count(&proxy).await;
 
@@ -926,11 +1047,20 @@ impl qobject::TransactionsModel {
     }
 
     pub fn install(mut self: Pin<&mut Self>, pkg_id: QString, name: QString, icon_url: QString) {
-        self.as_mut()
-            .start_transaction(pkg_id.to_string(), name.to_string(), icon_url.to_string(), "install");
+        self.as_mut().start_transaction(
+            pkg_id.to_string(),
+            name.to_string(),
+            icon_url.to_string(),
+            "install",
+        );
     }
 
-    pub fn request_install(self: Pin<&mut Self>, pkg_id: QString, name: QString, icon_url: QString) {
+    pub fn request_install(
+        self: Pin<&mut Self>,
+        pkg_id: QString,
+        name: QString,
+        icon_url: QString,
+    ) {
         let pkg_id = pkg_id.to_string();
         let name = name.to_string();
         let icon_url = icon_url.to_string();
@@ -950,7 +1080,9 @@ impl qobject::TransactionsModel {
             };
             let _ = qt_thread.queue(move |mut model| {
                 if eula_url.is_empty() {
-                    model.as_mut().start_transaction(pkg_id, name, icon_url, "install");
+                    model
+                        .as_mut()
+                        .start_transaction(pkg_id, name, icon_url, "install");
                 } else {
                     model.as_mut().eula_required(
                         QString::from(&pkg_id),
@@ -964,18 +1096,30 @@ impl qobject::TransactionsModel {
     }
 
     pub fn install_flatpakref(mut self: Pin<&mut Self>, url_or_path: QString, name: QString) {
-        self.as_mut()
-            .start_transaction(url_or_path.to_string(), name.to_string(), String::new(), "flatpakref");
+        self.as_mut().start_transaction(
+            url_or_path.to_string(),
+            name.to_string(),
+            String::new(),
+            "flatpakref",
+        );
     }
 
     pub fn install_bundle(mut self: Pin<&mut Self>, path: QString, name: QString) {
-        self.as_mut()
-            .start_transaction(path.to_string(), name.to_string(), String::new(), "bundle");
+        self.as_mut().start_transaction(
+            path.to_string(),
+            name.to_string(),
+            String::new(),
+            "bundle",
+        );
     }
 
     pub fn update(mut self: Pin<&mut Self>, pkg_id: QString, name: QString, icon_url: QString) {
-        self.as_mut()
-            .start_transaction(pkg_id.to_string(), name.to_string(), icon_url.to_string(), "update");
+        self.as_mut().start_transaction(
+            pkg_id.to_string(),
+            name.to_string(),
+            icon_url.to_string(),
+            "update",
+        );
     }
 
     pub fn launch(self: Pin<&mut Self>, pkg_id: QString) {
@@ -1003,7 +1147,9 @@ impl qobject::TransactionsModel {
             let _ = qt_thread.queue(move |mut model| {
                 for pkg in updates {
                     let icon = crate::services::icons::resolve(&pkg.id, pkg.icon_url.as_deref());
-                    model.as_mut().start_transaction(pkg.id, pkg.name, icon, "update");
+                    model
+                        .as_mut()
+                        .start_transaction(pkg.id, pkg.name, icon, "update");
                 }
             });
         });
@@ -1012,7 +1158,8 @@ impl qobject::TransactionsModel {
     pub fn remove_package(mut self: Pin<&mut Self>, pkg_id: QString) {
         let pkg_id = pkg_id.to_string();
         let name = pkg_id.clone();
-        self.as_mut().start_transaction(pkg_id, name, String::new(), "remove");
+        self.as_mut()
+            .start_transaction(pkg_id, name, String::new(), "remove");
     }
 
     pub fn cancel(self: Pin<&mut Self>, tx_id: QString) {
@@ -1047,7 +1194,9 @@ impl qobject::TransactionsModel {
         let tx_id = self
             .transactions
             .iter()
-            .find(|tx| tx.pkg_id == pkg_id && matches!(tx.status, TxStatus::Pending | TxStatus::Running))
+            .find(|tx| {
+                tx.pkg_id == pkg_id && matches!(tx.status, TxStatus::Pending | TxStatus::Running)
+            })
             .map(|tx| tx.id.clone());
         let Some(tx_id) = tx_id.filter(|id| !id.is_empty()) else {
             return;
@@ -1059,7 +1208,13 @@ impl qobject::TransactionsModel {
         });
     }
 
-    fn start_transaction(mut self: Pin<&mut Self>, pkg_id: String, name: String, icon_url: String, tx_type: &'static str) {
+    fn start_transaction(
+        mut self: Pin<&mut Self>,
+        pkg_id: String,
+        name: String,
+        icon_url: String,
+        tx_type: &'static str,
+    ) {
         if has_ongoing(&self.transactions, &pkg_id) {
             return;
         }
@@ -1123,9 +1278,13 @@ impl qobject::TransactionsModel {
             qobject::TransactionRoles::Name => QVariant::from(&QString::from(&tx.name)),
             qobject::TransactionRoles::IconUrl => QVariant::from(&QString::from(&tx.icon_url)),
             qobject::TransactionRoles::Progress => QVariant::from(&tx.progress),
-            qobject::TransactionRoles::Status => QVariant::from(&QString::from(status_str(tx.status))),
+            qobject::TransactionRoles::Status => {
+                QVariant::from(&QString::from(status_str(tx.status)))
+            }
             qobject::TransactionRoles::TxType => QVariant::from(&QString::from(&tx.tx_type)),
-            qobject::TransactionRoles::Section => QVariant::from(&QString::from(section_str(tx.status))),
+            qobject::TransactionRoles::Section => {
+                QVariant::from(&QString::from(section_str(tx.status)))
+            }
             qobject::TransactionRoles::Error => QVariant::from(&QString::from(&tx.error)),
             qobject::TransactionRoles::BytesDone => QVariant::from(&(tx.bytes_done as f64)),
             qobject::TransactionRoles::BytesTotal => QVariant::from(&(tx.bytes_total as f64)),
@@ -1139,18 +1298,54 @@ impl qobject::TransactionsModel {
         let mut roles = QHash::<QHashPair_i32_QByteArray>::default();
 
         roles.insert(qobject::TransactionRoles::Id.repr, QByteArray::from("txId"));
-        roles.insert(qobject::TransactionRoles::PkgId.repr, QByteArray::from("pkgId"));
-        roles.insert(qobject::TransactionRoles::Name.repr, QByteArray::from("name"));
-        roles.insert(qobject::TransactionRoles::IconUrl.repr, QByteArray::from("iconUrl"));
-        roles.insert(qobject::TransactionRoles::Progress.repr, QByteArray::from("progress"));
-        roles.insert(qobject::TransactionRoles::Status.repr, QByteArray::from("status"));
-        roles.insert(qobject::TransactionRoles::TxType.repr, QByteArray::from("txType"));
-        roles.insert(qobject::TransactionRoles::Section.repr, QByteArray::from("section"));
-        roles.insert(qobject::TransactionRoles::Error.repr, QByteArray::from("error"));
-        roles.insert(qobject::TransactionRoles::BytesDone.repr, QByteArray::from("bytesDone"));
-        roles.insert(qobject::TransactionRoles::BytesTotal.repr, QByteArray::from("bytesTotal"));
-        roles.insert(qobject::TransactionRoles::SpeedBps.repr, QByteArray::from("speedBps"));
-        roles.insert(qobject::TransactionRoles::EtaSecs.repr, QByteArray::from("etaSecs"));
+        roles.insert(
+            qobject::TransactionRoles::PkgId.repr,
+            QByteArray::from("pkgId"),
+        );
+        roles.insert(
+            qobject::TransactionRoles::Name.repr,
+            QByteArray::from("name"),
+        );
+        roles.insert(
+            qobject::TransactionRoles::IconUrl.repr,
+            QByteArray::from("iconUrl"),
+        );
+        roles.insert(
+            qobject::TransactionRoles::Progress.repr,
+            QByteArray::from("progress"),
+        );
+        roles.insert(
+            qobject::TransactionRoles::Status.repr,
+            QByteArray::from("status"),
+        );
+        roles.insert(
+            qobject::TransactionRoles::TxType.repr,
+            QByteArray::from("txType"),
+        );
+        roles.insert(
+            qobject::TransactionRoles::Section.repr,
+            QByteArray::from("section"),
+        );
+        roles.insert(
+            qobject::TransactionRoles::Error.repr,
+            QByteArray::from("error"),
+        );
+        roles.insert(
+            qobject::TransactionRoles::BytesDone.repr,
+            QByteArray::from("bytesDone"),
+        );
+        roles.insert(
+            qobject::TransactionRoles::BytesTotal.repr,
+            QByteArray::from("bytesTotal"),
+        );
+        roles.insert(
+            qobject::TransactionRoles::SpeedBps.repr,
+            QByteArray::from("speedBps"),
+        );
+        roles.insert(
+            qobject::TransactionRoles::EtaSecs.repr,
+            QByteArray::from("etaSecs"),
+        );
         roles
     }
 
@@ -1182,11 +1377,9 @@ fn queue_update(pkg_id: &str, f: impl FnOnce(&mut Tx) + Send + 'static) {
     };
     let pkg_id = pkg_id.to_string();
     let _ = qt_thread.queue(move |mut model| {
-        if let Some(row) = model
-            .transactions
-            .iter()
-            .position(|tx| tx.pkg_id == pkg_id && matches!(tx.status, TxStatus::Pending | TxStatus::Running))
-        {
+        if let Some(row) = model.transactions.iter().position(|tx| {
+            tx.pkg_id == pkg_id && matches!(tx.status, TxStatus::Pending | TxStatus::Running)
+        }) {
             f(&mut model.as_mut().rust_mut().transactions[row]);
             let tx = model.transactions[row].clone();
             emit_tx_row_changed(model, row as i32);
@@ -1253,7 +1446,9 @@ fn sync_launcher_badge(mut model: Pin<&mut qobject::TransactionsModel>) {
     model.as_mut().set_running_count(running);
     model.as_mut().set_queued_count(queued);
     model.as_mut().set_done_count(done);
-    model.as_mut().set_busy_packages_json(QString::from(&to_json(&busy_packages)));
+    model
+        .as_mut()
+        .set_busy_packages_json(QString::from(&to_json(&busy_packages)));
     libarc::launcher::update_transactions(active.len() as i32, progress);
 }
 
@@ -1321,12 +1516,18 @@ async fn refresh_updates_count(proxy: &ArcDaemonProxy<'static>) {
 }
 
 async fn run_signal_listener(proxy: ArcDaemonProxy<'static>) {
-    let (Ok(mut progress_stream), Ok(mut finished_stream), Ok(mut updates_stream), Ok(mut stats_stream)) = tokio::join!(
+    let (
+        Ok(mut progress_stream),
+        Ok(mut finished_stream),
+        Ok(mut updates_stream),
+        Ok(mut stats_stream),
+    ) = tokio::join!(
         proxy.receive_transaction_progress(),
         proxy.receive_transaction_finished(),
         proxy.receive_updates_available(),
         proxy.receive_transaction_stats(),
-    ) else {
+    )
+    else {
         return;
     };
 
@@ -1398,7 +1599,10 @@ pub struct HomeFeedModelRust {
 
 impl Default for HomeFeedModelRust {
     fn default() -> Self {
-        Self { loading: true, sections: Vec::new() }
+        Self {
+            loading: true,
+            sections: Vec::new(),
+        }
     }
 }
 
@@ -1454,36 +1658,60 @@ impl qobject::HomeFeedModel {
             qobject::HomeRoles::Text => QVariant::from(&QString::from(&s.text)),
             qobject::HomeRoles::Title => QVariant::from(&QString::from(&s.title)),
             qobject::HomeRoles::CardsJson => QVariant::from(&QString::from(&to_json(&s.cards))),
-            qobject::HomeRoles::HeroItemsJson => QVariant::from(&QString::from(&to_json(&s.hero_items))),
+            qobject::HomeRoles::HeroItemsJson => {
+                QVariant::from(&QString::from(&to_json(&s.hero_items)))
+            }
             qobject::HomeRoles::EditorialItemsJson => {
                 QVariant::from(&QString::from(&to_json(&s.editorial_items)))
             }
             qobject::HomeRoles::LinkTitle => QVariant::from(&QString::from(&s.link_title)),
-            qobject::HomeRoles::LinkItemsJson => QVariant::from(&QString::from(&to_json(&s.link_items))),
+            qobject::HomeRoles::LinkItemsJson => {
+                QVariant::from(&QString::from(&to_json(&s.link_items)))
+            }
             qobject::HomeRoles::AppCloudOverlay => QVariant::from(&s.app_cloud_overlay),
-            qobject::HomeRoles::CategoriesJson => QVariant::from(&QString::from(&to_json(&s.categories))),
+            qobject::HomeRoles::CategoriesJson => {
+                QVariant::from(&QString::from(&to_json(&s.categories)))
+            }
             _ => QVariant::default(),
         }
     }
 
     pub fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
         let mut roles = QHash::<QHashPair_i32_QByteArray>::default();
-        roles.insert(qobject::HomeRoles::ItemType.repr, QByteArray::from("itemType"));
+        roles.insert(
+            qobject::HomeRoles::ItemType.repr,
+            QByteArray::from("itemType"),
+        );
         roles.insert(qobject::HomeRoles::Text.repr, QByteArray::from("text"));
         roles.insert(qobject::HomeRoles::Title.repr, QByteArray::from("title"));
-        roles.insert(qobject::HomeRoles::CardsJson.repr, QByteArray::from("cardsJson"));
-        roles.insert(qobject::HomeRoles::HeroItemsJson.repr, QByteArray::from("heroItemsJson"));
+        roles.insert(
+            qobject::HomeRoles::CardsJson.repr,
+            QByteArray::from("cardsJson"),
+        );
+        roles.insert(
+            qobject::HomeRoles::HeroItemsJson.repr,
+            QByteArray::from("heroItemsJson"),
+        );
         roles.insert(
             qobject::HomeRoles::EditorialItemsJson.repr,
             QByteArray::from("editorialItemsJson"),
         );
-        roles.insert(qobject::HomeRoles::LinkTitle.repr, QByteArray::from("linkTitle"));
-        roles.insert(qobject::HomeRoles::LinkItemsJson.repr, QByteArray::from("linkItemsJson"));
+        roles.insert(
+            qobject::HomeRoles::LinkTitle.repr,
+            QByteArray::from("linkTitle"),
+        );
+        roles.insert(
+            qobject::HomeRoles::LinkItemsJson.repr,
+            QByteArray::from("linkItemsJson"),
+        );
         roles.insert(
             qobject::HomeRoles::AppCloudOverlay.repr,
             QByteArray::from("appCloudOverlay"),
         );
-        roles.insert(qobject::HomeRoles::CategoriesJson.repr, QByteArray::from("categoriesJson"));
+        roles.insert(
+            qobject::HomeRoles::CategoriesJson.repr,
+            QByteArray::from("categoriesJson"),
+        );
         roles
     }
 
@@ -1499,7 +1727,10 @@ pub struct RemotesModelRust {
 
 impl Default for RemotesModelRust {
     fn default() -> Self {
-        Self { loading: true, remotes: Vec::new() }
+        Self {
+            loading: true,
+            remotes: Vec::new(),
+        }
     }
 }
 
@@ -1566,7 +1797,8 @@ impl qobject::RemotesModel {
                 Ok(true) => {
                     let _ = qt_thread.queue(move |mut this| {
                         this.as_mut().load();
-                        this.as_mut().action_succeeded(QString::from("Repository added"));
+                        this.as_mut()
+                            .action_succeeded(QString::from("Repository added"));
                     });
                 }
                 Ok(false) => emit_failed(&qt_thread, "Could not add repository".into()),
@@ -1592,7 +1824,10 @@ impl qobject::RemotesModel {
                     });
                 }
                 Ok(false) => emit_failed(&qt_thread, format!("Could not remove repository {name}")),
-                Err(e) => emit_failed(&qt_thread, format!("Could not remove repository {name}: {e}")),
+                Err(e) => emit_failed(
+                    &qt_thread,
+                    format!("Could not remove repository {name}: {e}"),
+                ),
             }
         });
     }
@@ -1614,7 +1849,10 @@ impl qobject::RemotesModel {
         let mut roles = QHash::<QHashPair_i32_QByteArray>::default();
         roles.insert(qobject::RemoteRoles::Name.repr, QByteArray::from("name"));
         roles.insert(qobject::RemoteRoles::Url.repr, QByteArray::from("url"));
-        roles.insert(qobject::RemoteRoles::Protected.repr, QByteArray::from("isProtected"));
+        roles.insert(
+            qobject::RemoteRoles::Protected.repr,
+            QByteArray::from("isProtected"),
+        );
         roles
     }
 
