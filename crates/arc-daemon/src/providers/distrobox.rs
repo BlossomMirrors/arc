@@ -924,6 +924,18 @@ export_all() {
 
 touch "$EXPORT_LOG"
 
+# Some postinst scripts call xdg-desktop-menu to register a menu entry.
+# There's no writable system menu dir / desktop session in a distrobox
+# container, so it exits nonzero and can fail the whole package install.
+# export_all() below does our own desktop integration, so shadow it with
+# a no-op for the duration of the install.
+sudo tee /usr/local/bin/xdg-desktop-menu > /dev/null << 'STUB'
+#!/bin/sh
+exit 0
+STUB
+sudo chmod +x /usr/local/bin/xdg-desktop-menu
+trap 'sudo rm -f /usr/local/bin/xdg-desktop-menu' EXIT
+
 case "$PKG_TYPE" in
     deb)
         sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock
