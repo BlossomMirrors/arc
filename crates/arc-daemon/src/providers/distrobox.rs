@@ -78,7 +78,11 @@ fn guess_pkg_name(path: &Path, pkg_type: PkgType) -> String {
             // digit-starting field fails for names like "1password" or "0ad".
             let parts: Vec<&str> = no_ext.split('-').collect();
             let name_end = parts.len().saturating_sub(3);
-            if name_end > 0 { parts[..name_end].join("-") } else { parts[0].to_string() }
+            if name_end > 0 {
+                parts[..name_end].join("-")
+            } else {
+                parts[0].to_string()
+            }
         }
     }
 }
@@ -139,7 +143,9 @@ impl DistroboxProvider {
         }
         info!("Creating distrobox container {} ({})", name, image);
         let status = run_cancellable(
-            Command::new("distrobox").args(["create", "--name", name, "--image", image, "--yes"]),
+            Command::new("distrobox").args([
+                "create", "--name", name, "--image", image, "--init", "--nvidia", "--yes",
+            ]),
             cancel_token,
         )
         .await?;
@@ -477,10 +483,10 @@ fn parse_info(content: &str, home: &str) -> Option<Package> {
         icon_url: desktop_icon,
         remote: None,
         screenshots: vec![],
-            developer_name: None,
-            homepage_url: None,
-            content_rating: None,
-            is_runtime: false,
+        developer_name: None,
+        homepage_url: None,
+        content_rating: None,
+        is_runtime: false,
     })
 }
 
@@ -510,7 +516,8 @@ impl PackageProvider for DistroboxProvider {
             ArcError::ProviderError(format!("Unsupported package format: {}", path.display()))
         })?;
         let guessed_name = guess_pkg_name(&path, pkg_type);
-        self.ensure_container(&container, &image, &cancel_token).await?;
+        self.ensure_container(&container, &image, &cancel_token)
+            .await?;
         if container == CONTAINER_DEB {
             self.ensure_debian_compat(&cancel_token).await?;
         }
@@ -629,7 +636,12 @@ async fn run_cancellable(
     // setsid() makes the child its own process group leader (pgid == pid),
     // so we can kill the whole tree (distrobox → podman exec → apt-get/dnf/pacman)
     // with a single kill(-pgid, SIGKILL).
-    unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
     let mut child = cmd
         .spawn()
         .map_err(|e| ArcError::ProviderError(e.to_string()))?;
@@ -643,11 +655,16 @@ async fn run_cancellable(
     let killer = tokio::spawn(async move {
         killer_token.cancelled().await;
         if let Some(pid) = pid {
-            unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL); }
+            unsafe {
+                libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+            }
         }
     });
 
-    let result = child.wait().await.map_err(|e| ArcError::ProviderError(e.to_string()));
+    let result = child
+        .wait()
+        .await
+        .map_err(|e| ArcError::ProviderError(e.to_string()));
     killer.abort();
 
     if cancel_token.is_cancelled() {
@@ -692,7 +709,9 @@ impl DistroboxProvider {
         // Phase 1: ensure container (fast if it exists, slow if it needs creating)
         let _ = progress_tx.send(5);
         let ticker = slow_tick(progress_tx.clone(), 5, 18, 2);
-        let result = self.ensure_container(&container, &image, &cancel_token).await;
+        let result = self
+            .ensure_container(&container, &image, &cancel_token)
+            .await;
         ticker.abort();
         result?;
 
@@ -723,10 +742,7 @@ impl DistroboxProvider {
         Ok(())
     }
 
-    async fn ensure_debian_compat(
-        &self,
-        cancel_token: &CancellationToken,
-    ) -> Result<(), ArcError> {
+    async fn ensure_debian_compat(&self, cancel_token: &CancellationToken) -> Result<(), ArcError> {
         let arc_dir = PathBuf::from(&self.home).join(".local/share/arc");
         let marker = arc_dir.join("arc-debian-compat-v2.done");
         if marker.exists() {
@@ -772,10 +788,7 @@ impl DistroboxProvider {
         Ok(())
     }
 
-    async fn ensure_arch_compat(
-        &self,
-        cancel_token: &CancellationToken,
-    ) -> Result<(), ArcError> {
+    async fn ensure_arch_compat(&self, cancel_token: &CancellationToken) -> Result<(), ArcError> {
         let arc_dir = PathBuf::from(&self.home).join(".local/share/arc");
         let marker = arc_dir.join("arc-arch-compat-v1.done");
         if marker.exists() {
