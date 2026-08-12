@@ -32,7 +32,7 @@ RUN dnf install -y \
 RUN flatpak remote-add --system --if-not-exists \
         flathub https://flathub.org/repo/flathub.flatpakrepo \
     && flatpak remote-add --system --if-not-exists \
-        blossomos https://repo.blossomos.org/blossomos.flatpakrepo \
+        blossomos https://forge.blossomos.org/flatpak.flatpakrepo \
     && flatpak update --appstream --system || true
 
 COPY --from=builder /build/target/release/arc-daemon /usr/local/bin/arc-daemon
