@@ -101,56 +101,24 @@ Kirigami.ScrollablePage {
         }
     }
 
-    ColumnLayout {
-        visible: packageListModel.loading
-        width: parent.width
-        spacing: Kirigami.Units.largeSpacing * 2
-
-        Repeater {
-            model: 5
-
-            delegate: Kirigami.AbstractCard {
-                Layout.fillWidth: true
-                Layout.leftMargin: Kirigami.Units.largeSpacing * 2
-                Layout.rightMargin: Kirigami.Units.largeSpacing * 2
-
-                contentItem: RowLayout {
-                    spacing: Kirigami.Units.largeSpacing
-
-                    SkeletonBlock {
-                        Layout.preferredWidth: Kirigami.Units.iconSizes.huge
-                        Layout.preferredHeight: Kirigami.Units.iconSizes.huge
-                    }
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: Kirigami.Units.smallSpacing
-
-                        SkeletonBlock { Layout.preferredWidth: 180; Layout.preferredHeight: 18 }
-                        SkeletonBlock { Layout.fillWidth: true; Layout.preferredHeight: 14 }
-                    }
-
-                    SkeletonBlock { Layout.preferredWidth: 90; Layout.preferredHeight: 36 }
-                }
-            }
-        }
-    }
-
-    Kirigami.PlaceholderMessage {
-        anchors.centerIn: parent
-        width: parent.width - Kirigami.Units.gridUnit * 4
-        visible: !packageListModel.loading && listView.count === 0
-        text: root.emptyText
-    }
-
     Kirigami.CardsListView {
         id: listView
-        visible: !packageListModel.loading
         model: packageListModel
 
         reuseItems: true
 
         headerPositioning: ListView.InlineHeader
+
+        LoadingOverlay {
+            visible: packageListModel.loading
+        }
+
+        Kirigami.PlaceholderMessage {
+            anchors.centerIn: parent
+            width: parent.width - Kirigami.Units.gridUnit * 4
+            visible: !packageListModel.loading && listView.count === 0
+            text: root.emptyText
+        }
 
         header: Item {
             width: listView.width

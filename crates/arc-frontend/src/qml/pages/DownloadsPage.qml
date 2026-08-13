@@ -38,6 +38,10 @@ Kirigami.ScrollablePage {
         return i18n("Installing");
     }
 
+    LoadingOverlay {
+        visible: downloadListModel.loading
+    }
+
     Kirigami.PlaceholderMessage {
         anchors.centerIn: parent
         width: parent.width - Kirigami.Units.gridUnit * 4
@@ -287,40 +291,6 @@ Kirigami.ScrollablePage {
                         || TransactionsModel.doneCount > 0)
                 text: i18n("Everything is up to date.")
                 opacity: 0.7
-            }
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.topMargin: Kirigami.Units.largeSpacing
-                visible: downloadListModel.loading
-                spacing: Kirigami.Units.largeSpacing
-
-                Repeater {
-                    model: 3
-
-                    delegate: Kirigami.AbstractCard {
-                        Layout.fillWidth: true
-
-                        contentItem: RowLayout {
-                            spacing: Kirigami.Units.largeSpacing
-
-                            SkeletonBlock {
-                                Layout.preferredWidth: Kirigami.Units.iconSizes.large
-                                Layout.preferredHeight: Kirigami.Units.iconSizes.large
-                            }
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: Kirigami.Units.smallSpacing
-
-                                SkeletonBlock { Layout.preferredWidth: 160; Layout.preferredHeight: 16 }
-                                SkeletonBlock { Layout.preferredWidth: 80; Layout.preferredHeight: 12 }
-                            }
-
-                            SkeletonBlock { Layout.preferredWidth: 90; Layout.preferredHeight: 32 }
-                        }
-                    }
-                }
             }
 
             Repeater {

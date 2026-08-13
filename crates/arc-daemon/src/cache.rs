@@ -68,7 +68,9 @@ pub async fn fetch_icon(
             let ct = resp
                 .headers()
                 .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok().unwrap_or("image/png").to_string());
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("image/png")
+                .to_string();
             let bytes = resp.bytes().await.ok()?.to_vec();
             Some((bytes, ct))
         })

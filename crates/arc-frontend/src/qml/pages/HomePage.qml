@@ -46,13 +46,12 @@ Kirigami.ScrollablePage {
         applicationWindow().openCategory(categoryId, categoryLabel, categoryColor, categoryIcon);
     }
 
-    ConveyorLoader {
-        anchors.centerIn: parent
-        visible: HomeFeedModel.loading
+    LoadingOverlay {
+        visible: HomeFeedModel.loading || sectionsRepeater.count === 0
     }
 
     ColumnLayout {
-        visible: !HomeFeedModel.loading
+        visible: !HomeFeedModel.loading && sectionsRepeater.count > 0
         width: root.availableWidth
         spacing: 0
 
@@ -63,6 +62,7 @@ Kirigami.ScrollablePage {
             spacing: 0
 
             Repeater {
+                id: sectionsRepeater
                 model: HomeFeedModel
 
             delegate: Loader {
@@ -78,6 +78,7 @@ Kirigami.ScrollablePage {
                 required property string linkTitle
                 required property string linkItemsJson
                 required property string categoriesJson
+                required property bool loading
 
                 Layout.fillWidth: true
                 Layout.topMargin: index === 0 ? 0
@@ -127,7 +128,7 @@ Kirigami.ScrollablePage {
                 Component {
                     id: categoriesComponent
                     ColumnLayout {
-                        spacing: Kirigami.Units.smallSpacing
+                        spacing: Kirigami.Units.largeSpacing * 2
 
                         Kirigami.Heading {
                             level: 2
@@ -163,7 +164,7 @@ Kirigami.ScrollablePage {
                 Component {
                     id: appRowComponent
                     ColumnLayout {
-                        spacing: Kirigami.Units.smallSpacing
+                        spacing: Kirigami.Units.largeSpacing * 2
 
                         Kirigami.Heading {
                             level: 2
@@ -171,9 +172,16 @@ Kirigami.ScrollablePage {
                             visible: text.length > 0
                         }
 
+                        RowLoadingPlaceholder {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Kirigami.Units.gridUnit * 10
+                            visible: rowLoader.loading
+                        }
+
                         CardCarousel {
                             Layout.fillWidth: true
                             Layout.preferredHeight: Kirigami.Units.gridUnit * 10
+                            visible: !rowLoader.loading
                             model: JSON.parse(rowLoader.cardsJson)
 
                             delegate: AppCard {
@@ -199,7 +207,7 @@ Kirigami.ScrollablePage {
                 Component {
                     id: appGridComponent
                     ColumnLayout {
-                        spacing: Kirigami.Units.smallSpacing
+                        spacing: Kirigami.Units.largeSpacing * 2
 
                         Kirigami.Heading {
                             level: 2
@@ -207,9 +215,16 @@ Kirigami.ScrollablePage {
                             visible: text.length > 0
                         }
 
+                        RowLoadingPlaceholder {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Kirigami.Units.gridUnit * 10
+                            visible: rowLoader.loading
+                        }
+
                         GridLayout {
                             id: grid
                             Layout.fillWidth: true
+                            visible: !rowLoader.loading
                             columns: Math.max(2, Math.floor(width / (Kirigami.Units.gridUnit * 12)))
                             columnSpacing: Kirigami.Units.largeSpacing
                             rowSpacing: Kirigami.Units.largeSpacing
@@ -241,12 +256,18 @@ Kirigami.ScrollablePage {
                 Component {
                     id: carouselComponent
                     ColumnLayout {
-                        spacing: Kirigami.Units.largeSpacing
+                        spacing: Kirigami.Units.largeSpacing * 2
+
+                        RowLoadingPlaceholder {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 400
+                            visible: rowLoader.loading
+                        }
 
                         HeroCarousel {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 400
-                            visible: items.length > 0
+                            visible: !rowLoader.loading && items.length > 0
                             items: JSON.parse(rowLoader.heroItemsJson)
                             onStoryActivated: storyIndex => root.openStory("story-" + storyIndex)
                             onAppActivated: pkgId => root.openApp(pkgId)
@@ -307,11 +328,17 @@ Kirigami.ScrollablePage {
                             level: 2
                             text: rowLoader.linkTitle
                             visible: text.length > 0
-                            Layout.bottomMargin: Kirigami.Units.smallSpacing
+                            Layout.bottomMargin: Kirigami.Units.largeSpacing
+                        }
+
+                        RowLoadingPlaceholder {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Kirigami.Units.gridUnit * 5
+                            visible: rowLoader.loading
                         }
 
                         Repeater {
-                            model: JSON.parse(rowLoader.linkItemsJson)
+                            model: rowLoader.loading ? [] : JSON.parse(rowLoader.linkItemsJson)
 
                             delegate: ColumnLayout {
                                 id: linkRow

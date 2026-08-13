@@ -1,7 +1,6 @@
 use libarc::ArcDaemonProxy;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use tokio::runtime::Runtime;
-use tokio::sync::OnceCell;
 
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
@@ -21,14 +20,24 @@ where
         .spawn(future);
 }
 
-static PROXY: OnceCell<ArcDaemonProxy<'static>> = OnceCell::const_new();
+static PROXY: Mutex<Option<ArcDaemonProxy<'static>>> = Mutex::new(None);
 
 pub async fn proxy() -> Option<ArcDaemonProxy<'static>> {
-    match PROXY.get_or_try_init(libarc::connect).await {
-        Ok(p) => Some(p.clone()),
+    if let Some(p) = PROXY.lock().unwrap().clone() {
+        return Some(p);
+    }
+    match libarc::connect().await {
+        Ok(p) => {
+            *PROXY.lock().unwrap() = Some(p.clone());
+            Some(p)
+        }
         Err(e) => {
             tracing::warn!("failed to connect to daemon: {e}");
             None
         }
     }
+}
+
+pub fn invalidate_proxy() {
+    *PROXY.lock().unwrap() = None;
 }

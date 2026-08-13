@@ -34,22 +34,6 @@ Kirigami.AbstractCard {
         onTriggered: DetailController.prefetch(root.pkgId)
     }
 
-    background: Kirigami.ShadowedRectangle {
-        color: Kirigami.Theme.alternateBackgroundColor
-        radius: Kirigami.Units.cornerRadius * 4
-        border.width: 1
-        border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, root.cardHovered ? 0.2 : 0.1)
-
-        shadow.size: root.cardHovered ? Kirigami.Units.largeSpacing * 2 : Kirigami.Units.largeSpacing
-        shadow.yOffset: root.cardHovered ? 6 : 3
-        shadow.color: Qt.rgba(0, 0, 0, root.cardHovered ? 0.4 : 0.25)
-
-        Behavior on shadow.size { NumberAnimation { duration: Kirigami.Units.shortDuration } }
-        Behavior on shadow.yOffset { NumberAnimation { duration: Kirigami.Units.shortDuration } }
-        Behavior on color { ColorAnimation { duration: Kirigami.Units.shortDuration } }
-        Behavior on border.color { ColorAnimation { duration: Kirigami.Units.shortDuration } }
-    }
-
     contentItem: ColumnLayout {
         spacing: 0
 

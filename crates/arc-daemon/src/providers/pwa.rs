@@ -1,3 +1,5 @@
+use crate::cache::fetch_icon;
+
 use super::PackageProvider;
 use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider};
@@ -7,10 +9,7 @@ use tracing::{info, warn};
 
 const FORGE_PWAS_BASE: &str = "https://forge.blossomos.org/api/pwas";
 
-/// Escape a value for storage as a string-type Desktop Entry value. This is
-/// the ini-level escaping the spec requires for every string value (applied
-/// when the file is parsed, before the Exec key's own argument quoting is
-/// interpreted) and is independent of `quote_exec_arg`'s escaping.
+
 fn escape_desktop_value(value: &str) -> String {
     value
         .replace('\\', "\\\\")
@@ -19,12 +18,9 @@ fn escape_desktop_value(value: &str) -> String {
         .replace('\r', "\\r")
 }
 
-/// Quote a value for use as an Exec argument in a .desktop file, per the
-/// Desktop Entry Specification's reserved character rules. If the value
-/// contains a reserved character it is wrapped in double quotes, with
-/// backslash, double quote, backtick and dollar sign escaped.
+// sanatize exec args
 fn quote_exec_arg(value: &str) -> String {
-    const RESERVED: &[char] = &[
+    const RESERVED: &[char; 19] = &[
         ' ', '\t', '\n', '"', '\'', '\\', '>', '<', '~', '|', '&', ';', '$', '*', '?', '#', '(',
         ')', '`',
     ];
@@ -210,27 +206,17 @@ impl PwaProvider {
             return (icon_name, icon_path_str);
         }
 
-        match self
-            .http
-            .get(icon_url)
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await
-        {
-            Ok(r) => match r.bytes().await {
-                Ok(bytes) => {
-                    let to_write: Vec<u8> = if is_svg {
-                        bytes.to_vec()
-                    } else {
-                        round_pwa_icon(&bytes).unwrap_or_else(|| bytes.to_vec())
-                    };
-                    if let Err(e) = std::fs::write(&icon_path, &to_write) {
-                        warn!("Could not write icon: {}", e);
-                    }
-                }
-                Err(e) => warn!("Could not read icon bytes: {}", e),
-            },
-            Err(e) => warn!("Could not download icon: {}", e),
+        if let Some((bytes, _content_type)) = fetch_icon(&self.http, appid, icon_url).await {
+            let to_write: Vec<u8> = if is_svg {
+                bytes
+            } else {
+                round_pwa_icon(&bytes).unwrap_or_else(|| bytes.to_vec())
+            };
+            if let Err(e) = std::fs::write(&icon_path, &to_write) {
+                warn!("Could not write icon: {}", e);
+            }
+        } else {
+            warn!("Could not download icon for {}", appid)
         }
 
         (icon_name, icon_path_str)
@@ -301,7 +287,7 @@ impl PwaProvider {
         let path = self.desktop_path(&pwa.appid);
         std::fs::write(&path, &content)?;
 
-        // Mark executable so desktop environments treat it as trusted.
+        // mark executable
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -468,12 +454,6 @@ impl PackageProvider for PwaProvider {
             return Err(ArcError::PackageNotFound(appid.to_string()));
         }
 
-        // Launch through the generated .desktop file instead of re-splitting
-        // build_exec()'s output ourselves: that string is quoted per the
-        // Desktop Entry Exec rules, and a plain split_whitespace() mangles
-        // any argument containing a space (e.g. --name="Microsoft Teams"
-        // becomes two broken arguments). gtk-launch defers to glib's own
-        // Exec parser, which already has to get this right.
         let desktop_id = format!("arc-pwa-{}", appid);
         info!("Launching PWA {} via {}", appid, desktop_id);
         tokio::process::Command::new("gtk-launch")

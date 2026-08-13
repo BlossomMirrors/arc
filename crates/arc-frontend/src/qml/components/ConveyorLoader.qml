@@ -6,6 +6,8 @@ Item {
 
     implicitWidth: 560
     implicitHeight: 170
+    width: implicitWidth
+    height: implicitHeight
     clip: true
 
     property real phase: 0

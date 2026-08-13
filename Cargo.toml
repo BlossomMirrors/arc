@@ -3,7 +3,7 @@ members = [
     "crates/libarc",
     "crates/arc-daemon",
     "crates/arcli",
-    "crates/arc-frontend-qml",
+    "crates/arc-frontend",
     "crates/arc-dev",
 ]
 default-members = ["crates/arc-dev"]

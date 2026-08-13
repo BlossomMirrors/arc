@@ -23,7 +23,7 @@ struct Snapshot {
 
 fn disk_path() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".cache/arc-frontend-qml/home_feed.json"))
+    Some(PathBuf::from(home).join(".cache/arc-frontend/home_feed.json"))
 }
 
 fn static_item_type(s: &str) -> &'static str {
@@ -59,6 +59,9 @@ pub fn load() -> Option<(Vec<HomeSection>, Vec<Story>)> {
             link_items: d.link_items,
             app_cloud_overlay: d.app_cloud_overlay,
             categories: d.categories,
+            // save() only ever runs once every pending row has resolved, so
+            // a cached snapshot is always fully-resolved by construction
+            loading: false,
         })
         .collect();
     Some((sections, snapshot.stories))
