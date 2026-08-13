@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 ./build.sh
 RPM=$(ls rpmbuild/RPMS/x86_64/*.rpm)
 sudo rpm-ostree usroverlay || true

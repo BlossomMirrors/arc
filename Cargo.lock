@@ -180,7 +180,7 @@ name = "arc-dev"
 version = "0.1.0"
 
 [[package]]
-name = "arc-frontend-qml"
+name = "arc-frontend"
 version = "0.1.0"
 dependencies = [
  "anyhow",

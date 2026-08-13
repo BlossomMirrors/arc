@@ -30,6 +30,8 @@ fn main() {
             "src/qml/components/CardCarousel.qml",
             "src/qml/components/CategoryCard.qml",
             "src/qml/components/ConveyorLoader.qml",
+            "src/qml/components/LoadingOverlay.qml",
+            "src/qml/components/RowLoadingPlaceholder.qml",
             "src/qml/components/SkeletonBlock.qml",
             "src/qml/components/ItemList.qml",
             "src/qml/components/ItemButtons.qml",

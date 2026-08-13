@@ -37,6 +37,10 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "actionSucceeded"]
         fn action_succeeded(self: Pin<&mut SettingsController>, message: QString);
+
+        #[qsignal]
+        #[cxx_name = "daemonReconnected"]
+        fn daemon_reconnected(self: Pin<&mut SettingsController>);
     }
 
     impl cxx_qt::Threading for SettingsController {}
@@ -65,6 +69,30 @@ fn emit_result(qt_thread: &CxxQtThread<qobject::SettingsController>, message: St
             this.as_mut().action_failed(QString::from(&message));
         }
     });
+}
+
+// resolves the actual executable path of whatever process is currently
+// running as `arc-daemon` — a dev session (`cargo run -p arc-dev`) runs
+// target/debug/arc-daemon, not the system-installed /usr/bin/arc-daemon a
+// hardcoded path would restart instead, silently leaving the one actually
+// in use untouched (and possibly reviving a stale system install instead)
+fn find_running_arc_daemon_exe() -> Option<std::path::PathBuf> {
+    let entries = std::fs::read_dir("/proc").ok()?;
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
+            continue;
+        }
+        let Ok(comm) = std::fs::read_to_string(entry.path().join("comm")) else {
+            continue;
+        };
+        if comm.trim() != "arc-daemon" {
+            continue;
+        }
+        if let Ok(exe) = std::fs::read_link(entry.path().join("exe")) {
+            return Some(exe);
+        }
+    }
+    None
 }
 
 fn provider_to_string(p: &Provider) -> &'static str {
@@ -143,23 +171,39 @@ impl qobject::SettingsController {
     pub fn restart_daemon(mut self: Pin<&mut Self>) {
         let qt_thread = self.as_mut().qt_thread();
         runtime::spawn(async move {
+            let daemon_path = find_running_arc_daemon_exe()
+                .unwrap_or_else(|| std::path::PathBuf::from("/usr/bin/arc-daemon"));
+
             let _ = tokio::process::Command::new("pkill").args(["-x", "arc-daemon"]).status().await;
             tokio::time::sleep(std::time::Duration::from_millis(800)).await;
             let spawned = std::process::Command::new("setsid")
-                .args(["--fork", "/usr/bin/arc-daemon"])
+                .arg("--fork")
+                .arg(&daemon_path)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn();
             if let Err(e) = spawned {
-                emit_result(&qt_thread, format!("Failed to start arc-daemon: {e}"), false);
+                emit_result(&qt_thread, format!("Failed to start {}: {e}", daemon_path.display()), false);
                 return;
             }
 
             for _ in 0..20 {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                if libarc::connect().await.is_ok() {
+                let Ok(proxy) = libarc::connect().await else { continue };
+                let ready = tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    proxy.list_installed(),
+                )
+                .await
+                .map(|r| r.is_ok())
+                .unwrap_or(false);
+                if ready {
+                    runtime::invalidate_proxy();
                     emit_result(&qt_thread, "Daemon restarted".into(), true);
+                    let _ = qt_thread.queue(|mut this| {
+                        this.as_mut().daemon_reconnected();
+                    });
                     return;
                 }
             }

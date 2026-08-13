@@ -40,6 +40,7 @@ pub struct Category {
     pub color: String,
 }
 
+#[derive(Clone)]
 pub struct HomeSection {
     pub item_type: &'static str,
     pub text: String,
@@ -51,6 +52,11 @@ pub struct HomeSection {
     pub link_items: Vec<LinkItem>,
     pub app_cloud_overlay: bool,
     pub categories: Vec<Category>,
+    // true for a stub row whose cards/hero/link items haven't resolved yet
+    // (still needs one or more app_info lookups) — false for rows that
+    // never needed resolution (headings, categories, ...) and for rows
+    // that have since been filled in by resolve_pending_section
+    pub loading: bool,
 }
 
 impl Default for HomeSection {
@@ -66,8 +72,43 @@ impl Default for HomeSection {
             link_items: vec![],
             app_cloud_overlay: false,
             categories: vec![],
+            loading: false,
         }
     }
+}
+
+// each pending row's stories are numbered starting at row_index * STORY_INDEX_STRIDE
+// so ids stay globally unique without needing a running offset computed in
+// document order — that would force resolving every row sequentially,
+// exactly what this whole module exists to avoid. Generous headroom for
+// how many stories a single carousel/links section could plausibly hold.
+const STORY_INDEX_STRIDE: i32 = 1000;
+
+// mirrors bridge/models.rs's DAEMON_STARTUP_TIMEOUT (same underlying race,
+// different call site — not worth sharing one const across a module
+// boundary for a single magic number)
+const DAEMON_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+// everything needed to resolve one pending row's app ids, independent of
+// any other row — sent off to its own concurrent task by the caller
+pub struct PendingSection {
+    pub row_index: usize,
+    section: FpSection,
+}
+
+// shared, read-only context every pending row's resolution needs; built
+// once in plan_home and handed out as an Arc so spawning one task per
+// pending row doesn't require re-fetching or duplicating any of it
+pub struct HomeCtx {
+    proxy: Option<ArcDaemonProxy<'static>>,
+    pwa_map: HashMap<String, forge::PwaApp>,
+    installed_ids: HashSet<String>,
+    app_meta_map: HashMap<String, forge::HomeAppMeta>,
+}
+
+pub struct HomePlan {
+    pub sections: Vec<HomeSection>,
+    pub pending: Vec<PendingSection>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -85,7 +126,7 @@ struct AppEntry {
     icon_url: Option<String>,
 }
 
-const CATEGORY_DEFS: &[(&str, &str, &str, &str)] = &[
+const CATEGORY_DEFS: &[(&str, &str, &str, &str); 9] = &[
     ("AudioVideo", "Multimedia", "applications-multimedia", "#2980b9"),
     ("Development", "Developer Tools", "applications-development", "#8e44ad"),
     ("Education", "Education", "applications-education", "#27ae60"),
@@ -197,7 +238,15 @@ async fn entries_to_cards(entries: Vec<AppEntry>, installed: &HashSet<String>) -
         .collect()
 }
 
-pub async fn load_home(proxy: Option<ArcDaemonProxy<'static>>) -> (Vec<HomeSection>, Vec<Story>) {
+
+// Phase A: everything knowable from the single frontpage-XML fetch plus the
+// small handful of bulk lookups, with zero per-app resolution. Fast — no
+// section here waits on another. Rows that do need per-app resolution come
+// back as a `loading: true` stub (right type/heading/position, no cards
+// yet) plus a matching PendingSection for the caller to resolve separately
+// (see resolve_pending_section) and patch in whenever it happens to finish,
+// independent of every other row.
+pub async fn plan_home(proxy: Option<ArcDaemonProxy<'static>>) -> (HomePlan, std::sync::Arc<HomeCtx>) {
     let lang = sys_locale::get_locale()
         .unwrap_or_default()
         .split(['_', '-'])
@@ -209,8 +258,17 @@ pub async fn load_home(proxy: Option<ArcDaemonProxy<'static>>) -> (Vec<HomeSecti
         forge::fetch_frontpage(),
         async {
             if let Some(ref p) = proxy {
-                p.installed_packages()
+                // the daemon claims its D-Bus name before its object server
+                // is registered (see models.rs's DAEMON_STARTUP_TIMEOUT
+                // comment) — a call landing in that gap gets no reply at
+                // all, so this needs a bound or a cold app launch can hang
+                // here for as long as it takes something else (e.g. the
+                // page's own cold-start retry timer) to happen to unstick
+                // it, rather than Phase A completing in well under a second
+                tokio::time::timeout(DAEMON_STARTUP_TIMEOUT, p.installed_packages())
                     .await
+                    .ok()
+                    .and_then(|r| r.ok())
                     .unwrap_or_default()
                     .into_iter()
                     .map(|pkg| pkg.id)
@@ -230,150 +288,157 @@ pub async fn load_home(proxy: Option<ArcDaemonProxy<'static>>) -> (Vec<HomeSecti
 
     let show_categories = fp_sections.iter().any(|s| matches!(s, FpSection::Categories));
 
-    struct SecOut {
-        item: HomeSection,
-        stories: Vec<Story>,
+    let mut sections = Vec::with_capacity(fp_sections.len());
+    let mut pending = Vec::new();
+
+    for section in fp_sections {
+        let row_index = sections.len();
+        let stub = match &section {
+            FpSection::H1(t) => HomeSection { item_type: "h1", text: t.clone(), ..Default::default() },
+            FpSection::H2(t) => HomeSection { item_type: "h2", text: t.clone(), ..Default::default() },
+            FpSection::H3(t) => HomeSection { item_type: "h3", text: t.clone(), ..Default::default() },
+            FpSection::P(t) => HomeSection { item_type: "p", text: t.clone(), ..Default::default() },
+            FpSection::Br => HomeSection { item_type: "br", ..Default::default() },
+            FpSection::Categories => HomeSection {
+                item_type: "categories",
+                categories: if show_categories { build_categories() } else { vec![] },
+                ..Default::default()
+            },
+            FpSection::Top => HomeSection {
+                item_type: "app-grid",
+                title: "Popular".into(),
+                loading: true,
+                ..Default::default()
+            },
+            FpSection::New => HomeSection {
+                item_type: "app-row",
+                title: "Recently Added".into(),
+                loading: true,
+                ..Default::default()
+            },
+            FpSection::Trending => HomeSection {
+                item_type: "app-row",
+                title: "Trending".into(),
+                loading: true,
+                ..Default::default()
+            },
+            FpSection::Charts { cards: as_cards } => HomeSection {
+                item_type: if *as_cards { "app-grid" } else { "app-row" },
+                title: "Charts".into(),
+                loading: true,
+                ..Default::default()
+            },
+            FpSection::Custom { title, .. } => HomeSection {
+                item_type: "app-row",
+                title: title.clone(),
+                loading: true,
+                ..Default::default()
+            },
+            FpSection::CarouselSection { app_cloud_overlay, .. } => HomeSection {
+                item_type: "carousel",
+                app_cloud_overlay: *app_cloud_overlay,
+                loading: true,
+                ..Default::default()
+            },
+            FpSection::LinksSection { title, .. } => HomeSection {
+                item_type: "links",
+                link_title: title.clone(),
+                loading: true,
+                ..Default::default()
+            },
+        };
+        let needs_resolution = stub.loading;
+        sections.push(stub);
+        if needs_resolution {
+            pending.push(PendingSection { row_index, section });
+        }
     }
 
-    let section_futs = fp_sections.into_iter().map(|section| {
-        let proxy = proxy.clone();
-        let pwa_map = &pwa_map;
-        let installed_ids = &installed_ids;
-        let app_meta_map = &app_meta_map;
-        async move {
-            let p = proxy.as_ref();
-            match section {
-                FpSection::H1(t) => SecOut {
-                    item: HomeSection { item_type: "h1", text: t, ..Default::default() },
-                    stories: vec![],
-                },
-                FpSection::H2(t) => SecOut {
-                    item: HomeSection { item_type: "h2", text: t, ..Default::default() },
-                    stories: vec![],
-                },
-                FpSection::H3(t) => SecOut {
-                    item: HomeSection { item_type: "h3", text: t, ..Default::default() },
-                    stories: vec![],
-                },
-                FpSection::P(t) => SecOut {
-                    item: HomeSection { item_type: "p", text: t, ..Default::default() },
-                    stories: vec![],
-                },
-                FpSection::Br => SecOut {
-                    item: HomeSection { item_type: "br", ..Default::default() },
-                    stories: vec![],
-                },
-                FpSection::Categories => SecOut {
-                    item: HomeSection {
-                        item_type: "categories",
-                        categories: if show_categories { build_categories() } else { vec![] },
-                        ..Default::default()
-                    },
-                    stories: vec![],
-                },
-                FpSection::Top => {
-                    let ids = forge::fetch_app_ids("api/top", 12).await;
-                    let entries = resolve_ids_cached(&ids, app_meta_map, p, pwa_map).await;
-                    let cards = entries_to_cards(entries, installed_ids).await;
-                    SecOut {
-                        item: HomeSection {
-                            item_type: "app-grid",
-                            title: "Popular".into(),
-                            cards,
-                            ..Default::default()
-                        },
-                        stories: vec![],
-                    }
-                }
-                FpSection::New => {
-                    let ids = forge::fetch_app_ids("api/new", 20).await;
-                    let entries = resolve_ids_cached(&ids, app_meta_map, p, pwa_map).await;
-                    let cards = entries_to_cards(entries, installed_ids).await;
-                    SecOut {
-                        item: HomeSection {
-                            item_type: "app-row",
-                            title: "Recently Added".into(),
-                            cards,
-                            ..Default::default()
-                        },
-                        stories: vec![],
-                    }
-                }
-                FpSection::Trending => {
-                    let ids = forge::fetch_app_ids("api/trending", 12).await;
-                    let entries = resolve_ids_cached(&ids, app_meta_map, p, pwa_map).await;
-                    let cards = entries_to_cards(entries, installed_ids).await;
-                    SecOut {
-                        item: HomeSection {
-                            item_type: "app-row",
-                            title: "Trending".into(),
-                            cards,
-                            ..Default::default()
-                        },
-                        stories: vec![],
-                    }
-                }
-                FpSection::Charts { cards: as_cards } => {
-                    let ids = forge::fetch_chart_ids(12).await;
-                    let entries = resolve_ids_cached(&ids, app_meta_map, p, pwa_map).await;
-                    let cards = entries_to_cards(entries, installed_ids).await;
-                    SecOut {
-                        item: HomeSection {
-                            item_type: if as_cards { "app-grid" } else { "app-row" },
-                            title: "Charts".into(),
-                            cards,
-                            ..Default::default()
-                        },
-                        stories: vec![],
-                    }
-                }
-                FpSection::Custom { title, app_ids } => {
-                    let entries = resolve_ids_cached(&app_ids, app_meta_map, p, pwa_map).await;
-                    let cards = entries_to_cards(entries, installed_ids).await;
-                    SecOut {
-                        item: HomeSection { item_type: "app-row", title, cards, ..Default::default() },
-                        stories: vec![],
-                    }
-                }
-                FpSection::CarouselSection { breakpoint, items, app_cloud_overlay } => {
-                    let (item, stories) = build_carousel(
-                        breakpoint, items, p, pwa_map, installed_ids, app_meta_map, app_cloud_overlay,
-                    )
-                    .await;
-                    SecOut { item, stories }
-                }
-                FpSection::LinksSection { title, items, .. } => {
-                    let (item, stories) = build_links(title, items, p, pwa_map, installed_ids, app_meta_map).await;
-                    SecOut { item, stories }
-                }
-            }
-        }
-    });
+    let ctx = std::sync::Arc::new(HomeCtx { proxy, pwa_map, installed_ids, app_meta_map });
+    (HomePlan { sections, pending }, ctx)
+}
 
-    let section_results = join_all(section_futs).await;
+// Phase B: resolves one row's app ids. Completely independent of every
+// other pending row — callers run these concurrently (one per row) and
+// patch each row in place whenever its own future finishes, in whatever
+// order that happens to be.
+pub async fn resolve_pending_section(
+    pending: PendingSection,
+    ctx: &HomeCtx,
+) -> (usize, HomeSection, Vec<Story>) {
+    let PendingSection { row_index, section } = pending;
+    let p = ctx.proxy.as_ref();
+    let base_story_index = row_index as i32 * STORY_INDEX_STRIDE;
 
-    let mut sections: Vec<HomeSection> = Vec::new();
-    let mut stories: Vec<Story> = Vec::new();
-    for mut so in section_results {
-        let offset = stories.len() as i32;
-        for hi in so.item.hero_items.iter_mut().chain(so.item.editorial_items.iter_mut()) {
-            if hi.story_index >= 0 {
-                hi.story_index += offset;
-            }
+    let (item, stories) = match section {
+        FpSection::Top => {
+            let ids = forge::fetch_app_ids("api/top", 12).await;
+            let entries = resolve_ids_cached(&ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
+            let cards = entries_to_cards(entries, &ctx.installed_ids).await;
+            (
+                HomeSection { item_type: "app-grid", title: "Popular".into(), cards, ..Default::default() },
+                vec![],
+            )
         }
-        for li in &mut so.item.link_items {
-            if li.story_index >= 0 {
-                li.story_index += offset;
-            }
+        FpSection::New => {
+            let ids = forge::fetch_app_ids("api/new", 20).await;
+            let entries = resolve_ids_cached(&ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
+            let cards = entries_to_cards(entries, &ctx.installed_ids).await;
+            (
+                HomeSection { item_type: "app-row", title: "Recently Added".into(), cards, ..Default::default() },
+                vec![],
+            )
         }
-        for (local_idx, story) in so.stories.iter_mut().enumerate() {
-            story.id = format!("story-{}", offset + local_idx as i32);
+        FpSection::Trending => {
+            let ids = forge::fetch_app_ids("api/trending", 12).await;
+            let entries = resolve_ids_cached(&ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
+            let cards = entries_to_cards(entries, &ctx.installed_ids).await;
+            (
+                HomeSection { item_type: "app-row", title: "Trending".into(), cards, ..Default::default() },
+                vec![],
+            )
         }
-        stories.extend(so.stories);
-        sections.push(so.item);
-    }
+        FpSection::Charts { cards: as_cards } => {
+            let ids = forge::fetch_chart_ids(12).await;
+            let entries = resolve_ids_cached(&ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
+            let cards = entries_to_cards(entries, &ctx.installed_ids).await;
+            (
+                HomeSection {
+                    item_type: if as_cards { "app-grid" } else { "app-row" },
+                    title: "Charts".into(),
+                    cards,
+                    ..Default::default()
+                },
+                vec![],
+            )
+        }
+        FpSection::Custom { title, app_ids } => {
+            let entries = resolve_ids_cached(&app_ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
+            let cards = entries_to_cards(entries, &ctx.installed_ids).await;
+            (HomeSection { item_type: "app-row", title, cards, ..Default::default() }, vec![])
+        }
+        FpSection::CarouselSection { breakpoint, items, app_cloud_overlay } => {
+            build_carousel(
+                breakpoint,
+                items,
+                p,
+                &ctx.pwa_map,
+                &ctx.installed_ids,
+                &ctx.app_meta_map,
+                app_cloud_overlay,
+                base_story_index,
+            )
+            .await
+        }
+        FpSection::LinksSection { title, items, .. } => {
+            build_links(title, items, p, &ctx.pwa_map, &ctx.installed_ids, &ctx.app_meta_map, base_story_index)
+                .await
+        }
+        // H1/H2/H3/P/Br/Categories never produce a PendingSection in plan_home
+        _ => unreachable!("non-pending FpSection reached resolve_pending_section"),
+    };
 
-    (sections, stories)
+    (row_index, item, stories)
 }
 
 fn build_categories() -> Vec<Category> {
@@ -390,6 +455,7 @@ fn build_categories() -> Vec<Category> {
 
 async fn load_stories(
     stories: Vec<(usize, ForgeStory)>,
+    base_story_index: i32,
     proxy: Option<&ArcDaemonProxy<'static>>,
     pwa_map: &HashMap<String, forge::PwaApp>,
     installed: &HashSet<String>,
@@ -398,7 +464,7 @@ async fn load_stories(
     stories
         .into_iter()
         .map(|(idx, s)| Story {
-            id: format!("story-{idx}"),
+            id: format!("story-{}", base_story_index + idx as i32),
             title: s.title,
             banner_url: s.banner_url.unwrap_or_default(),
             body_html: s.body,
@@ -414,6 +480,7 @@ async fn build_carousel(
     installed: &HashSet<String>,
     app_meta_map: &HashMap<String, forge::HomeAppMeta>,
     app_cloud_overlay: bool,
+    base_story_index: i32,
 ) -> (HomeSection, Vec<Story>) {
     use forge::CarouselItem;
 
@@ -434,7 +501,7 @@ async fn build_carousel(
 
     let indexed = story_forge.into_iter().enumerate().collect::<Vec<_>>();
     let (loaded_stories, app_entries) = tokio::join!(
-        load_stories(indexed, proxy, pwa_map, installed),
+        load_stories(indexed, base_story_index, proxy, pwa_map, installed),
         resolve_ids_cached(&app_id_list, app_meta_map, proxy, pwa_map),
     );
     let app_cards = entries_to_cards(app_entries, installed).await;
@@ -452,14 +519,15 @@ async fn build_carousel(
             CarouselItem::Story(s) => {
                 let story_idx = pos_to_story_idx[&pos];
                 let rs = loaded_stories.get(story_idx);
+                let global_story_index = base_story_index + story_idx as i32;
                 let hero_item = HeroItem {
-                    id: rs.map(|r| r.id.clone()).unwrap_or_else(|| format!("story-{story_idx}")),
+                    id: rs.map(|r| r.id.clone()).unwrap_or_else(|| format!("story-{global_story_index}")),
                     banner_url: rs.map(|r| r.banner_url.clone()).unwrap_or_default(),
                     icon_url: String::new(),
                     title: s.title.clone(),
                     body: strip_html_tags(&s.body),
                     is_story: true,
-                    story_index: story_idx as i32,
+                    story_index: global_story_index,
                 };
                 if pos < hero_count {
                     hero_items.push(hero_item);
@@ -506,6 +574,7 @@ async fn build_links(
     pwa_map: &HashMap<String, forge::PwaApp>,
     installed: &HashSet<String>,
     app_meta_map: &HashMap<String, forge::HomeAppMeta>,
+    base_story_index: i32,
 ) -> (HomeSection, Vec<Story>) {
     enum LinkKind {
         Story(usize),
@@ -539,7 +608,7 @@ async fn build_links(
 
     let indexed = story_forge.into_iter().enumerate().collect::<Vec<_>>();
     let (loaded_stories, app_entries) = tokio::join!(
-        load_stories(indexed, proxy, pwa_map, installed),
+        load_stories(indexed, base_story_index, proxy, pwa_map, installed),
         resolve_ids_cached(&app_ids_batch, app_meta_map, proxy, pwa_map),
     );
 
@@ -548,7 +617,7 @@ async fn build_links(
     for (kind, item) in link_kinds.iter().zip(link_items.iter_mut()) {
         match kind {
             LinkKind::Story(idx) => {
-                item.story_index = *idx as i32;
+                item.story_index = base_story_index + *idx as i32;
                 if let Some(rs) = loaded_stories.get(*idx) {
                     item.text = rs.title.clone();
                 }

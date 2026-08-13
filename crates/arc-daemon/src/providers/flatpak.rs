@@ -298,7 +298,8 @@ impl FlatpakProvider {
                     }
                 }
             }
-            Ok(AppStreamDb::get()
+
+            Ok(AppStreamDb::try_get()
                 .get_apps_by_category(&category)
                 .into_iter()
                 .map(|e| {
@@ -940,7 +941,8 @@ impl PackageProvider for FlatpakProvider {
     async fn search(&self, query: &str) -> Result<Vec<Package>, ArcError> {
         let query = query.to_string();
         tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
-            Ok(AppStreamDb::get()
+
+            Ok(AppStreamDb::try_get()
                 .search_apps(&query)
                 .into_iter()
                 .map(|e| entry_to_flatpak_package(e, false))

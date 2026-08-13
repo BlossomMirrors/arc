@@ -6,6 +6,7 @@ mod http_api;
 mod kio;
 mod providers;
 mod transaction_manager;
+mod cache;
 
 use anyhow::Result;
 use tracing::info;

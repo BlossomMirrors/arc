@@ -159,6 +159,15 @@ Kirigami.ApplicationWindow {
         }
     }
 
+    Connections {
+        target: SettingsController
+        function onDaemonReconnected() {
+            HomeFeedModel.reload();
+            installedPageItem.load();
+            downloadsPageItem.load();
+        }
+    }
+
     Component {
         id: categoryPageComponent
         CategoryPage {}

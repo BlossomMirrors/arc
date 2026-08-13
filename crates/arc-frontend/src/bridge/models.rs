@@ -317,6 +317,7 @@ pub mod qobject {
         LinkItemsJson,
         AppCloudOverlay,
         CategoriesJson,
+        Loading,
     }
 
     unsafe extern "RustQt" {
@@ -334,6 +335,13 @@ pub mod qobject {
         // picks up apps dropped earlier while the appstream database was cold
         #[qinvokable]
         fn refresh(self: Pin<&mut HomeFeedModel>);
+
+        // like refresh(), but for a disruptive event (daemon restart) where
+        // the old content shouldn't just sit there silently updating in the
+        // background — clears the page first so the loading state (page
+        // conveyor, then per-row placeholders) is actually visible again
+        #[qinvokable]
+        fn reload(self: Pin<&mut HomeFeedModel>);
     }
 
     extern "RustQt" {
@@ -359,6 +367,32 @@ pub mod qobject {
         #[inherit]
         #[cxx_name = "endResetModel"]
         unsafe fn end_reset_model(self: Pin<&mut HomeFeedModel>);
+        #[inherit]
+        #[cxx_name = "beginInsertRows"]
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut HomeFeedModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+        #[inherit]
+        #[cxx_name = "endInsertRows"]
+        unsafe fn end_insert_rows(self: Pin<&mut HomeFeedModel>);
+        #[inherit]
+        fn index(
+            self: &HomeFeedModel,
+            row: i32,
+            column: i32,
+            parent: &QModelIndex,
+        ) -> QModelIndex;
+        #[inherit]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(
+            self: Pin<&mut HomeFeedModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QList_i32,
+        );
     }
 
     impl cxx_qt::Threading for HomeFeedModel {}
@@ -476,6 +510,7 @@ pub struct PackageListModelRust {
     sort_by_name: bool,
     providers: QStringList,
     request_seq: u64,
+    registered: bool,
 }
 
 impl Default for PackageListModelRust {
@@ -490,11 +525,14 @@ impl Default for PackageListModelRust {
             sort_by_name: false,
             providers: QStringList::default(),
             request_seq: 0,
+            registered: false,
         }
     }
 }
 
-static PACKAGE_LIST_QT_THREAD: OnceLock<CxxQtThread<qobject::PackageListModel>> = OnceLock::new();
+
+static PACKAGE_LIST_QT_THREADS: Mutex<Vec<CxxQtThread<qobject::PackageListModel>>> =
+    Mutex::new(Vec::new());
 
 // keyed by "search:<q>" / "installed" / "updates" / "category:<id>",
 // cleared wholesale after any successful transaction
@@ -619,7 +657,10 @@ impl qobject::PackageListModel {
         what: &'static str,
     ) {
         let qt_thread = self.qt_thread();
-        let _ = PACKAGE_LIST_QT_THREAD.set(qt_thread.clone());
+        if !self.registered {
+            PACKAGE_LIST_QT_THREADS.lock().unwrap().push(qt_thread.clone());
+            self.as_mut().rust_mut().registered = true;
+        }
 
         let seq = {
             let mut rust = self.as_mut().rust_mut();
@@ -841,33 +882,36 @@ fn carry_busy_state(old: &[PackageRow], rows: &mut [PackageRow]) {
 fn sync_package_busy(pkg_id: &str, busy: bool, progress: f32) {
     crate::bridge::detail_controller::sync_busy(pkg_id, busy, progress);
 
-    let Some(qt_thread) = PACKAGE_LIST_QT_THREAD.get() else {
-        return;
-    };
     let pkg_id = pkg_id.to_string();
-    let _ = qt_thread.queue(move |mut model| {
-        let mut changed_row: Option<i32> = None;
-        {
-            let mut rust = model.as_mut().rust_mut();
-            for r in rust.all_packages.iter_mut() {
-                if r.pkg.id == pkg_id {
-                    r.busy = busy;
-                    r.progress = progress;
+
+    PACKAGE_LIST_QT_THREADS.lock().unwrap().retain(|qt_thread| {
+        let pkg_id = pkg_id.clone();
+        qt_thread
+            .queue(move |mut model| {
+                let mut changed_row: Option<i32> = None;
+                {
+                    let mut rust = model.as_mut().rust_mut();
+                    for r in rust.all_packages.iter_mut() {
+                        if r.pkg.id == pkg_id {
+                            r.busy = busy;
+                            r.progress = progress;
+                        }
+                    }
+                    for (i, r) in rust.packages.iter_mut().enumerate() {
+                        if r.pkg.id == pkg_id {
+                            r.busy = busy;
+                            r.progress = progress;
+                            changed_row = Some(i as i32);
+                        }
+                    }
                 }
-            }
-            for (i, r) in rust.packages.iter_mut().enumerate() {
-                if r.pkg.id == pkg_id {
-                    r.busy = busy;
-                    r.progress = progress;
-                    changed_row = Some(i as i32);
+                if let Some(row) = changed_row {
+                    let idx = model.index(row, 0, &QModelIndex::default());
+                    let roles = QList::<i32>::default();
+                    model.as_mut().data_changed(&idx, &idx, &roles);
                 }
-            }
-        }
-        if let Some(row) = changed_row {
-            let idx = model.index(row, 0, &QModelIndex::default());
-            let roles = QList::<i32>::default();
-            model.as_mut().data_changed(&idx, &idx, &roles);
-        }
+            })
+            .is_ok()
     });
 }
 
@@ -885,65 +929,69 @@ fn sync_package_finished(pkg_id: &str, tx_type: &str, success: bool) {
         crate::bridge::detail_controller::sync_busy(pkg_id, false, 0.0);
     }
 
-    let Some(qt_thread) = PACKAGE_LIST_QT_THREAD.get() else {
-        return;
-    };
     let pkg_id = pkg_id.to_string();
     let is_update = tx_type == "update";
-    let _ = qt_thread.queue(move |mut model| {
-        if !model
-            .packages
-            .iter()
-            .chain(model.all_packages.iter())
-            .any(|r| r.pkg.id == pkg_id)
-        {
-            return;
-        }
-        let drop_row = success
-            && ((is_remove && model.mode == ListMode::Installed)
-                || (is_update && model.mode == ListMode::Updates));
+    PACKAGE_LIST_QT_THREADS.lock().unwrap().retain(|qt_thread| {
+        let pkg_id = pkg_id.clone();
+        qt_thread
+            .queue(move |mut model| {
+                if !model
+                    .packages
+                    .iter()
+                    .chain(model.all_packages.iter())
+                    .any(|r| r.pkg.id == pkg_id)
+                {
+                    return;
+                }
+                let drop_row = success
+                    && ((is_remove && model.mode == ListMode::Installed)
+                        || (is_update && model.mode == ListMode::Updates));
 
-        {
-            let mut rust = model.as_mut().rust_mut();
-            if drop_row {
-                rust.all_packages.retain(|r| r.pkg.id != pkg_id);
-            } else {
-                for r in rust.all_packages.iter_mut() {
-                    if r.pkg.id == pkg_id {
+                {
+                    let mut rust = model.as_mut().rust_mut();
+                    if drop_row {
+                        rust.all_packages.retain(|r| r.pkg.id != pkg_id);
+                    } else {
+                        for r in rust.all_packages.iter_mut() {
+                            if r.pkg.id == pkg_id {
+                                r.busy = false;
+                                r.progress = 0.0;
+                                if success {
+                                    r.pkg.installed = !is_remove;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let visible_row = model.packages.iter().position(|r| r.pkg.id == pkg_id);
+                let Some(row) = visible_row else { return };
+                if drop_row {
+                    unsafe {
+                        model.as_mut().begin_remove_rows(
+                            &QModelIndex::default(),
+                            row as i32,
+                            row as i32,
+                        );
+                        model.as_mut().rust_mut().packages.remove(row);
+                        model.as_mut().end_remove_rows();
+                    }
+                } else {
+                    {
+                        let mut rust = model.as_mut().rust_mut();
+                        let r = &mut rust.packages[row];
                         r.busy = false;
                         r.progress = 0.0;
                         if success {
                             r.pkg.installed = !is_remove;
                         }
                     }
+                    let idx = model.index(row as i32, 0, &QModelIndex::default());
+                    let roles = QList::<i32>::default();
+                    model.as_mut().data_changed(&idx, &idx, &roles);
                 }
-            }
-        }
-
-        let visible_row = model.packages.iter().position(|r| r.pkg.id == pkg_id);
-        let Some(row) = visible_row else { return };
-        if drop_row {
-            unsafe {
-                model
-                    .as_mut()
-                    .begin_remove_rows(&QModelIndex::default(), row as i32, row as i32);
-                model.as_mut().rust_mut().packages.remove(row);
-                model.as_mut().end_remove_rows();
-            }
-        } else {
-            {
-                let mut rust = model.as_mut().rust_mut();
-                let r = &mut rust.packages[row];
-                r.busy = false;
-                r.progress = 0.0;
-                if success {
-                    r.pkg.installed = !is_remove;
-                }
-            }
-            let idx = model.index(row as i32, 0, &QModelIndex::default());
-            let roles = QList::<i32>::default();
-            model.as_mut().data_changed(&idx, &idx, &roles);
-        }
+            })
+            .is_ok()
     });
 }
 
@@ -1019,6 +1067,7 @@ pub struct TransactionsModelRust {
 }
 
 static QT_THREAD: OnceLock<CxxQtThread<qobject::TransactionsModel>> = OnceLock::new();
+const DAEMON_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 fn has_ongoing(transactions: &[Tx], pkg_id: &str) -> bool {
     transactions
@@ -1036,8 +1085,8 @@ impl qobject::TransactionsModel {
             let Some(proxy) = runtime::proxy().await else {
                 return;
             };
-            load_running_transactions(&proxy).await;
-            refresh_updates_count(&proxy).await;
+            let _ = tokio::time::timeout(DAEMON_STARTUP_TIMEOUT, load_running_transactions(&proxy)).await;
+            let _ = tokio::time::timeout(DAEMON_STARTUP_TIMEOUT, refresh_updates_count(&proxy)).await;
 
             loop {
                 run_signal_listener(proxy.clone()).await;
@@ -1516,18 +1565,27 @@ async fn refresh_updates_count(proxy: &ArcDaemonProxy<'static>) {
 }
 
 async fn run_signal_listener(proxy: ArcDaemonProxy<'static>) {
-    let (
+    let subscribed = tokio::time::timeout(
+        DAEMON_STARTUP_TIMEOUT,
+        async {
+            tokio::join!(
+                proxy.receive_transaction_progress(),
+                proxy.receive_transaction_finished(),
+                proxy.receive_updates_available(),
+                proxy.receive_transaction_stats(),
+            )
+        },
+    )
+    .await;
+
+    let Ok((
         Ok(mut progress_stream),
         Ok(mut finished_stream),
         Ok(mut updates_stream),
         Ok(mut stats_stream),
-    ) = tokio::join!(
-        proxy.receive_transaction_progress(),
-        proxy.receive_transaction_finished(),
-        proxy.receive_updates_available(),
-        proxy.receive_transaction_stats(),
-    )
+    )) = subscribed
     else {
+        tracing::warn!("run_signal_listener: failed to subscribe to transaction signal streams");
         return;
     };
 
@@ -1595,6 +1653,16 @@ fn to_json<T: serde::Serialize>(v: &T) -> String {
 pub struct HomeFeedModelRust {
     loading: bool,
     sections: Vec<crate::services::home::HomeSection>,
+    // bumped on every load()/refresh(); a Phase B row-resolution that lands
+    // after a newer generation has already reset the model is stale and
+    // must be dropped instead of patched in
+    request_seq: u64,
+    // how many rows of the current generation are still resolving; disk
+    // cache save fires once this hits 0
+    pending_count: u32,
+    // accumulates as pending rows resolve; snapshotted for the cache save
+    // and re-stashed (replacing the global stash) after every row lands
+    all_stories: Vec<crate::services::home::Story>,
 }
 
 impl Default for HomeFeedModelRust {
@@ -1602,8 +1670,25 @@ impl Default for HomeFeedModelRust {
         Self {
             loading: true,
             sections: Vec::new(),
+            request_seq: 0,
+            pending_count: 0,
+            all_stories: Vec::new(),
         }
     }
+}
+
+// off the GUI thread: writes to disk are cheap to trigger but the actual
+// I/O should never run on the thread driving the UI
+fn save_home_cache_in_background(
+    sections: Vec<crate::services::home::HomeSection>,
+    stories: Vec<crate::services::home::Story>,
+) {
+    runtime::spawn(async move {
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::services::home_cache::save(&sections, &stories);
+        })
+        .await;
+    });
 }
 
 impl qobject::HomeFeedModel {
@@ -1611,18 +1696,45 @@ impl qobject::HomeFeedModel {
         if !self.sections.is_empty() {
             return;
         }
-        if let Some((sections, stories)) = crate::services::home_cache::load() {
-            crate::bridge::home_model::stash_stories(stories);
-            unsafe {
-                self.as_mut().begin_reset_model();
-                self.as_mut().rust_mut().sections = sections;
-                self.as_mut().end_reset_model();
-            }
-        }
-        self.fetch();
+        // kick off the live fetch and the disk-cache read at the same time
+        // — neither should wait on the other, whichever produces visible
+        // content first wins
+        self.as_mut().fetch();
+
+        let qt_thread = self.qt_thread();
+        runtime::spawn(async move {
+            let cached = tokio::task::spawn_blocking(crate::services::home_cache::load)
+                .await
+                .ok()
+                .flatten();
+            let Some((sections, stories)) = cached else {
+                return;
+            };
+            let _ = qt_thread.queue(move |mut this| unsafe {
+                // the live fetch already produced (or is producing) newer
+                // content — don't clobber it with a stale disk snapshot
+                if !this.sections.is_empty() {
+                    return;
+                }
+                crate::bridge::home_model::stash_stories(stories);
+                this.as_mut().begin_reset_model();
+                this.as_mut().rust_mut().sections = sections;
+                this.as_mut().end_reset_model();
+                this.as_mut().set_loading(false);
+            });
+        });
     }
 
     pub fn refresh(self: Pin<&mut Self>) {
+        self.fetch();
+    }
+
+    pub fn reload(mut self: Pin<&mut Self>) {
+        unsafe {
+            self.as_mut().begin_reset_model();
+            self.as_mut().rust_mut().sections = Vec::new();
+            self.as_mut().end_reset_model();
+        }
         self.fetch();
     }
 
@@ -1630,21 +1742,83 @@ impl qobject::HomeFeedModel {
         let has_cached = !self.sections.is_empty();
         self.as_mut().set_loading(!has_cached);
 
+        let seq = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.request_seq += 1;
+            rust.request_seq
+        };
+
         let qt_thread = self.qt_thread();
+
         runtime::spawn(async move {
             let proxy = runtime::proxy().await;
-            let (sections, stories) = crate::services::home::load_home(proxy).await;
-            crate::services::home_cache::save(&sections, &stories);
-            crate::bridge::home_model::stash_stories(stories);
+            let (plan, ctx) = crate::services::home::plan_home(proxy).await;
 
-            qt_thread
-                .queue(move |mut this| unsafe {
+            let pending_count = plan.pending.len() as u32;
+            let sections = plan.sections;
+
+            // Phase A: reveal the full page shape immediately — headings,
+            // row order, anything that didn't need per-app resolution.
+            // Rows still needing it show up as their own "loading" stub;
+            // Phase B below fills each one in independently as it resolves.
+            //
+            // The disk-cache read kicked off alongside this in load() is a
+            // local file read racing a live fetch that needs a network
+            // round trip — it almost always wins and populates `sections`
+            // first. If it did, don't stomp already-good cached content
+            // back down to loading stubs here; just let Phase B patch rows
+            // in place (indices line up unless the frontpage's row layout
+            // itself changed between the cached fetch and this one, which
+            // is rare and self-heals on the next save).
+            let qt_reset = qt_thread.clone();
+            let _ = qt_reset.queue(move |mut this| unsafe {
+                if this.request_seq != seq {
+                    return;
+                }
+                if this.sections.is_empty() {
                     this.as_mut().begin_reset_model();
                     this.as_mut().rust_mut().sections = sections;
                     this.as_mut().end_reset_model();
-                    this.as_mut().set_loading(false);
-                })
-                .ok();
+                }
+                this.as_mut().rust_mut().all_stories = Vec::new();
+                this.as_mut().rust_mut().pending_count = pending_count;
+                this.as_mut().set_loading(false);
+                if pending_count == 0 {
+                    save_home_cache_in_background(this.sections.clone(), this.all_stories.clone());
+                }
+            });
+
+            for pending in plan.pending {
+                let ctx = ctx.clone();
+                let qt_thread = qt_thread.clone();
+                runtime::spawn(async move {
+                    let (row_index, section, stories) =
+                        crate::services::home::resolve_pending_section(pending, &ctx).await;
+                    let _ = qt_thread.queue(move |mut this| unsafe {
+                        if this.request_seq != seq {
+                            return;
+                        }
+                        if let Some(slot) = this.as_mut().rust_mut().sections.get_mut(row_index) {
+                            *slot = section;
+                        }
+                        this.as_mut().rust_mut().all_stories.extend(stories);
+                        crate::bridge::home_model::stash_stories(this.all_stories.clone());
+
+                        let idx = this.index(row_index as i32, 0, &QModelIndex::default());
+                        let roles = QList::<i32>::default();
+                        this.as_mut().data_changed(&idx, &idx, &roles);
+
+                        let remaining = this.pending_count.saturating_sub(1);
+                        this.as_mut().rust_mut().pending_count = remaining;
+                        if remaining == 0 {
+                            save_home_cache_in_background(
+                                this.sections.clone(),
+                                this.all_stories.clone(),
+                            );
+                        }
+                    });
+                });
+            }
         });
     }
 
@@ -1672,6 +1846,7 @@ impl qobject::HomeFeedModel {
             qobject::HomeRoles::CategoriesJson => {
                 QVariant::from(&QString::from(&to_json(&s.categories)))
             }
+            qobject::HomeRoles::Loading => QVariant::from(&s.loading),
             _ => QVariant::default(),
         }
     }
@@ -1712,6 +1887,10 @@ impl qobject::HomeFeedModel {
             qobject::HomeRoles::CategoriesJson.repr,
             QByteArray::from("categoriesJson"),
         );
+        roles.insert(
+            qobject::HomeRoles::Loading.repr,
+            QByteArray::from("loading"),
+        );
         roles
     }
 
@@ -1748,7 +1927,7 @@ impl qobject::RemotesModel {
         runtime::spawn(async move {
             let remotes = match runtime::proxy().await {
                 Some(proxy) => proxy.remotes().await.unwrap_or_default(),
-                None => vec![],
+                none => vec![],
             };
 
             qt_thread
