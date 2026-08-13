@@ -65,4 +65,4 @@ EXPOSE 1312
 ENV ARC_HTTP_HOST=0.0.0.0
 ENV ARC_HTTP_ONLY=1
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/usr/local/bin/entrypoint.sh"]
