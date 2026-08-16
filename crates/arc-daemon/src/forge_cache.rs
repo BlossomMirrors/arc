@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-const FORGE_BASE: &str = "https://forge.blossomos.org";
+const FORGE_BASE: &str = "https://forge.arcstore.net";
 const DAEMON_BASE: &str = "http://localhost:1312";
 
 #[derive(Default)]

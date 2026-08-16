@@ -5,7 +5,7 @@ use reqwest::Client;
 use std::path::PathBuf;
 use tracing::{info, warn};
 
-const FORGE_PWAS_BASE: &str = "https://forge.blossomos.org/api/pwas";
+const FORGE_PWAS_BASE: &str = "https://forge.arcstore.net/api/pwas";
 
 /// Escape a value for storage as a string-type Desktop Entry value. This is
 /// the ini-level escaping the spec requires for every string value (applied
@@ -278,7 +278,10 @@ impl PwaProvider {
             exec.push_str(" --tray");
         }
         if !pwa.url_filter.is_empty() {
-            exec.push_str(&format!(" --url-filter={}", quote_exec_arg(&pwa.url_filter)));
+            exec.push_str(&format!(
+                " --url-filter={}",
+                quote_exec_arg(&pwa.url_filter)
+            ));
         }
         exec
     }

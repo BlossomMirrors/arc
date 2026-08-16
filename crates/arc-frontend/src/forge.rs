@@ -1,4 +1,4 @@
-const FORGE: &str = "https://forge.blossomos.org";
+const FORGE: &str = "https://forge.arcstore.net";
 
 #[derive(serde::Deserialize, Clone)]
 pub struct HomeAppMeta {
