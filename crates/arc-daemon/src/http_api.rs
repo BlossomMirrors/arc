@@ -10,7 +10,8 @@ use std::sync::OnceLock;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::appstream_db::{
-    find_local_flatpak_icon_bytes, parse_locale_candidates, score_entry, AppStreamDb, AppStreamEntry,
+    find_local_flatpak_icon_bytes, parse_locale_candidates, score_entry, AppStreamDb,
+    AppStreamEntry,
 };
 use crate::providers::lutris::LutrisProvider;
 use crate::providers::pwa::PwaProvider;
@@ -146,7 +147,11 @@ async fn search(Query(p): Query<SearchParams>) -> impl IntoResponse {
         .map(|(entry, score)| (serde_json::to_value(&entry).unwrap_or_default(), score))
         .collect();
 
-    for pkg in pwa_packages.unwrap_or_default().into_iter().chain(lutris_packages.unwrap_or_default()) {
+    for pkg in pwa_packages
+        .unwrap_or_default()
+        .into_iter()
+        .chain(lutris_packages.unwrap_or_default())
+    {
         if let Some(score) = score_package(&pkg, &q_lower) {
             merged.push((serde_json::to_value(&pkg).unwrap_or_default(), score));
         }
@@ -221,7 +226,12 @@ async fn app_metadata(Path(id): Path<String>, Query(p): Query<AppParams>) -> Res
 
 async fn app_icon(Path(id): Path<String>) -> Response {
     if id.starts_with("pwa:") {
-        let icon_url = pwa_provider().get_app_info(&id).await.ok().flatten().and_then(|pkg| pkg.icon_url);
+        let icon_url = pwa_provider()
+            .get_app_info(&id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|pkg| pkg.icon_url);
         return match icon_url {
             Some(url) if url.starts_with("https://") || url.starts_with("http://") => {
                 fetch_and_forward(&url).await
@@ -230,7 +240,12 @@ async fn app_icon(Path(id): Path<String>) -> Response {
         };
     }
     if id.starts_with("lutris:") {
-        let icon_url = lutris_provider().get_app_info(&id).await.ok().flatten().and_then(|pkg| pkg.icon_url);
+        let icon_url = lutris_provider()
+            .get_app_info(&id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|pkg| pkg.icon_url);
         return match icon_url {
             Some(url) if url.starts_with("https://") || url.starts_with("http://") => {
                 fetch_and_forward(&url).await
@@ -259,7 +274,9 @@ async fn app_icon(Path(id): Path<String>) -> Response {
             .await
             .unwrap_or(None);
         return match bytes {
-            Some((bytes, content_type)) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
+            Some((bytes, content_type)) => {
+                ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
+            }
             None => StatusCode::NOT_FOUND.into_response(),
         };
     }
@@ -318,7 +335,7 @@ async fn forge_icon(Path(id): Path<String>) -> Response {
 }
 
 async fn forge_pwas(Query(p): Query<PwasParams>) -> Response {
-    let url = format!("https://forge.blossomos.org/api/pwas?lang={}", p.lang);
+    let url = format!("https://forge.arcstore.net/api/pwas?lang={}", p.lang);
     fetch_and_forward(&url).await
 }
 

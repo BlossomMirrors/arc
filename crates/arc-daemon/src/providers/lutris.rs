@@ -15,7 +15,7 @@ fn null_as_empty<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     Option::<String>::deserialize(d).map(|o| o.unwrap_or_default())
 }
 
-const WHITELIST_URL: &str = "https://forge.blossomos.org/api/lutris-whitelist";
+const WHITELIST_URL: &str = "https://forge.arcstore.net/api/lutris-whitelist";
 const LUTRIS_GAMES_API: &str = "https://lutris.net/api/games";
 const CATALOG_CACHE_TTL: Duration = Duration::from_secs(3600);
 
@@ -139,7 +139,13 @@ impl LutrisProvider {
 
     async fn scrape_screenshots(&self, game_slug: &str) -> Vec<String> {
         let url = format!("https://lutris.net/games/{}/", game_slug);
-        let html = match self.http_client.get(&url).timeout(Duration::from_secs(10)).send().await {
+        let html = match self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+        {
             Ok(r) => match r.text().await {
                 Ok(t) => t,
                 Err(_) => return vec![],
@@ -191,8 +197,8 @@ impl LutrisProvider {
             }
         };
 
-        let entries: Vec<CatalogEntry> = futures_util::future::join_all(
-            whitelist.into_iter().map(|(installer_slug, game_slug)| async move {
+        let entries: Vec<CatalogEntry> = futures_util::future::join_all(whitelist.into_iter().map(
+            |(installer_slug, game_slug)| async move {
                 match self.fetch_game(&game_slug).await {
                     Ok(game) => {
                         let screenshots = self.scrape_screenshots(&game_slug).await;
@@ -203,8 +209,8 @@ impl LutrisProvider {
                         None
                     }
                 }
-            }),
-        )
+            },
+        ))
         .await
         .into_iter()
         .flatten()

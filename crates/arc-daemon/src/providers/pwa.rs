@@ -7,7 +7,7 @@ use reqwest::Client;
 use std::path::PathBuf;
 use tracing::{info, warn};
 
-const FORGE_PWAS_BASE: &str = "https://forge.blossomos.org/api/pwas";
+const FORGE_PWAS_BASE: &str = "https://forge.arcstore.net/api/pwas";
 
 
 fn escape_desktop_value(value: &str) -> String {
@@ -265,7 +265,10 @@ impl PwaProvider {
             exec.push_str(" --tray");
         }
         if !pwa.url_filter.is_empty() {
-            exec.push_str(&format!(" --url-filter={}", quote_exec_arg(&pwa.url_filter)));
+            exec.push_str(&format!(
+                " --url-filter={}",
+                quote_exec_arg(&pwa.url_filter)
+            ));
         }
         exec
     }
