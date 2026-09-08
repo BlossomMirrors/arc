@@ -1,6 +1,7 @@
 #include <QQmlApplicationEngine>
 #include <QtGlobal>
 #include <QByteArray>
+#include <QIcon>
 #include <KLocalizedQmlContext>
 #include <cstdio>
 #include <cstdlib>
@@ -41,4 +42,8 @@ extern "C" void arc_setup_i18n(void *engine_ptr, const char *domain) {
 extern "C" bool arc_engine_has_root(void *engine_ptr) {
     auto *engine = reinterpret_cast<QQmlApplicationEngine *>(engine_ptr);
     return engine != nullptr && !engine->rootObjects().isEmpty();
+}
+
+extern "C" void arc_set_icon_theme(const char *name) {
+    QIcon::setThemeName(QString::fromUtf8(name));
 }

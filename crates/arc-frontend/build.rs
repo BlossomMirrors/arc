@@ -7,7 +7,7 @@ fn main() {
     println!("cargo::rustc-link-arg=-Wl,--as-needed");
 
     let builder = CxxQtBuilder::new_qml_module(
-        QmlModule::new("org.blossomos.arc").qml_files([
+        QmlModule::new("org.blossomos.arc").depend("QtQml.Models").qml_files([
             "src/qml/Main.qml",
             "src/qml/pages/HomePage.qml",
             "src/qml/pages/StoryPage.qml",

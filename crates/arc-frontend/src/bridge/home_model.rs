@@ -24,18 +24,9 @@ pub mod qobject {
 }
 
 use crate::runtime;
-use crate::services::home::Story;
 use cxx_qt::Threading;
 use cxx_qt_lib::QString;
 use std::pin::Pin;
-use std::sync::{Mutex, OnceLock};
-
-// stashed by HomeFeedModel::load() so stories don't need a refetch
-static STORIES: OnceLock<Mutex<Vec<Story>>> = OnceLock::new();
-
-pub fn stash_stories(stories: Vec<Story>) {
-    *STORIES.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap() = stories;
-}
 
 pub struct StoryControllerRust {
     loading: bool,
@@ -64,9 +55,7 @@ impl qobject::StoryController {
         self.as_mut().set_story_id(story_id);
         self.as_mut().set_blocks_json(QString::from("[]"));
 
-        let story = STORIES
-            .get()
-            .and_then(|lock| lock.lock().unwrap().iter().find(|s| s.id == id).cloned());
+        let story = crate::services::home_cache::find_story(&id);
 
         let Some(story) = story else {
             self.as_mut().set_loading(false);

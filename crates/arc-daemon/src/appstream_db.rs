@@ -1,10 +1,14 @@
 use appstream::enums::{Bundle, ComponentKind, ContentAttribute, ContentState, ImageKind, ProjectUrl};
 use appstream::{Collection, Component, MarkupTranslatableString, TranslatableString};
+use libarc::cache::JsonCache;
 use libarc::{Package, Provider};
 use std::collections::HashMap;
+use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::thread;
 
 // bumped whenever the on-disk Snapshot shape changes to invalidate old caches
 const SNAPSHOT_SCHEMA: u32 = 1;
@@ -79,13 +83,13 @@ pub struct AppStreamEntry {
 // Build a priority list of locale codes from the process environment.
 // For "de_DE.UTF-8" we return ["de_DE", "de"]; for "C" or unset we return [].
 fn detect_locales() -> Vec<String> {
-    let raw = std::env::var("LANGUAGE")
+    let raw = env::var("LANGUAGE")
         .ok()
         .and_then(|l| l.split(':').next().map(|s| s.to_string()))
         .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("LANG").ok())
-        .or_else(|| std::env::var("LC_ALL").ok())
-        .or_else(|| std::env::var("LC_MESSAGES").ok())
+        .or_else(|| env::var("LANG").ok())
+        .or_else(|| env::var("LC_ALL").ok())
+        .or_else(|| env::var("LC_MESSAGES").ok())
         .unwrap_or_default();
 
     let locale = raw
@@ -168,7 +172,7 @@ fn ensure_load_started() {
     if LOAD_KICKED_OFF.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         return;
     }
-    std::thread::spawn(|| {
+    thread::spawn(|| {
         let live_key = compute_snapshot_key();
         if let Some(snapshot) = load_snapshot_from_disk() {
             *CURRENT_KEY.lock().unwrap() = Some(snapshot.key.clone());
@@ -197,7 +201,7 @@ impl AppStreamDb {
     pub fn get() -> Arc<AppStreamDb> {
         ensure_load_started();
         while !FULLY_LOADED.load(Ordering::Relaxed) {
-            std::thread::sleep(std::time::Duration::from_millis(30));
+            thread::sleep(std::time::Duration::from_millis(30));
         }
         slot().read().unwrap().clone()
     }
@@ -330,7 +334,7 @@ pub fn resolve_now(id: &str) -> Option<AppStreamEntry> {
     let locales = detect_locales();
     let mut catalogs = Vec::new();
     collect_catalog_paths("/var/lib/flatpak/appstream", &mut catalogs);
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(home) = env::var_os("HOME") {
         let path = PathBuf::from(home).join(".local/share/flatpak/appstream");
         collect_catalog_paths(&path, &mut catalogs);
     }
@@ -355,7 +359,7 @@ fn cached_raw_bytes(path: &Path) -> Option<Arc<Vec<u8>>> {
         return Some(bytes.clone());
     }
     let is_gz = path.extension().and_then(|e| e.to_str()) == Some("gz");
-    let bytes = if is_gz { read_gz_bytes(path).ok()? } else { std::fs::read(path).ok()? };
+    let bytes = if is_gz { read_gz_bytes(path).ok()? } else { fs::read(path).ok()? };
     let bytes = Arc::new(bytes);
     cache.lock().unwrap().insert(path.to_path_buf(), bytes.clone());
     Some(bytes)
@@ -402,7 +406,7 @@ fn scan_exported_metainfo(id: &str, locales: &[String]) -> Option<AppStreamEntry
         PathBuf::from("/var/lib/flatpak/exports/share/metainfo"),
         PathBuf::from("/var/lib/flatpak/exports/share/appdata"),
     ];
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(home) = env::var_os("HOME") {
         let h = PathBuf::from(home);
         dirs.push(h.join(".local/share/flatpak/exports/share/metainfo"));
         dirs.push(h.join(".local/share/flatpak/exports/share/appdata"));
@@ -413,7 +417,7 @@ fn scan_exported_metainfo(id: &str, locales: &[String]) -> Option<AppStreamEntry
             if !path.exists() {
                 continue;
             }
-            let Ok(bytes) = std::fs::read(&path) else {
+            let Ok(bytes) = fs::read(&path) else {
                 continue;
             };
             if let Some(entry) = parse_metainfo_bytes(id, &bytes, locales) {
@@ -693,7 +697,7 @@ fn component_to_entry(
     descriptions: &HashMap<String, HashMap<String, String>>,
     verifications: &HashMap<String, bool>,
 ) -> AppStreamEntry {
-    // Prefer a remote 128×128 URL — local cached files may not be downloaded yet.
+    // Prefer a remote 128×128 URL. local cached files may not be downloaded yet.
     // Fall back to the first available icon (cached → local → stock) otherwise.
     let icon_url = c.icons.iter().find_map(|icon| match icon {
         appstream::enums::Icon::Remote { url, width, .. }
@@ -701,9 +705,9 @@ fn component_to_entry(
         _ => None,
     }).or_else(|| c.icons.first().and_then(|icon| match icon {
         appstream::enums::Icon::Remote { url, .. } => Some(url.to_string()),
-        appstream::enums::Icon::Local { path, .. } => Some(format!("local:{}", path.display())),
-        appstream::enums::Icon::Cached { path, .. } => Some(format!("local:{}", path.display())),
-        appstream::enums::Icon::Stock(name) => Some(format!("local:{}", name)),
+        appstream::enums::Icon::Local { path, .. } => Some(format!("{}{}", libarc::media::LOCAL_PREFIX, path.display())),
+        appstream::enums::Icon::Cached { path, .. } => Some(format!("{}{}", libarc::media::LOCAL_PREFIX, path.display())),
+        appstream::enums::Icon::Stock(name) => Some(format!("{}{}", libarc::media::LOCAL_PREFIX, name)),
     }));
 
     let screenshots: Vec<String> = c
@@ -887,12 +891,12 @@ fn extract_verifications(xml_bytes: &[u8], out: &mut HashMap<String, bool>) {
 
 // Flatpak lays out appstream data as <root>/<remote>/<arch>/active/appstream.xml[.gz]
 fn collect_catalog_paths(root: impl AsRef<Path>, out: &mut Vec<(String, PathBuf, u64)>) {
-    let Ok(remotes) = std::fs::read_dir(root.as_ref()) else {
+    let Ok(remotes) = fs::read_dir(root.as_ref()) else {
         return;
     };
     for remote_dir in remotes.flatten() {
         let remote_name = remote_dir.file_name().to_string_lossy().to_string();
-        let Ok(arches) = std::fs::read_dir(remote_dir.path()) else {
+        let Ok(arches) = fs::read_dir(remote_dir.path()) else {
             continue;
         };
         for arch in arches.flatten() {
@@ -906,7 +910,7 @@ fn collect_catalog_paths(root: impl AsRef<Path>, out: &mut Vec<(String, PathBuf,
             } else {
                 continue;
             };
-            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
             out.push((remote_name.clone(), path, size));
         }
     }
@@ -932,7 +936,7 @@ fn load_one_catalog(
         if let Ok(col) = Collection::from_path(path.to_path_buf()) {
             out.extend(col.components.into_iter().map(|c| (c, Some(remote_name.to_string()))));
         }
-        if let Ok(bytes) = std::fs::read(path) {
+        if let Ok(bytes) = fs::read(path) {
             extract_descriptions(&bytes, out_descriptions);
             extract_verifications(&bytes, out_verifications);
         }
@@ -945,7 +949,7 @@ fn load_one_catalog(
 fn load_flatpak_progressive() -> AppStreamDb {
     let mut catalogs = Vec::new();
     collect_catalog_paths("/var/lib/flatpak/appstream", &mut catalogs);
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(home) = env::var_os("HOME") {
         let path = PathBuf::from(home).join(".local/share/flatpak/appstream");
         collect_catalog_paths(&path, &mut catalogs);
     }
@@ -969,19 +973,46 @@ fn load_flatpak_progressive() -> AppStreamDb {
     AppStreamDb { components, locales, descriptions, verifications }
 }
 
-fn snapshot_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".cache/arc-daemon/appstream_db.json"))
+static SNAPSHOT_STORE: OnceLock<JsonCache<Snapshot>> = OnceLock::new();
+
+fn snapshot_store() -> &'static JsonCache<Snapshot> {
+    SNAPSHOT_STORE.get_or_init(|| JsonCache::new("daemon", "appstream.json").with_schema(SNAPSHOT_SCHEMA))
+}
+
+// `flatpak update --appstream` is a real network fetch, not just reading a
+// disk cache, and the daemon restarts on every login (xdg autostart) as well
+// as whenever the frontend replaces a stale instance, so running it
+// unconditionally on every startup means paying that cost far more often
+// than remotes actually publish new data. throttle it with a stamp file
+// instead, independent of any single daemon process's lifetime.
+const REMOTE_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3600);
+
+fn remote_refresh_stamp_path() -> Option<PathBuf> {
+    libarc::cache::namespace("daemon").map(|dir| dir.join("appstream-remote-refresh.stamp"))
+}
+
+pub fn should_refresh_remotes() -> bool {
+    let Some(path) = remote_refresh_stamp_path() else { return true };
+    match fs::metadata(&path).and_then(|m| m.modified()) {
+        Ok(modified) => modified.elapsed().map(|age| age >= REMOTE_REFRESH_INTERVAL).unwrap_or(true),
+        Err(_) => true,
+    }
+}
+
+pub fn mark_remotes_refreshed() {
+    if let Some(path) = remote_refresh_stamp_path() {
+        let _ = fs::write(&path, []);
+    }
 }
 
 // walks the same active/appstream.xml[.gz] files collect_catalog_paths does
 // a stamp changing means that remote redeployed a new catalog
 fn collect_source_stamps(root: impl AsRef<Path>, out: &mut Vec<SourceStamp>) {
-    let Ok(remotes) = std::fs::read_dir(root.as_ref()) else {
+    let Ok(remotes) = fs::read_dir(root.as_ref()) else {
         return;
     };
     for remote_dir in remotes.flatten() {
-        let Ok(arches) = std::fs::read_dir(remote_dir.path()) else {
+        let Ok(arches) = fs::read_dir(remote_dir.path()) else {
             continue;
         };
         for arch in arches.flatten() {
@@ -992,7 +1023,7 @@ fn collect_source_stamps(root: impl AsRef<Path>, out: &mut Vec<SourceStamp>) {
             let Ok(canonical) = path.canonicalize() else {
                 continue;
             };
-            let Ok(meta) = std::fs::metadata(&canonical) else {
+            let Ok(meta) = fs::metadata(&canonical) else {
                 continue;
             };
             let mtime_secs = meta
@@ -1009,7 +1040,7 @@ fn collect_source_stamps(root: impl AsRef<Path>, out: &mut Vec<SourceStamp>) {
 fn compute_snapshot_key() -> SnapshotKey {
     let mut sources = Vec::new();
     collect_source_stamps("/var/lib/flatpak/appstream", &mut sources);
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(home) = env::var_os("HOME") {
         let path = PathBuf::from(home).join(".local/share/flatpak/appstream");
         collect_source_stamps(&path, &mut sources);
     }
@@ -1018,31 +1049,17 @@ fn compute_snapshot_key() -> SnapshotKey {
 }
 
 fn load_snapshot_from_disk() -> Option<Snapshot> {
-    let path = snapshot_path()?;
-    let bytes = std::fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    snapshot_store().load()
 }
 
 fn persist_snapshot(db: &AppStreamDb, key: &SnapshotKey) {
-    let Some(path) = snapshot_path() else { return };
-    let Some(parent) = path.parent() else { return };
-    if std::fs::create_dir_all(parent).is_err() {
-        return;
-    }
     let snapshot = Snapshot {
         key: key.clone(),
         components: db.components.clone(),
         descriptions: db.descriptions.clone(),
         verifications: db.verifications.clone(),
     };
-    let Ok(bytes) = serde_json::to_vec(&snapshot) else { return };
-    // write to a tmp file then rename since the rename is atomic
-    // a crash mid-write never leaves a torn snapshot behind
-    let tmp_path = path.with_extension("json.tmp");
-    if std::fs::write(&tmp_path, bytes).is_err() {
-        return;
-    }
-    let _ = std::fs::rename(&tmp_path, &path);
+    let _ = snapshot_store().store_blocking(&snapshot);
 }
 
 // bypass entry for GetAppMetadata while the real appstream data for this id
@@ -1068,70 +1085,11 @@ pub fn partial_entry_from_package(pkg: &Package) -> AppStreamEntry {
     }
 }
 
-const ICON_SIZES: [&str; 7] = ["128x128", "256x256", "96x96", "64x64", "48x48", "32x32", "scalable"];
-const ICON_EXTS: [&str; 3] = ["png", "svg", "svgz"];
-
-fn icon_content_type(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
-        "svg" | "svgz" => "image/svg+xml",
-        _ => "image/png",
-    }
-}
-
-fn find_appstream_icon(id: &str) -> Option<PathBuf> {
-    let mut roots = vec![PathBuf::from("/var/lib/flatpak/appstream")];
-    if let Some(home) = std::env::var_os("HOME") {
-        roots.push(PathBuf::from(home).join(".local/share/flatpak/appstream"));
-    }
-    for root in &roots {
-        let Ok(remotes) = std::fs::read_dir(root) else { continue };
-        for remote_dir in remotes.flatten() {
-            let Ok(arches) = std::fs::read_dir(remote_dir.path()) else { continue };
-            for arch in arches.flatten() {
-                let icons_base = arch.path().join("active").join("icons");
-                if !icons_base.exists() {
-                    continue;
-                }
-                // Flatpak stores icons in both <icons>/<size>/ and <icons>/flatpak/<size>/.
-                for search_root in [icons_base.clone(), icons_base.join("flatpak")] {
-                    for size in ICON_SIZES {
-                        for ext in ICON_EXTS {
-                            let p = search_root.join(size).join(format!("{}.{}", id, ext));
-                            if p.exists() {
-                                return Some(p);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-// The exported hicolor theme only has icons for apps that are actually installed.
-fn find_exported_icon(id: &str) -> Option<PathBuf> {
-    let mut bases = vec![PathBuf::from("/var/lib/flatpak/exports/share/icons/hicolor")];
-    if let Some(home) = std::env::var_os("HOME") {
-        bases.push(PathBuf::from(home).join(".local/share/flatpak/exports/share/icons/hicolor"));
-    }
-    for base in &bases {
-        for size in ICON_SIZES {
-            for ext in ICON_EXTS {
-                let p = base.join(size).join("apps").join(format!("{}.{}", id, ext));
-                if p.exists() {
-                    return Some(p);
-                }
-            }
-        }
-    }
-    None
-}
-
 pub fn find_local_flatpak_icon_bytes(id: &str) -> Option<(Vec<u8>, String)> {
-    let path = find_appstream_icon(id).or_else(|| find_exported_icon(id))?;
-    let bytes = std::fs::read(&path).ok()?;
-    Some((bytes, icon_content_type(&path).to_string()))
+    let path = libarc::icons::find_flatpak_appstream_icon(id)
+        .or_else(|| libarc::icons::find_flatpak_export_icon(id))?;
+    let bytes = fs::read(&path).ok()?;
+    Some((bytes, libarc::icons::icon_content_type(&path).to_string()))
 }
 
 pub fn entry_to_flatpak_package(entry: AppStreamEntry, installed: bool) -> Package {

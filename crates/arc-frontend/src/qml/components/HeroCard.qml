@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Effects
@@ -13,62 +15,20 @@ Item {
 
     signal activated()
 
-    implicitWidth: 220
-    implicitHeight: 150
+    anchors.fill: parent
 
     Item {
         anchors.fill: parent
 
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            maskEnabled: true
-            maskSource: maskShape
-            maskThresholdMin: 0.5
-            maskSpreadAtMin: 1.0
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            visible: root.bannerUrl.length === 0
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: Qt.darker(Kirigami.Theme.highlightColor, 1.8) }
-                GradientStop { position: 1.0; color: Qt.darker(Kirigami.Theme.highlightColor, 3.2) }
-            }
-        }
-
         Image {
             anchors.fill: parent
-            visible: root.bannerUrl.length > 0
             source: root.bannerUrl
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
         }
 
-        Kirigami.Icon {
-            visible: root.bannerUrl.length === 0 && root.iconUrl.length > 0
-            source: root.iconUrl
-            width: 56
-            height: 56
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: 20
-        }
-
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: 80
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "transparent" }
-                GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.82) }
-            }
-        }
-
         Column {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.margins: 12
+            anchors.fill: parent
             spacing: 3
 
             Controls.Label {
@@ -90,16 +50,6 @@ Item {
         }
     }
 
-    Item {
-        id: maskShape
-        anchors.fill: parent
-        visible: false
-        layer.enabled: true
-        Rectangle {
-            anchors.fill: parent
-            radius: 14
-        }
-    }
 
     Rectangle {
         anchors.fill: parent

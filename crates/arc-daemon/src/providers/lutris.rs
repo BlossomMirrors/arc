@@ -3,19 +3,20 @@ use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Deserializer};
+use futures_util::future::join_all;
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::sync::RwLock;
+use tokio::task::spawn_blocking;
 use tracing::{info, warn};
 
 fn null_as_empty<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     Option::<String>::deserialize(d).map(|o| o.unwrap_or_default())
 }
 
-const WHITELIST_URL: &str = "https://forge.blossomos.org/api/lutris-whitelist";
 const LUTRIS_GAMES_API: &str = "https://lutris.net/api/games";
 const CATALOG_CACHE_TTL: Duration = Duration::from_secs(3600);
 
@@ -87,7 +88,7 @@ impl LutrisProvider {
     async fn fetch_whitelist(&self) -> Result<Vec<(String, String)>, ArcError> {
         let text = self
             .http_client
-            .get(WHITELIST_URL)
+            .get(format!("{}/api/lutris-whitelist", libarc::FORGE_BASE_URL))
             .timeout(Duration::from_secs(10))
             .send()
             .await
@@ -191,7 +192,7 @@ impl LutrisProvider {
             }
         };
 
-        let entries: Vec<CatalogEntry> = futures_util::future::join_all(
+        let entries: Vec<CatalogEntry> = join_all(
             whitelist.into_iter().map(|(installer_slug, game_slug)| async move {
                 match self.fetch_game(&game_slug).await {
                     Ok(game) => {
@@ -221,7 +222,7 @@ impl LutrisProvider {
     async fn installed_slugs(&self) -> HashSet<String> {
         // Read installed state directly from Lutris's pga.db database
         let db_path = self.find_lutris_db();
-        tokio::task::spawn_blocking(move || {
+        spawn_blocking(move || {
             if let Some(path) = db_path {
                 let mut slugs = HashSet::new();
                 match Connection::open(&path) {
@@ -265,7 +266,7 @@ impl LutrisProvider {
             return Ok(());
         }
 
-        info!("Lutris not found — installing via Flathub");
+        info!("Lutris not found... installing via Flathub");
         let status = Command::new("flatpak")
             .args([
                 "install",
@@ -415,7 +416,7 @@ impl PackageProvider for LutrisProvider {
         let slug = slug.to_string();
         let db_path_query = db_path.clone();
         let slug_query = slug.clone();
-        let game_directory: Option<String> = tokio::task::spawn_blocking(move || {
+        let game_directory: Option<String> = spawn_blocking(move || {
             let conn = Connection::open(&db_path_query).map_err(|e| {
                 ArcError::ProviderError(format!("Failed to open Lutris database: {}", e))
             })?;
@@ -454,7 +455,7 @@ impl PackageProvider for LutrisProvider {
         }
 
         // Remove the database entry
-        tokio::task::spawn_blocking(move || {
+        spawn_blocking(move || {
             Connection::open(&db_path)
                 .map_err(|e| {
                     ArcError::ProviderError(format!("Failed to open Lutris database: {}", e))

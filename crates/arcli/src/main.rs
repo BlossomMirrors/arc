@@ -32,11 +32,21 @@ struct Cli {
 enum Commands {
     Install {
         app_id: String,
+        /// Show a desktop notification for this install (off by default)
+        #[arg(long, short)]
+        notify: bool,
     },
     Remove {
         app_id: String,
+        /// Show a desktop notification for this removal (off by default)
+        #[arg(long, short)]
+        notify: bool,
     },
-    Update,
+    Update {
+        /// Show a desktop notification for each update (off by default)
+        #[arg(long, short)]
+        notify: bool,
+    },
     Search {
         query: String,
     },
@@ -111,7 +121,7 @@ async fn main() -> Result<()> {
     })?;
 
     match cli.command {
-        Commands::Install { app_id } => {
+        Commands::Install { app_id, notify } => {
             let app_id = if std::path::Path::new(&app_id).exists() {
                 std::fs::canonicalize(&app_id)
                     .map(|p| p.to_string_lossy().into_owned())
@@ -120,19 +130,19 @@ async fn main() -> Result<()> {
                 app_id
             };
             println!("{} {}", "Installing".cyan(), app_id.bold());
-            let tx_id = proxy.install_package(&app_id).await?;
+            let tx_id = proxy.install_package(&app_id, notify).await?;
             println!("Transaction ID: {}", tx_id.dimmed());
             wait_for_transaction(&proxy, &tx_id).await?;
         }
 
-        Commands::Remove { app_id } => {
+        Commands::Remove { app_id, notify } => {
             println!("{} {}", "Removing".yellow(), app_id.bold());
-            let tx_id = proxy.remove_package(&app_id).await?;
+            let tx_id = proxy.remove_package(&app_id, notify).await?;
             println!("Transaction ID: {}", tx_id.dimmed());
             wait_for_transaction(&proxy, &tx_id).await?;
         }
 
-        Commands::Update => {
+        Commands::Update { notify } => {
             println!("{}", "Checking for updates...".cyan());
             let json = proxy.list_updates().await?;
             let packages = parse_packages(&json)?;
@@ -149,7 +159,7 @@ async fn main() -> Result<()> {
 
             for pkg in &packages {
                 println!("\n{} {}", "Updating".cyan(), pkg.id.bold());
-                let tx_id = proxy.update_package(&pkg.id).await?;
+                let tx_id = proxy.update_package(&pkg.id, notify).await?;
                 wait_for_transaction(&proxy, &tx_id).await?;
             }
         }

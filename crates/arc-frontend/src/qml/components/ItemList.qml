@@ -65,7 +65,7 @@ Kirigami.ScrollablePage {
                 spacing: Kirigami.Units.smallSpacing
 
                 function applyFilters() {
-                    packageListModel.setFilters(
+                    root.packageListModel.setFilters(
                         sourceCombo.currentIndex === 0 ? "" : sourceCombo.currentText,
                         stateCombo.currentIndex,
                         sortCombo.currentIndex === 1);
@@ -73,8 +73,8 @@ Kirigami.ScrollablePage {
 
                 Controls.ComboBox {
                     id: sourceCombo
-                    visible: packageListModel.providers.length > 1
-                    model: [i18n("All sources")].concat(packageListModel.providers)
+                    visible: root.packageListModel.providers.length > 1
+                    model: [i18n("All sources")].concat(root.packageListModel.providers)
                     onActivated: parent.applyFilters()
                 }
 
@@ -93,7 +93,7 @@ Kirigami.ScrollablePage {
                 Item { Layout.fillWidth: true }
 
                 Controls.Label {
-                    visible: !packageListModel.loading
+                    visible: !root.packageListModel.loading
                     text: i18np("%1 app", "%1 apps", listView.count)
                     opacity: 0.7
                 }
@@ -103,20 +103,20 @@ Kirigami.ScrollablePage {
 
     Kirigami.CardsListView {
         id: listView
-        model: packageListModel
+        model: root.packageListModel
 
         reuseItems: true
 
         headerPositioning: ListView.InlineHeader
 
         LoadingOverlay {
-            visible: packageListModel.loading
+            visible: root.packageListModel.loading
         }
 
         Kirigami.PlaceholderMessage {
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
-            visible: !packageListModel.loading && listView.count === 0
+            visible: !root.packageListModel.loading && listView.count === 0
             text: root.emptyText
         }
 
@@ -184,7 +184,7 @@ Kirigami.ScrollablePage {
             Timer {
                 interval: 200
                 running: rowHover.hovered
-                onTriggered: DetailController.prefetch(delegate.pkgId)
+                onTriggered: DetailController.prefetch(delegate.pkgId, Math.round(Kirigami.Units.gridUnit * 14 * 16 / 9 * 2))
             }
 
             contentItem: ColumnLayout {
@@ -259,7 +259,7 @@ Kirigami.ScrollablePage {
                         installed: delegate.installed
                         busy: delegate.busy
                         mode: "install"
-                        onRemoveRequested: TransactionsModel.removePackage(delegate.pkgId)
+                        onRemoveRequested: TransactionsModel.removePackage(delegate.pkgId, delegate.name, delegate.iconUrl)
                     }
                 }
 

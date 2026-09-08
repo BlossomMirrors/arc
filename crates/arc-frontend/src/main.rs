@@ -12,6 +12,7 @@ extern "C" {
     fn arc_setup_i18n(engine: *mut c_void, domain: *const std::ffi::c_char);
     fn arc_install_message_handler();
     fn arc_engine_has_root(engine: *mut c_void) -> bool;
+    fn arc_set_icon_theme(name: *const std::ffi::c_char);
 }
 
 fn main() {
@@ -28,6 +29,12 @@ fn main() {
     services::deeplink::init();
 
     let mut app = QApplication::new();
+
+    if let Some(theme) = libarc::icons::system_theme_name() {
+        if let Ok(theme) = CString::new(theme) {
+            unsafe { arc_set_icon_theme(theme.as_ptr()) };
+        }
+    }
 
     QGuiApplication::set_desktop_file_name(&QString::from("org.blossomos.Arc"));
 
@@ -62,5 +69,5 @@ fn main() {
     }
 
     libarc::launcher::clear_blocking();
-    libarc::clear_foreground_blocking();
+    libarc::cache::flush_blocking();
 }

@@ -4,7 +4,7 @@ import org.blossomos.arc
 ItemList {
     id: root
 
-    required property string categoryId
+    property string categoryId: ""
     property string categoryLabel: ""
     property string categoryColor: ""
     property string categoryIcon: ""
@@ -20,12 +20,20 @@ ItemList {
 
     packageListModel: categoryListModel
 
-    Component.onCompleted: categoryListModel.searchCategory(categoryId)
+    function openCategory(id, label, color, icon) {
+        root.categoryId = id;
+        root.categoryLabel = label ?? "";
+        root.categoryColor = color ?? "";
+        root.categoryIcon = icon ?? "";
+        categoryListModel.searchCategory(id);
+        retryTimer.attempts = 0;
+        retryTimer.restart();
+    }
 
     Timer {
+        id: retryTimer
         property int attempts: 0
         interval: 2000
-        running: true
         repeat: true
         onTriggered: {
             attempts += 1;

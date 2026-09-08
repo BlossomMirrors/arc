@@ -31,7 +31,7 @@ Kirigami.AbstractCard {
     Timer {
         interval: 200
         running: root.cardHovered
-        onTriggered: DetailController.prefetch(root.pkgId)
+        onTriggered: DetailController.prefetch(root.pkgId, Math.round(Kirigami.Units.gridUnit * 14 * 16 / 9 * 2))
     }
 
     contentItem: ColumnLayout {

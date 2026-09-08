@@ -10,12 +10,15 @@ Kirigami.ScrollablePage {
     id: root
 
     Kirigami.ColumnView.fillWidth: true
-
-    leftPadding: Kirigami.Units.largeSpacing * 2
-    rightPadding: Kirigami.Units.largeSpacing * 2
-    topPadding: Kirigami.Units.largeSpacing
+    padding: 0
 
     title: i18n("Home")
+
+    Binding {
+        target: root.contentItem
+        property: "rightPadding"
+        value: 0
+    }
 
     Component.onCompleted: HomeFeedModel.load()
 
@@ -51,191 +54,151 @@ Kirigami.ScrollablePage {
     }
 
     ColumnLayout {
+        id: column
         visible: !HomeFeedModel.loading && sectionsRepeater.count > 0
-        width: root.availableWidth
+        width: root.width
         spacing: 0
 
         ColumnLayout {
-            Layout.alignment: Qt.AlignHCenter
             Layout.fillWidth: true
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 76
             spacing: 0
 
             Repeater {
                 id: sectionsRepeater
                 model: HomeFeedModel
 
-            delegate: Loader {
-                id: rowLoader
+                delegate: Loader {
+                    id: rowLoader
 
-                required property int index
-                required property string itemType
-                required property string text
-                required property string title
-                required property string cardsJson
-                required property string heroItemsJson
-                required property string editorialItemsJson
-                required property string linkTitle
-                required property string linkItemsJson
-                required property string categoriesJson
-                required property bool loading
+                    required property int index
+                    required property string itemType
+                    required property string text
+                    required property string title
+                    required property string cardsJson
+                    required property string heroItemsJson
+                    required property string editorialItemsJson
+                    required property string linkTitle
+                    required property string linkItemsJson
+                    required property string categoriesJson
+                    required property bool loading
 
-                Layout.fillWidth: true
-                Layout.topMargin: index === 0 ? 0
-                    : ["carousel", "app-row", "app-grid", "categories"].indexOf(itemType) >= 0
-                        ? Kirigami.Units.gridUnit * 2.5
-                        : Kirigami.Units.largeSpacing
+                    Layout.fillWidth: true
 
-                sourceComponent: {
-                    switch (rowLoader.itemType) {
-                    case "h1": return headingComponent;
-                    case "h2": return headingComponent;
-                    case "h3": return headingComponent;
-                    case "p": return paragraphComponent;
-                    case "br": return rowLoader.index === 0 ? null : spacerComponent;
-                    case "categories": return categoriesComponent;
-                    case "app-row": return appRowComponent;
-                    case "app-grid": return appGridComponent;
-                    case "carousel": return carouselComponent;
-                    case "links": return linksComponent;
-                    default: return null;
-                    }
-                }
-
-                Component {
-                    id: headingComponent
-                    Kirigami.Heading {
-                        level: rowLoader.itemType === "h1" ? 1 : rowLoader.itemType === "h2" ? 2 : 3
-                        text: rowLoader.text
-                        wrapMode: Text.WordWrap
-                    }
-                }
-
-                Component {
-                    id: paragraphComponent
-                    Controls.Label {
-                        text: rowLoader.text
-                        opacity: 0.7
-                        wrapMode: Text.WordWrap
-                    }
-                }
-
-                Component {
-                    id: spacerComponent
-                    Kirigami.Separator {}
-                }
-
-                Component {
-                    id: categoriesComponent
-                    ColumnLayout {
-                        spacing: Kirigami.Units.largeSpacing * 2
-
-                        Kirigami.Heading {
-                            level: 2
-                            text: i18n("Categories")
+                    sourceComponent: {
+                        switch (rowLoader.itemType) {
+                        case "h1":
+                            return headingComponent;
+                        case "h2":
+                            return headingComponent;
+                        case "h3":
+                            return headingComponent;
+                        case "p":
+                            return paragraphComponent;
+                        case "br":
+                            return rowLoader.index === 0 ? null : spacerComponent;
+                        case "categories":
+                            return categoriesComponent;
+                        case "app-row":
+                            return appRowComponent;
+                        case "app-grid":
+                            return appGridComponent;
+                        case "carousel":
+                            return carouselComponent;
+                        case "links":
+                            return linksComponent;
+                        default:
+                            return null;
                         }
+                    }
 
-                        GridLayout {
-                            Layout.alignment: Qt.AlignHCenter
-                            Layout.fillWidth: true
-                            Layout.maximumWidth: Kirigami.Units.gridUnit * 41
-                            columns: 3
-                            columnSpacing: Kirigami.Units.largeSpacing
-                            rowSpacing: Kirigami.Units.largeSpacing
+                    Component {
+                        id: headingComponent
+                        Kirigami.Heading {
+                            level: rowLoader.itemType === "h1" ? 1 : rowLoader.itemType === "h2" ? 2 : 3
+                            text: rowLoader.text
+                            wrapMode: Text.WordWrap
+                        }
+                    }
 
-                            Repeater {
-                                model: JSON.parse(rowLoader.categoriesJson)
+                    Component {
+                        id: paragraphComponent
+                        Controls.Label {
+                            text: rowLoader.text
+                            opacity: 0.7
+                            wrapMode: Text.WordWrap
+                        }
+                    }
 
-                                delegate: CategoryCard {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: Kirigami.Units.gridUnit * 5
-                                    categoryId: modelData.id
-                                    label: modelData.label
-                                    iconName: modelData.icon_name
-                                    bgColor: modelData.color
-                                    onActivated: root.openCategory(modelData.id, modelData.label, modelData.color, modelData.icon_name)
+                    Component {
+                        id: spacerComponent
+                        Kirigami.Separator {}
+                    }
+
+                    Component {
+                        id: categoriesComponent
+                        ColumnLayout {
+                            spacing: Kirigami.Units.largeSpacing * 2
+
+                            Kirigami.Heading {
+                                level: 2
+                                text: i18n("Categories")
+                            }
+
+                            GridLayout {
+                                Layout.alignment: Qt.AlignHCenter
+                                Layout.fillWidth: true
+                                Layout.maximumWidth: Kirigami.Units.gridUnit * 41
+                                columns: 3
+                                columnSpacing: Kirigami.Units.largeSpacing
+                                rowSpacing: Kirigami.Units.largeSpacing
+
+                                Repeater {
+                                    model: JSON.parse(rowLoader.categoriesJson)
+
+                                    delegate: CategoryCard {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: Kirigami.Units.gridUnit * 5
+                                        categoryId: modelData.id
+                                        label: modelData.label
+                                        iconName: modelData.icon_name
+                                        bgColor: modelData.color
+                                        onActivated: root.openCategory(modelData.id, modelData.label, modelData.color, modelData.icon_name)
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                Component {
-                    id: appRowComponent
-                    ColumnLayout {
-                        spacing: Kirigami.Units.largeSpacing * 2
+                    Component {
+                        id: appRowComponent
+                        ColumnLayout {
+                            spacing: Kirigami.Units.largeSpacing * 2
 
-                        Kirigami.Heading {
-                            level: 2
-                            text: rowLoader.title
-                            visible: text.length > 0
-                        }
-
-                        RowLoadingPlaceholder {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: Kirigami.Units.gridUnit * 10
-                            visible: rowLoader.loading
-                        }
-
-                        CardCarousel {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: Kirigami.Units.gridUnit * 10
-                            visible: !rowLoader.loading
-                            model: JSON.parse(rowLoader.cardsJson)
-
-                            delegate: AppCard {
-                                required property var modelData
-                                width: Kirigami.Units.gridUnit * 10
-                                height: Kirigami.Units.gridUnit * 10
-                                pkgId: modelData.id
-                                appName: modelData.name
-                                summary: modelData.summary
-                                iconUrl: modelData.icon_url
-                                installed: modelData.installed
-                                onActivated: root.openApp(modelData.id, {
-                                    name: modelData.name,
-                                    summary: modelData.summary,
-                                    iconUrl: modelData.icon_url,
-                                    installed: modelData.installed
-                                })
+                            Kirigami.Heading {
+                                level: 2
+                                text: rowLoader.title
+                                visible: text.length > 0
                             }
-                        }
-                    }
-                }
 
-                Component {
-                    id: appGridComponent
-                    ColumnLayout {
-                        spacing: Kirigami.Units.largeSpacing * 2
+                            RowLoadingPlaceholder {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Kirigami.Units.gridUnit * 10
+                                visible: rowLoader.loading
+                            }
 
-                        Kirigami.Heading {
-                            level: 2
-                            text: rowLoader.title
-                            visible: text.length > 0
-                        }
-
-                        RowLoadingPlaceholder {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: Kirigami.Units.gridUnit * 10
-                            visible: rowLoader.loading
-                        }
-
-                        GridLayout {
-                            id: grid
-                            Layout.fillWidth: true
-                            visible: !rowLoader.loading
-                            columns: Math.max(2, Math.floor(width / (Kirigami.Units.gridUnit * 12)))
-                            columnSpacing: Kirigami.Units.largeSpacing
-                            rowSpacing: Kirigami.Units.largeSpacing
-
-                            Repeater {
+                            CardCarousel {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Kirigami.Units.gridUnit * 10
+                                visible: !rowLoader.loading
                                 model: JSON.parse(rowLoader.cardsJson)
+                                cardWidth: Kirigami.Units.gridUnit * 10
 
                                 delegate: AppCard {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: Kirigami.Units.gridUnit * 10
+                                    property var modelData: ({})
+                                    property int index
+                                    width: Kirigami.Units.gridUnit * 10
+                                    height: Kirigami.Units.gridUnit * 10
                                     pkgId: modelData.id
                                     appName: modelData.name
                                     summary: modelData.summary
@@ -251,125 +214,175 @@ Kirigami.ScrollablePage {
                             }
                         }
                     }
-                }
 
-                Component {
-                    id: carouselComponent
-                    ColumnLayout {
-                        spacing: Kirigami.Units.largeSpacing * 2
+                    Component {
+                        id: appGridComponent
+                        ColumnLayout {
+                            spacing: Kirigami.Units.largeSpacing * 2
 
-                        RowLoadingPlaceholder {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 400
-                            visible: rowLoader.loading
-                        }
-
-                        HeroCarousel {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 400
-                            visible: !rowLoader.loading && items.length > 0
-                            items: JSON.parse(rowLoader.heroItemsJson)
-                            onStoryActivated: storyIndex => root.openStory("story-" + storyIndex)
-                            onAppActivated: pkgId => root.openApp(pkgId)
-                        }
-
-                        CardCarousel {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 150
-                            visible: count > 0
-                            model: JSON.parse(rowLoader.editorialItemsJson)
-
-                            delegate: HeroCard {
-                                required property var modelData
-                                width: 220
-                                height: 150
-                                bannerUrl: modelData.banner_url
-                                iconUrl: modelData.icon_url
-                                heroTitle: modelData.title
-                                body: modelData.body
-                                onActivated: modelData.is_story
-                                    ? root.openStory("story-" + modelData.story_index)
-                                    : root.openApp(modelData.id)
+                            Kirigami.Heading {
+                                level: 2
+                                text: rowLoader.title
+                                visible: text.length > 0
                             }
-                        }
 
-                        CardCarousel {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: Kirigami.Units.gridUnit * 10
-                            visible: count > 0
-                            model: JSON.parse(rowLoader.cardsJson)
+                            RowLoadingPlaceholder {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Kirigami.Units.gridUnit * 10
+                                visible: rowLoader.loading
+                            }
 
-                            delegate: AppCard {
-                                required property var modelData
-                                width: Kirigami.Units.gridUnit * 10
-                                height: Kirigami.Units.gridUnit * 10
-                                pkgId: modelData.id
-                                appName: modelData.name
-                                summary: modelData.summary
-                                iconUrl: modelData.icon_url
-                                installed: modelData.installed
-                                onActivated: root.openApp(modelData.id, {
-                                    name: modelData.name,
-                                    summary: modelData.summary,
-                                    iconUrl: modelData.icon_url,
-                                    installed: modelData.installed
-                                })
+                            GridLayout {
+                                id: grid
+                                Layout.fillWidth: true
+                                visible: !rowLoader.loading
+                                columns: Math.max(2, Math.floor(width / (Kirigami.Units.gridUnit * 12)))
+                                columnSpacing: Kirigami.Units.largeSpacing
+                                rowSpacing: Kirigami.Units.largeSpacing
+
+                                Repeater {
+                                    model: JSON.parse(rowLoader.cardsJson)
+
+                                    delegate: AppCard {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: Kirigami.Units.gridUnit * 10
+                                        pkgId: modelData.id
+                                        appName: modelData.name
+                                        summary: modelData.summary
+                                        iconUrl: modelData.icon_url
+                                        installed: modelData.installed
+                                        onActivated: root.openApp(modelData.id, {
+                                            name: modelData.name,
+                                            summary: modelData.summary,
+                                            iconUrl: modelData.icon_url,
+                                            installed: modelData.installed
+                                        })
+                                    }
+                                }
                             }
                         }
                     }
-                }
 
-                Component {
-                    id: linksComponent
-                    ColumnLayout {
-                        spacing: 0
+                    Component {
+                        id: carouselComponent
+                        ColumnLayout {
+                            spacing: Kirigami.Units.largeSpacing * 2
 
-                        Kirigami.Heading {
-                            level: 2
-                            text: rowLoader.linkTitle
-                            visible: text.length > 0
-                            Layout.bottomMargin: Kirigami.Units.largeSpacing
-                        }
-
-                        RowLoadingPlaceholder {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: Kirigami.Units.gridUnit * 5
-                            visible: rowLoader.loading
-                        }
-
-                        Repeater {
-                            model: rowLoader.loading ? [] : JSON.parse(rowLoader.linkItemsJson)
-
-                            delegate: ColumnLayout {
-                                id: linkRow
-                                required property var modelData
+                            RowLoadingPlaceholder {
                                 Layout.fillWidth: true
-                                spacing: 0
+                                Layout.preferredHeight: 400
+                                visible: rowLoader.loading
+                            }
 
-                                Controls.ItemDelegate {
+                            HeroCarousel {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 400
+                                visible: !rowLoader.loading && items.length > 0
+                                items: JSON.parse(rowLoader.heroItemsJson)
+                                onStoryActivated: storyIndex => root.openStory("story-" + storyIndex)
+                                onAppActivated: pkgId => root.openApp(pkgId)
+                            }
+
+                            CardCarousel {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 150
+                                visible: count > 0
+                                model: JSON.parse(rowLoader.editorialItemsJson)
+                                cardWidth: 220
+
+                                delegate: HeroCard {
+                                    property var modelData: ({})
+                                    property int index
+                                    width: 220
+                                    height: 150
+                                    bannerUrl: modelData.banner_url
+                                    iconUrl: modelData.icon_url
+                                    heroTitle: modelData.title
+                                    body: modelData.body
+                                    onActivated: modelData.is_story ? root.openStory("story-" + modelData.story_index) : root.openApp(modelData.id)
+                                }
+                            }
+
+                            CardCarousel {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Kirigami.Units.gridUnit * 10
+                                visible: count > 0
+                                model: JSON.parse(rowLoader.cardsJson)
+                                cardWidth: Kirigami.Units.gridUnit * 10
+
+                                delegate: AppCard {
+                                    property var modelData: ({})
+                                    property int index
+                                    width: Kirigami.Units.gridUnit * 10
+                                    height: Kirigami.Units.gridUnit * 10
+                                    pkgId: modelData.id
+                                    appName: modelData.name
+                                    summary: modelData.summary
+                                    iconUrl: modelData.icon_url
+                                    installed: modelData.installed
+                                    onActivated: root.openApp(modelData.id, {
+                                        name: modelData.name,
+                                        summary: modelData.summary,
+                                        iconUrl: modelData.icon_url,
+                                        installed: modelData.installed
+                                    })
+                                }
+                            }
+                        }
+                    }
+
+                    Component {
+                        id: linksComponent
+                        ColumnLayout {
+                            spacing: 0
+
+                            Kirigami.Heading {
+                                level: 2
+                                text: rowLoader.linkTitle
+                                visible: text.length > 0
+                                Layout.bottomMargin: Kirigami.Units.largeSpacing
+                            }
+
+                            RowLoadingPlaceholder {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Kirigami.Units.gridUnit * 5
+                                visible: rowLoader.loading
+                            }
+
+                            Repeater {
+                                model: rowLoader.loading ? [] : JSON.parse(rowLoader.linkItemsJson)
+
+                                delegate: ColumnLayout {
+                                    id: linkRow
+                                    required property var modelData
                                     Layout.fillWidth: true
-                                    text: linkRow.modelData.text
-                                    icon.name: linkRow.modelData.href.length > 0 ? "link-symbolic" : ""
-                                    onClicked: {
-                                        if (linkRow.modelData.story_index >= 0) {
-                                            root.openStory("story-" + linkRow.modelData.story_index);
-                                        } else if (linkRow.modelData.app_id.length > 0) {
-                                            root.openApp(linkRow.modelData.app_id);
-                                        } else if (linkRow.modelData.href.length > 0) {
-                                            Qt.openUrlExternally(linkRow.modelData.href);
+                                    spacing: 0
+
+                                    Controls.ItemDelegate {
+                                        Layout.fillWidth: true
+                                        text: linkRow.modelData.text
+                                        icon.name: linkRow.modelData.href.length > 0 ? "link-symbolic" : ""
+                                        onClicked: {
+                                            if (linkRow.modelData.story_index >= 0) {
+                                                root.openStory("story-" + linkRow.modelData.story_index);
+                                            } else if (linkRow.modelData.app_id.length > 0) {
+                                                root.openApp(linkRow.modelData.app_id);
+                                            } else if (linkRow.modelData.href.length > 0) {
+                                                Qt.openUrlExternally(linkRow.modelData.href);
+                                            }
                                         }
                                     }
-                                }
 
-                                Kirigami.Separator {
-                                    Layout.fillWidth: true
+                                    Kirigami.Separator {
+                                        Layout.fillWidth: true
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        }
         }
 
         Item {

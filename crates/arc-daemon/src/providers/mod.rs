@@ -1,10 +1,12 @@
 use async_trait::async_trait;
-use libarc::{ArcError, Package};
+use libarc::cache::JsonCache;
+use libarc::{ArcError, Package, Provider};
 use std::future::Future;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
+use tokio::spawn;
 use tokio::sync::{mpsc::UnboundedSender, Mutex, RwLock};
+use tokio::task::spawn_blocking;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
@@ -67,44 +69,20 @@ pub mod pwa;
 // a JSON snapshot of the last successful package_cache, so a fresh daemon
 // process can serve (slightly stale) search results immediately on startup
 // instead of making every first search wait out the full provider fetch
-fn disk_cache_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".cache/arc/package_cache.json"))
+static PACKAGE_STORE: OnceLock<JsonCache<Vec<Package>>> = OnceLock::new();
+
+fn package_store() -> &'static JsonCache<Vec<Package>> {
+    PACKAGE_STORE.get_or_init(|| JsonCache::new("daemon", "packages.json"))
 }
 
-fn load_disk_cache() -> Option<Vec<Package>> {
-    let path = disk_cache_path()?;
-    let bytes = std::fs::read(&path).ok()?;
-    match serde_json::from_slice::<Vec<Package>>(&bytes) {
-        Ok(packages) => {
-            info!("Loaded {} packages from on-disk cache", packages.len());
-            Some(packages)
-        }
-        Err(e) => {
-            warn!("Failed to parse on-disk package cache, ignoring: {e}");
-            None
-        }
-    }
+fn load_disk_cache() -> Option<(Vec<Package>, Duration)> {
+    let (packages, age) = package_store().load_with_age()?;
+    info!("Loaded {} packages from on-disk cache ({}s old)", packages.len(), age.as_secs());
+    Some((packages, age))
 }
 
 fn save_disk_cache(packages: &[Package]) {
-    let Some(path) = disk_cache_path() else {
-        return;
-    };
-    if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            warn!("Failed to create cache dir {}: {e}", parent.display());
-            return;
-        }
-    }
-    match serde_json::to_vec(packages) {
-        Ok(bytes) => {
-            if let Err(e) = std::fs::write(&path, bytes) {
-                warn!("Failed to write on-disk package cache: {e}");
-            }
-        }
-        Err(e) => warn!("Failed to serialize package cache: {e}"),
-    }
+    package_store().store(&packages.to_vec());
 }
 
 #[derive(Clone, Copy, Default)]
@@ -140,11 +118,18 @@ impl MultiProvider {
         pwa: pwa::PwaProvider,
     ) -> Arc<Self> {
         // pre-seed the cache from disk (if any) so the very first search
-        // after startup doesn't have to wait for a live provider fetch;
-        // treated as fresh (full TTL) since the background warm-up spawned
-        // by the caller unconditionally runs a real fetch shortly after and
-        // will overwrite this with live data regardless
-        let seeded = load_disk_cache().map(|packages| (Instant::now(), packages));
+        // after startup doesn't have to wait for a live provider fetch; an
+        // entry still within the TTL is seeded fresh, an older one is seeded
+        // already-stale so a background refresh triggers on first access
+        // instead of trusting possibly-days-old data for the full TTL
+        let seeded = load_disk_cache().map(|(packages, age)| {
+            let cached_at = if age < PACKAGE_CACHE_TTL {
+                Instant::now()
+            } else {
+                Instant::now() - PACKAGE_CACHE_TTL
+            };
+            (cached_at, packages)
+        });
 
         Arc::new_cyclic(|weak| Self {
             native: Arc::new(native),
@@ -161,7 +146,7 @@ impl MultiProvider {
     fn trigger_background_refresh(&self) {
         let Some(strong) = self.self_weak.upgrade() else { return };
         let Ok(guard) = Arc::clone(&self.fetch_lock).try_lock_owned() else { return };
-        tokio::spawn(async move {
+        spawn(async move {
             let _ = strong.fetch_and_store().await;
             drop(guard);
         });
@@ -200,11 +185,16 @@ impl MultiProvider {
             bounded("pwa", PROVIDER_FETCH_TIMEOUT, self.pwa.search("")),
         );
         let complete = flatpak.1 && native.1 && lutris.1 && appimage.1 && pwa.1;
-        let mut packages = flatpak.0;
-        packages.extend(native.0);
-        packages.extend(lutris.0);
-        packages.extend(appimage.0);
-        packages.extend(pwa.0);
+        let previous = self.package_cache.read().await.as_ref().map(|(_, p)| p.clone()).unwrap_or_default();
+        let keep_previous = |provider: Provider| -> Vec<Package> {
+            previous.iter().filter(|p| p.provider == provider).cloned().collect()
+        };
+
+        let mut packages = if flatpak.1 { flatpak.0 } else { keep_previous(Provider::Flatpak) };
+        packages.extend(if native.1 { native.0 } else { keep_previous(Provider::Distrobox) });
+        packages.extend(if lutris.1 { lutris.0 } else { keep_previous(Provider::Lutris) });
+        packages.extend(if appimage.1 { appimage.0 } else { keep_previous(Provider::AppImage) });
+        packages.extend(if pwa.1 { pwa.0 } else { keep_previous(Provider::Pwa) });
         {
             let mut cache = self.package_cache.write().await;
             // if a provider timed out, keep this result around only briefly so
@@ -221,13 +211,24 @@ impl MultiProvider {
         if complete {
             // persist off the async path; this is plain blocking file I/O
             let to_persist = packages.clone();
-            tokio::task::spawn_blocking(move || save_disk_cache(&to_persist));
+            spawn_blocking(move || save_disk_cache(&to_persist));
         }
         Ok(packages)
     }
 
     pub async fn refresh_cache(&self) -> Result<(), ArcError> {
         self.fetch_and_store().await.map(|_| ())
+    }
+
+    // true if the disk-seeded cache is still within its TTL, i.e. a live
+    // provider fetch (flatpak list, distrobox enter per container, ...)
+    // isn't actually needed right now
+    pub async fn cache_is_fresh(&self) -> bool {
+        self.package_cache
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|(cached_at, _)| cached_at.elapsed() < PACKAGE_CACHE_TTL)
     }
 
     pub async fn invalidate_package_cache(&self) {
@@ -265,7 +266,7 @@ impl MultiProvider {
         } else if Self::is_flatpak_id(package_id) {
             let gio_cancel = libflatpak::gio::Cancellable::new();
             let gio_cancel_bridge = gio_cancel.clone();
-            let bridge = tokio::spawn(async move {
+            let bridge = spawn(async move {
                 cancel_token.cancelled().await;
                 gio_cancel_bridge.cancel();
             });
@@ -292,7 +293,7 @@ impl MultiProvider {
     ) -> Result<(), ArcError> {
         let gio_cancel = libflatpak::gio::Cancellable::new();
         let gio_cancel_bridge = gio_cancel.clone();
-        let bridge = tokio::spawn(async move {
+        let bridge = spawn(async move {
             cancel_token.cancelled().await;
             gio_cancel_bridge.cancel();
         });
@@ -312,7 +313,7 @@ impl MultiProvider {
     ) -> Result<(), ArcError> {
         let gio_cancel = libflatpak::gio::Cancellable::new();
         let gio_cancel_bridge = gio_cancel.clone();
-        let bridge = tokio::spawn(async move {
+        let bridge = spawn(async move {
             cancel_token.cancelled().await;
             gio_cancel_bridge.cancel();
         });
@@ -338,7 +339,7 @@ impl MultiProvider {
         } else if Self::is_flatpak_id(package_id) {
             let gio_cancel = libflatpak::gio::Cancellable::new();
             let gio_cancel_bridge = gio_cancel.clone();
-            let bridge = tokio::spawn(async move {
+            let bridge = spawn(async move {
                 cancel_token.cancelled().await;
                 gio_cancel_bridge.cancel();
             });

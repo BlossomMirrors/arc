@@ -8,14 +8,14 @@ import org.kde.kirigami as Kirigami
 Item {
     id: root
 
+    implicitHeight: Math.max(300, Window.height * 0.5)
+
     property var items: []
 
     signal storyActivated(int storyIndex)
     signal appActivated(string pkgId)
 
     property int currentIndex: 0
-
-    implicitHeight: 400
 
     onItemsChanged: currentIndex = 0
 
@@ -32,20 +32,11 @@ Item {
 
     Item {
         id: content
-        anchors.fill: parent
-
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            maskEnabled: true
-            maskSource: maskShape
-            maskThresholdMin: 0.5
-            maskSpreadAtMin: 1.0
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            color: Kirigami.Theme.alternateBackgroundColor
-        }
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: indicatorBackground.top
+        anchors.bottomMargin: Kirigami.Units.largeSpacing
 
         Repeater {
             model: root.items
@@ -59,7 +50,10 @@ Item {
                 anchors.fill: parent
                 opacity: index === root.currentIndex ? 1 : 0
                 Behavior on opacity {
-                    NumberAnimation { duration: 400; easing.type: Easing.InOutQuad }
+                    NumberAnimation {
+                        duration: 400
+                        easing.type: Easing.InOutQuad
+                    }
                 }
 
                 Image {
@@ -70,15 +64,6 @@ Item {
                     visible: slide.modelData.is_story && slide.modelData.banner_url.length > 0
                 }
 
-                Rectangle {
-                    anchors.fill: parent
-                    visible: !slide.modelData.is_story || slide.modelData.banner_url.length === 0
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Qt.darker(Kirigami.Theme.highlightColor, 1.8) }
-                        GradientStop { position: 1.0; color: Qt.darker(Kirigami.Theme.highlightColor, 3.2) }
-                    }
-                }
-
                 Kirigami.Icon {
                     visible: !slide.modelData.is_story && slide.modelData.icon_url.length > 0
                     source: slide.modelData.icon_url
@@ -86,17 +71,6 @@ Item {
                     height: 120
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: 60
-                }
-
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    height: 180
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: "transparent" }
-                        GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.88) }
-                    }
                 }
 
                 Column {
@@ -131,9 +105,7 @@ Item {
 
                 TapHandler {
                     enabled: slide.index === root.currentIndex
-                    onTapped: slide.modelData.is_story
-                        ? root.storyActivated(slide.modelData.story_index)
-                        : root.appActivated(slide.modelData.id)
+                    onTapped: slide.modelData.is_story ? root.storyActivated(slide.modelData.story_index) : root.appActivated(slide.modelData.id)
                 }
             }
         }
@@ -149,49 +121,51 @@ Item {
             radius: 16
         }
     }
+    Rectangle {
+        id: indicatorBackground
+        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.inherit: false
 
-    Controls.RoundButton {
-        visible: root.items.length > 1
-        enabled: root.currentIndex > 0
-        anchors.left: parent.left
-        anchors.leftMargin: 16
-        anchors.verticalCenter: parent.verticalCenter
-        icon.name: "go-previous-symbolic"
-        onClicked: root.currentIndex -= 1
-    }
+        implicitWidth: dots.implicitWidth + Kirigami.Units.largeSpacing
+        implicitHeight: dots.implicitHeight + Kirigami.Units.smallSpacing * 2
+        radius: height / 2
 
-    Controls.RoundButton {
-        visible: root.items.length > 1
-        enabled: root.currentIndex < root.items.length - 1
-        anchors.right: parent.right
-        anchors.rightMargin: 16
-        anchors.verticalCenter: parent.verticalCenter
-        icon.name: "go-next-symbolic"
-        onClicked: root.currentIndex += 1
-    }
-
-    Row {
-        visible: root.items.length > 1
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 12
-        spacing: 6
 
-        Repeater {
-            model: root.items.length
+        color: Qt.alpha(Kirigami.Theme.alternateBackgroundColor, 0.6)
 
-            delegate: Rectangle {
-                id: dot
-                required property int index
-                width: index === root.currentIndex ? 20 : 6
-                height: 6
-                radius: 3
-                color: index === root.currentIndex ? "white" : Qt.rgba(1, 1, 1, 0.33)
-                Behavior on width {
-                    NumberAnimation { duration: 200; easing.type: Easing.InOutQuad }
-                }
-                TapHandler {
-                    onTapped: root.currentIndex = dot.index
+        Row {
+            id: dots
+            anchors.centerIn: parent
+            spacing: Kirigami.Units.smallSpacing
+
+            Repeater {
+                model: root.items.length
+
+                delegate: Rectangle {
+                    id: dot
+                    required property int index
+                    width: index === root.currentIndex ? 30 : 8
+                    height: 8
+                    radius: 5
+                    color: index === root.currentIndex ? "white" : Qt.rgba(1, 1, 1, 0.33)
+                    Behavior on width {
+                        NumberAnimation {
+                            duration: 200
+                            easing.type: Easing.InOutQuad
+                        }
+                    }
+                    TapHandler {
+                        enabled: dot.index !== root.currentIndex
+                        margin: Kirigami.Units.smallSpacing * 2
+                        onTapped: root.currentIndex = dot.index
+                    }
+                    HoverHandler {
+                        enabled: dot.index !== root.currentIndex
+                        margin: Kirigami.Units.smallSpacing * 2
+                        cursorShape: Qt.PointingHandCursor
+                    }
                 }
             }
         }

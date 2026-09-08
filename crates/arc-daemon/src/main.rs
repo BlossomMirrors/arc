@@ -4,11 +4,16 @@ mod dbus_interface;
 mod forge_cache;
 mod http_api;
 mod kio;
+mod launcher_progress;
+mod media;
 mod providers;
 mod transaction_manager;
-mod cache;
 
 use anyhow::Result;
+use std::env;
+use std::fs;
+use tokio::spawn;
+use tokio::task::spawn_blocking;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -33,7 +38,7 @@ async fn main() {
     // have left to run. All our real cleanup (cancelling transactions)
     // already happened inside run(), so skip Rust's normal exit() (which
     // waits for the runtime and runs atexit handlers) and terminate via the
-    // raw syscall instead — a daemon replaced early in its life should die
+    // raw syscall instead. a daemon replaced early in its life should die
     // immediately, not linger.
     unsafe { libc::_exit(code) };
 }
@@ -42,7 +47,7 @@ async fn main() {
 // a stale one instead of racing it for the http port
 fn terminate_stale_daemons() {
     let self_pid = std::process::id();
-    let Ok(entries) = std::fs::read_dir("/proc") else {
+    let Ok(entries) = fs::read_dir("/proc") else {
         return;
     };
     for entry in entries.flatten() {
@@ -52,7 +57,7 @@ fn terminate_stale_daemons() {
         if pid == self_pid {
             continue;
         }
-        let comm = std::fs::read_to_string(entry.path().join("comm")).unwrap_or_default();
+        let comm = fs::read_to_string(entry.path().join("comm")).unwrap_or_default();
         if comm.trim() == "arc-daemon" {
             info!("Terminating stale daemon pid {pid}");
             let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
@@ -79,15 +84,15 @@ async fn run() -> Result<()> {
 
     // ARC_HTTP_ONLY runs without a session bus (e.g. in a container), so it
     // can't claim the D-Bus name and doesn't need to replace anything.
-    let bus_claim = if std::env::var_os("ARC_HTTP_ONLY").is_none() {
+    let bus_claim = if env::var_os("ARC_HTTP_ONLY").is_none() {
         Some(daemon::claim_bus_name().await?)
     } else {
         None
     };
 
     info!("Loading appstream database in the background...");
-    tokio::spawn(async {
-        tokio::task::spawn_blocking(appstream_db::AppStreamDb::get)
+    spawn(async {
+        spawn_blocking(appstream_db::AppStreamDb::get)
             .await
             .ok();
         info!("Appstream database ready");
@@ -98,7 +103,7 @@ async fn run() -> Result<()> {
         // a loaded snapshot older than the live catalog files still answers
         // instantly so this catches it up once in the background
         if appstream_db::AppStreamDb::snapshot_was_stale() {
-            tokio::task::spawn_blocking(appstream_db::AppStreamDb::refresh_if_stale)
+            spawn_blocking(appstream_db::AppStreamDb::refresh_if_stale)
                 .await
                 .ok();
             forge_cache::refresh().await;
@@ -106,16 +111,17 @@ async fn run() -> Result<()> {
 
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
-            tokio::task::spawn_blocking(appstream_db::AppStreamDb::refresh_if_stale)
+            spawn_blocking(appstream_db::AppStreamDb::refresh_if_stale)
                 .await
                 .ok();
             forge_cache::refresh().await;
+            spawn_blocking(media::sweep).await.ok();
         }
     });
 
     // Allow overriding the bind host via env var so the HTTP API is reachable
     // when running inside a container (set ARC_HTTP_HOST=0.0.0.0).
-    let bind_host = std::env::var("ARC_HTTP_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let bind_host = env::var("ARC_HTTP_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let addr: std::net::SocketAddr = format!("{bind_host}:{HTTP_PORT}").parse()?;
     // claiming the D-Bus name only reassigns ownership at the broker; an old
     // instance still has to notice NameLost and actually exit before it lets
@@ -142,7 +148,7 @@ async fn run() -> Result<()> {
         })?
     };
     info!("HTTP API listening on http://{}", addr);
-    tokio::spawn(async move {
+    spawn(async move {
         if let Err(e) = axum::serve(listener, http_api::router()).await {
             tracing::error!("HTTP API error: {}", e);
         }
@@ -150,7 +156,7 @@ async fn run() -> Result<()> {
 
     // ARC_HTTP_ONLY=1 skips the D-Bus daemon (useful in containers where no
     // session bus is available) and keeps the process alive serving only HTTP.
-    if std::env::var_os("ARC_HTTP_ONLY").is_some() {
+    if env::var_os("ARC_HTTP_ONLY").is_some() {
         info!("Running in HTTP-only mode (no D-Bus)");
         tokio::signal::ctrl_c().await?;
         return Ok(());

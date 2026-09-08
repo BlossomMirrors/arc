@@ -1,17 +1,15 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls as Controls
 import org.kde.kirigami as Kirigami
 
-// Horizontally-scrolling row of cards. Built on Repeater + Flickable rather
-// than ListView: ListView bound directly to a plain JS array (JSON.parse'd
-// model data, as opposed to a real QAbstractListModel) rendered nothing here
-// despite the underlying data being correct, while this Repeater-based
-// approach (the same pattern HeroCarousel already uses successfully) does.
 Item {
     id: root
 
     property alias model: repeater.model
-    property alias delegate: repeater.delegate
+    property Component delegate
+    property real cardWidth: Kirigami.Units.gridUnit * 10
     property real spacing: Kirigami.Units.largeSpacing * 2
     readonly property int count: repeater.count
 
@@ -37,6 +35,30 @@ Item {
 
             Repeater {
                 id: repeater
+
+                delegate: Item {
+                    id: slot
+
+                    required property var modelData
+                    required property int index
+
+                    width: root.cardWidth
+                    height: row.height
+
+                    readonly property real slotX: index * (root.cardWidth + root.spacing)
+                    readonly property bool inView: slot.slotX + root.cardWidth > flick.contentX - root.cardWidth
+                        && slot.slotX < flick.contentX + flick.width + root.cardWidth
+
+                    Loader {
+                        anchors.fill: parent
+                        active: slot.inView
+                        sourceComponent: root.delegate
+                        onLoaded: {
+                            item.modelData = slot.modelData;
+                            item.index = slot.index;
+                        }
+                    }
+                }
             }
         }
     }

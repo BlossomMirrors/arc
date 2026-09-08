@@ -7,6 +7,7 @@ use axum::{
 };
 use serde::Deserialize;
 use std::sync::OnceLock;
+use tokio::task::spawn_blocking;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::appstream_db::{
@@ -52,7 +53,7 @@ pub fn router() -> Router {
 }
 
 // ---------------------------------------------------------------------------
-// Shared lang param — present on every endpoint
+// Shared lang param present on every endpoint
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize, Default)]
@@ -114,6 +115,7 @@ struct AppParams {
 #[derive(Deserialize)]
 struct ImageParams {
     url: String,
+    w: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -127,7 +129,7 @@ async fn search(Query(p): Query<SearchParams>) -> impl IntoResponse {
     let flatpak_results: Vec<(AppStreamEntry, u32)> = {
         let q = p.q.clone();
         let q_lower = q_lower.clone();
-        tokio::task::spawn_blocking(move || {
+        spawn_blocking(move || {
             AppStreamDb::get()
                 .search_apps_with_locales(&q, &locales)
                 .into_iter()
@@ -143,11 +145,17 @@ async fn search(Query(p): Query<SearchParams>) -> impl IntoResponse {
 
     let mut merged: Vec<(serde_json::Value, u32)> = flatpak_results
         .into_iter()
-        .map(|(entry, score)| (serde_json::to_value(&entry).unwrap_or_default(), score))
+        .map(|(mut entry, score)| {
+            crate::media::proxy_icon_url_field(&mut entry.icon_url, &entry.id);
+            crate::media::proxy_screenshot_urls(&mut entry.screenshots);
+            (serde_json::to_value(&entry).unwrap_or_default(), score)
+        })
         .collect();
 
-    for pkg in pwa_packages.unwrap_or_default().into_iter().chain(lutris_packages.unwrap_or_default()) {
+    for mut pkg in pwa_packages.unwrap_or_default().into_iter().chain(lutris_packages.unwrap_or_default()) {
         if let Some(score) = score_package(&pkg, &q_lower) {
+            crate::media::proxy_icon_url_field(&mut pkg.icon_url, &pkg.id);
+            crate::media::proxy_screenshot_urls(&mut pkg.screenshots);
             merged.push((serde_json::to_value(&pkg).unwrap_or_default(), score));
         }
     }
@@ -165,9 +173,16 @@ async fn search(Query(p): Query<SearchParams>) -> impl IntoResponse {
     Json(response)
 }
 
+fn proxy_entries(entries: &mut [AppStreamEntry]) {
+    for entry in entries {
+        crate::media::proxy_icon_url_field(&mut entry.icon_url, &entry.id);
+        crate::media::proxy_screenshot_urls(&mut entry.screenshots);
+    }
+}
+
 async fn home(Query(p): Query<HomeParams>) -> impl IntoResponse {
     let locales = p.lang.locales();
-    let (popular, recent) = tokio::task::spawn_blocking(move || {
+    let (mut popular, mut recent) = spawn_blocking(move || {
         let db = AppStreamDb::get();
         (
             db.get_popular_apps_with_locales(p.popular as usize, &locales),
@@ -176,36 +191,47 @@ async fn home(Query(p): Query<HomeParams>) -> impl IntoResponse {
     })
     .await
     .unwrap_or_default();
+    proxy_entries(&mut popular);
+    proxy_entries(&mut recent);
 
     Json(serde_json::json!({ "popular": popular, "recent": recent }))
 }
 
 async fn category(Path(name): Path<String>, Query(p): Query<CategoryParams>) -> impl IntoResponse {
     let locales = p.lang.locales();
-    let results = tokio::task::spawn_blocking(move || {
+    let mut results = spawn_blocking(move || {
         AppStreamDb::get().get_apps_by_category_with_locales(&name, &locales)
     })
     .await
     .unwrap_or_default();
+    proxy_entries(&mut results);
     Json(results)
 }
 
 async fn app_metadata(Path(id): Path<String>, Query(p): Query<AppParams>) -> Response {
     if id.starts_with("pwa:") {
         return match pwa_provider().get_app_info(&id).await {
-            Ok(Some(pkg)) => Json(pkg).into_response(),
+            Ok(Some(mut pkg)) => {
+                crate::media::proxy_icon_url_field(&mut pkg.icon_url, &pkg.id);
+                crate::media::proxy_screenshot_urls(&mut pkg.screenshots);
+                Json(pkg).into_response()
+            }
             _ => StatusCode::NOT_FOUND.into_response(),
         };
     }
     if id.starts_with("lutris:") {
         return match lutris_provider().get_app_info(&id).await {
-            Ok(Some(pkg)) => Json(pkg).into_response(),
+            Ok(Some(mut pkg)) => {
+                crate::media::proxy_icon_url_field(&mut pkg.icon_url, &pkg.id);
+                crate::media::proxy_screenshot_urls(&mut pkg.screenshots);
+                Json(pkg).into_response()
+            }
             _ => StatusCode::NOT_FOUND.into_response(),
         };
     }
 
     let locales = p.lang.locales();
-    let result = tokio::task::spawn_blocking(move || {
+    let result = spawn_blocking(move || {
         let db = AppStreamDb::get();
         db.find_by_id_with_locales(&id, &locales)
             .or_else(|| db.load_from_exported_metainfo_with_locales(&id, &locales))
@@ -214,69 +240,70 @@ async fn app_metadata(Path(id): Path<String>, Query(p): Query<AppParams>) -> Res
     .unwrap_or(None);
 
     match result {
-        Some(entry) => Json(entry).into_response(),
+        Some(mut entry) => {
+            crate::media::proxy_icon_url_field(&mut entry.icon_url, &entry.id);
+            crate::media::proxy_screenshot_urls(&mut entry.screenshots);
+            Json(entry).into_response()
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn app_icon(Path(id): Path<String>) -> Response {
-    if id.starts_with("pwa:") {
-        let icon_url = pwa_provider().get_app_info(&id).await.ok().flatten().and_then(|pkg| pkg.icon_url);
-        return match icon_url {
-            Some(url) if url.starts_with("https://") || url.starts_with("http://") => {
-                fetch_and_forward(&url).await
-            }
-            _ => StatusCode::NOT_FOUND.into_response(),
-        };
-    }
-    if id.starts_with("lutris:") {
-        let icon_url = lutris_provider().get_app_info(&id).await.ok().flatten().and_then(|pkg| pkg.icon_url);
-        return match icon_url {
-            Some(url) if url.starts_with("https://") || url.starts_with("http://") => {
-                fetch_and_forward(&url).await
-            }
-            _ => StatusCode::NOT_FOUND.into_response(),
-        };
-    }
-
-    let id_for_lookup = id.clone();
-    let icon_url = tokio::task::spawn_blocking(move || {
-        AppStreamDb::get()
-            .find_by_id(&id_for_lookup)
-            .and_then(|e| e.icon_url)
-    })
-    .await
-    .unwrap_or(None);
+    let icon_url = if id.starts_with("pwa:") {
+        pwa_provider().get_app_info(&id).await.ok().flatten().and_then(|pkg| pkg.icon_url)
+    } else if id.starts_with("lutris:") {
+        lutris_provider().get_app_info(&id).await.ok().flatten().and_then(|pkg| pkg.icon_url)
+    } else {
+        let id_for_lookup = id.clone();
+        spawn_blocking(move || {
+            AppStreamDb::get().find_by_id(&id_for_lookup).and_then(|e| e.icon_url)
+        })
+        .await
+        .unwrap_or(None)
+    };
 
     let Some(url) = icon_url else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    // Apps without a remote icon URL get a "local:" placeholder (see component_to_entry);
-    // resolve those from the on-disk AppStream/flatpak export caches instead of the network.
-    if url.starts_with("local:") {
-        let bytes = tokio::task::spawn_blocking(move || find_local_flatpak_icon_bytes(&id))
+    match libarc::media::classify(&url) {
+        libarc::media::MediaRef::Remote(u) => {
+            match crate::media::fetch(crate::media::MediaKind::Icon, u, None).await {
+                Some((bytes, content_type)) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
+                None => StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+        libarc::media::MediaRef::Local => {
+            let bytes = spawn_blocking(move || {
+                let (bytes, content_type) = find_local_flatpak_icon_bytes(&id)?;
+                let padded = if content_type == "image/svg+xml" {
+                    libarc::icons::normalize_padding_svg(&bytes)
+                } else {
+                    libarc::icons::normalize_padding(&bytes)
+                };
+                Some(padded.map(|p| (p, "image/png".to_string())).unwrap_or((bytes, content_type)))
+            })
             .await
             .unwrap_or(None);
-        return match bytes {
-            Some((bytes, content_type)) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
+            match bytes {
+                Some((bytes, content_type)) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
+                None => StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+        _ => StatusCode::NOT_FOUND.into_response(),
     }
-
-    if !url.starts_with("https://") && !url.starts_with("http://") {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    fetch_and_forward(&url).await
 }
 
 // Proxy a remote image URL (e.g. screenshots). Only http(s) URLs are accepted.
 async fn proxy_image(Query(p): Query<ImageParams>) -> Response {
-    if !p.url.starts_with("https://") && !p.url.starts_with("http://") {
+    if !matches!(libarc::media::classify(&p.url), libarc::media::MediaRef::Remote(_)) {
         return (StatusCode::BAD_REQUEST, "Only http(s) URLs are supported").into_response();
     }
-    fetch_and_forward(&p.url).await
+    match crate::media::fetch(crate::media::MediaKind::Screenshot, &p.url, p.w).await {
+        Some((bytes, content_type)) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
+        None => StatusCode::BAD_GATEWAY.into_response(),
+    }
 }
 
 async fn forge_top() -> impl IntoResponse {
@@ -318,7 +345,7 @@ async fn forge_icon(Path(id): Path<String>) -> Response {
 }
 
 async fn forge_pwas(Query(p): Query<PwasParams>) -> Response {
-    let url = format!("https://forge.blossomos.org/api/pwas?lang={}", p.lang);
+    let url = format!("{}/api/pwas?lang={}", libarc::FORGE_BASE_URL, p.lang);
     fetch_and_forward(&url).await
 }
 

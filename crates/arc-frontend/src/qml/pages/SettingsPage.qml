@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls as Controls
-import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.formcard as FormCard
 import org.blossomos.arc
@@ -161,6 +160,20 @@ FormCard.FormCardPage {
             text: i18n("Restart daemon")
             description: i18n("Kills the running arc-daemon and starts a fresh one")
             onClicked: restartDaemonDialog.open()
+        }
+
+        FormCard.FormDelegateSeparator {
+            above: restartDelegate
+            below: clearIconCacheDelegate
+        }
+
+        FormCard.FormButtonDelegate {
+            id: clearIconCacheDelegate
+            icon.name: "edit-clear-symbolic"
+            icon.color: Kirigami.Theme.negativeTextColor
+            text: i18n("Clear icon cache")
+            description: i18n("Reprocesses app icons the next time they're shown")
+            onClicked: SettingsController.clearIconCache()
         }
     }
 

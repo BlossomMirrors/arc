@@ -52,10 +52,6 @@ pub struct HomeSection {
     pub link_items: Vec<LinkItem>,
     pub app_cloud_overlay: bool,
     pub categories: Vec<Category>,
-    // true for a stub row whose cards/hero/link items haven't resolved yet
-    // (still needs one or more app_info lookups) — false for rows that
-    // never needed resolution (headings, categories, ...) and for rows
-    // that have since been filled in by resolve_pending_section
     pub loading: bool,
 }
 
@@ -77,28 +73,15 @@ impl Default for HomeSection {
     }
 }
 
-// each pending row's stories are numbered starting at row_index * STORY_INDEX_STRIDE
-// so ids stay globally unique without needing a running offset computed in
-// document order — that would force resolving every row sequentially,
-// exactly what this whole module exists to avoid. Generous headroom for
-// how many stories a single carousel/links section could plausibly hold.
 const STORY_INDEX_STRIDE: i32 = 1000;
 
-// mirrors bridge/models.rs's DAEMON_STARTUP_TIMEOUT (same underlying race,
-// different call site — not worth sharing one const across a module
-// boundary for a single magic number)
-const DAEMON_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const DAEMON_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
-// everything needed to resolve one pending row's app ids, independent of
-// any other row — sent off to its own concurrent task by the caller
 pub struct PendingSection {
     pub row_index: usize,
     section: FpSection,
 }
 
-// shared, read-only context every pending row's resolution needs; built
-// once in plan_home and handed out as an Arc so spawning one task per
-// pending row doesn't require re-fetching or duplicating any of it
 pub struct HomeCtx {
     proxy: Option<ArcDaemonProxy<'static>>,
     pwa_map: HashMap<String, forge::PwaApp>,
@@ -238,14 +221,6 @@ async fn entries_to_cards(entries: Vec<AppEntry>, installed: &HashSet<String>) -
         .collect()
 }
 
-
-// Phase A: everything knowable from the single frontpage-XML fetch plus the
-// small handful of bulk lookups, with zero per-app resolution. Fast — no
-// section here waits on another. Rows that do need per-app resolution come
-// back as a `loading: true` stub (right type/heading/position, no cards
-// yet) plus a matching PendingSection for the caller to resolve separately
-// (see resolve_pending_section) and patch in whenever it happens to finish,
-// independent of every other row.
 pub async fn plan_home(proxy: Option<ArcDaemonProxy<'static>>) -> (HomePlan, std::sync::Arc<HomeCtx>) {
     let lang = sys_locale::get_locale()
         .unwrap_or_default()
@@ -258,13 +233,6 @@ pub async fn plan_home(proxy: Option<ArcDaemonProxy<'static>>) -> (HomePlan, std
         forge::fetch_frontpage(),
         async {
             if let Some(ref p) = proxy {
-                // the daemon claims its D-Bus name before its object server
-                // is registered (see models.rs's DAEMON_STARTUP_TIMEOUT
-                // comment) — a call landing in that gap gets no reply at
-                // all, so this needs a bound or a cold app launch can hang
-                // here for as long as it takes something else (e.g. the
-                // page's own cold-start retry timer) to happen to unstick
-                // it, rather than Phase A completing in well under a second
                 tokio::time::timeout(DAEMON_STARTUP_TIMEOUT, p.installed_packages())
                     .await
                     .ok()
@@ -358,10 +326,6 @@ pub async fn plan_home(proxy: Option<ArcDaemonProxy<'static>>) -> (HomePlan, std
     (HomePlan { sections, pending }, ctx)
 }
 
-// Phase B: resolves one row's app ids. Completely independent of every
-// other pending row — callers run these concurrently (one per row) and
-// patch each row in place whenever its own future finishes, in whatever
-// order that happens to be.
 pub async fn resolve_pending_section(
     pending: PendingSection,
     ctx: &HomeCtx,

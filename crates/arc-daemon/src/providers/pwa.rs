@@ -1,93 +1,16 @@
-use crate::cache::fetch_icon;
-
 use super::PackageProvider;
 use async_trait::async_trait;
+use libarc::desktop_entry::{quote_exec_arg, DesktopEntry};
 use libarc::{ArcError, Package, Provider};
 use reqwest::Client;
+use std::env;
+use std::fs;
 use std::path::PathBuf;
 use tracing::{info, warn};
 
-const FORGE_PWAS_BASE: &str = "https://forge.blossomos.org/api/pwas";
-
-
-fn escape_desktop_value(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('\n', "\\n")
-        .replace('\t', "\\t")
-        .replace('\r', "\\r")
-}
-
-// sanatize exec args
-fn quote_exec_arg(value: &str) -> String {
-    const RESERVED: &[char; 19] = &[
-        ' ', '\t', '\n', '"', '\'', '\\', '>', '<', '~', '|', '&', ';', '$', '*', '?', '#', '(',
-        ')', '`',
-    ];
-    if !value.contains(RESERVED) {
-        return value.to_string();
-    }
-    let mut quoted = String::with_capacity(value.len() + 2);
-    quoted.push('"');
-    for c in value.chars() {
-        if matches!(c, '"' | '`' | '$' | '\\') {
-            quoted.push('\\');
-        }
-        quoted.push(c);
-    }
-    quoted.push('"');
-    quoted
-}
-
-const ICON_SIZE: u32 = 240;
-const CORNER_RADIUS: u32 = 45; // 45/240 ≈ 18.75%
-
-/// Decode a raster image from `bytes`, resize to ICON_SIZE×ICON_SIZE, punch out
-/// the four corners with radius CORNER_RADIUS, and re-encode as PNG.
-/// Returns None if the bytes aren't a recognised image format.
-fn round_pwa_icon(bytes: &[u8]) -> Option<Vec<u8>> {
-    let img = image::load_from_memory(bytes).ok()?;
-    let img = img.resize_exact(ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3);
-    let mut rgba = img.into_rgba8();
-
-    let r = CORNER_RADIUS as i64;
-    let s = ICON_SIZE as i64;
-    let r2 = r * r;
-
-    for y in 0..s {
-        for x in 0..s {
-            // Distance from the nearest corner centre along each axis.
-            // Non-zero only when the pixel is within the corner band.
-            let dx = if x < r {
-                r - x
-            } else if x >= s - r {
-                x - (s - r - 1)
-            } else {
-                0
-            };
-            let dy = if y < r {
-                r - y
-            } else if y >= s - r {
-                y - (s - r - 1)
-            } else {
-                0
-            };
-            if dx > 0 && dy > 0 && dx * dx + dy * dy > r2 {
-                rgba.get_pixel_mut(x as u32, y as u32)[3] = 0;
-            }
-        }
-    }
-
-    let mut out = std::io::Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgba8(rgba)
-        .write_to(&mut out, image::ImageFormat::Png)
-        .ok()?;
-    Some(out.into_inner())
-}
-
 fn detect_lang() -> String {
     for var in ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"] {
-        if let Ok(val) = std::env::var(var) {
+        if let Ok(val) = env::var(var) {
             let lang = val.split(['.', '_', '-']).next().unwrap_or("").to_string();
             if !lang.is_empty() && lang != "C" && lang != "POSIX" {
                 return lang;
@@ -132,18 +55,23 @@ struct ForgePwa {
 
 pub struct PwaProvider {
     desktop_dir: PathBuf,
-    icons_dir: PathBuf,
+    hicolor_dir: PathBuf,
     http: Client,
 }
 
 impl PwaProvider {
     pub fn new() -> Self {
-        let home = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()));
+        let home = PathBuf::from(env::var("HOME").unwrap_or_else(|_| "/root".to_string()));
         Self {
             desktop_dir: home.join(".local/share/applications"),
-            icons_dir: home.join(".local/share/icons/hicolor/256x256/apps"),
+            hicolor_dir: home.join(".local/share/icons/hicolor"),
             http: Client::new(),
         }
+    }
+
+    fn icon_theme_path(&self, appid: &str, ext: &str) -> PathBuf {
+        let size_dir = if ext == "svg" || ext == "svgz" { "scalable" } else { "256x256" };
+        self.hicolor_dir.join(size_dir).join("apps").join(format!("arc-pwa-{}.{}", appid, ext))
     }
 
     fn strip_prefix(id: &str) -> &str {
@@ -159,7 +87,7 @@ impl PwaProvider {
     }
 
     async fn fetch_pwas(&self) -> Vec<ForgePwa> {
-        let url = format!("{}?lang={}", FORGE_PWAS_BASE, detect_lang());
+        let url = format!("{}/api/pwas?lang={}", libarc::FORGE_BASE_URL, detect_lang());
         match self
             .http
             .get(&url)
@@ -194,39 +122,27 @@ impl PwaProvider {
         }
     }
 
-    async fn download_icon(&self, appid: &str, icon_url: &str) -> (String, String) {
+    async fn download_icon(&self, appid: &str, icon_url: &str) -> String {
         let is_svg = icon_url.contains(".svg");
-        let ext = if is_svg { "svg" } else { "png" };
         let icon_name = format!("arc-pwa-{}", appid);
-        let icon_path = self.icons_dir.join(format!("{}.{}", icon_name, ext));
-        let icon_path_str = icon_path.to_string_lossy().to_string();
 
-        if let Err(e) = std::fs::create_dir_all(&self.icons_dir) {
-            warn!("Could not create icons dir: {}", e);
-            return (icon_name, icon_path_str);
-        }
-
-        if let Some((bytes, _content_type)) = fetch_icon(&self.http, appid, icon_url).await {
-            let to_write: Vec<u8> = if is_svg {
-                bytes
-            } else {
-                round_pwa_icon(&bytes).unwrap_or_else(|| bytes.to_vec())
-            };
-            if let Err(e) = std::fs::write(&icon_path, &to_write) {
-                warn!("Could not write icon: {}", e);
+        match crate::media::fetch_raw(icon_url).await {
+            Some((bytes, _content_type)) => {
+                if libarc::icons::install_icon(&icon_name, &bytes, is_svg).is_none() {
+                    warn!("Could not write icon for {}", appid);
+                }
             }
-        } else {
-            warn!("Could not download icon for {}", appid)
+            None => warn!("Could not download icon for {}", appid),
         }
 
-        (icon_name, icon_path_str)
+        icon_name
     }
 
-    /// Return a file:// URI for the locally cached (rounded) icon, if one has
-    /// already been downloaded for this appid.
+    /// Return a file:// URI for the locally cached icon, if one has already
+    /// been downloaded for this appid.
     fn local_icon_uri(&self, appid: &str) -> Option<String> {
         for ext in ["png", "svg", "webp"] {
-            let path = self.icons_dir.join(format!("arc-pwa-{}.{}", appid, ext));
+            let path = self.icon_theme_path(appid, ext);
             if path.exists() {
                 return Some(format!("file://{}", path.to_string_lossy()));
             }
@@ -271,32 +187,19 @@ impl PwaProvider {
     }
 
     fn write_desktop(&self, pwa: &ForgePwa, icon_name: &str) -> Result<(), ArcError> {
-        std::fs::create_dir_all(&self.desktop_dir)?;
+        fs::create_dir_all(&self.desktop_dir)?;
 
-        let comment = pwa.summary.replace('\n', " ");
-        let exec = self.build_exec(pwa);
-        let content = format!(
-            "[Desktop Entry]\nVersion=1.0\nType=Application\nName={name}\nComment={comment}\nExec={exec}\nIcon={icon}\nCategories=Network;WebApplication;\nStartupNotify=true\nStartupWMClass={appid}",
-            name = escape_desktop_value(&pwa.name),
-            comment = escape_desktop_value(&comment),
-            exec = escape_desktop_value(&exec),
-            icon = escape_desktop_value(icon_name),
-            appid = escape_desktop_value(&pwa.appid)
-        );
-
-        let path = self.desktop_path(&pwa.appid);
-        std::fs::write(&path, &content)?;
-
-        // mark executable
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = std::fs::metadata(&path) {
-                let mut perms = meta.permissions();
-                perms.set_mode(0o755);
-                let _ = std::fs::set_permissions(&path, perms);
-            }
-        }
+        let entry = DesktopEntry {
+            name: pwa.name.clone(),
+            comment: pwa.summary.clone(),
+            exec: self.build_exec(pwa),
+            icon: icon_name.to_string(),
+            categories: "Network;WebApplication;".to_string(),
+            start_notify: true,
+            startup_wm_class: Some(pwa.appid.clone()),
+            ..Default::default()
+        };
+        entry.write(&self.desktop_path(&pwa.appid))?;
 
         Ok(())
     }
@@ -307,6 +210,9 @@ impl PwaProvider {
         let Some(pwa) = pwas.iter().find(|p| p.appid == appid) else {
             return "null".to_string();
         };
+        let screenshots: Vec<String> = pwa.screenshots.iter().map(|url| crate::media::image_proxy_url(url)).collect();
+        let mut icon_url = pwa.icon_url.clone();
+        crate::media::proxy_icon_url_field(&mut icon_url, package_id);
         serde_json::json!({
             "summary": pwa.summary,
             "description": pwa.description,
@@ -315,6 +221,8 @@ impl PwaProvider {
             "homepage_url": pwa.homepage_url,
             "content_rating": pwa.content_rating.as_deref().unwrap_or("All ages"),
             "developer_name": pwa.developer_name,
+            "screenshots": screenshots,
+            "icon_url": icon_url,
         })
         .to_string()
     }
@@ -342,7 +250,7 @@ impl PackageProvider for PwaProvider {
     }
 
     async fn list_installed(&self) -> Result<Vec<Package>, ArcError> {
-        let entries = match std::fs::read_dir(&self.desktop_dir) {
+        let entries = match fs::read_dir(&self.desktop_dir) {
             Ok(e) => e,
             Err(_) => return Ok(vec![]),
         };
@@ -412,8 +320,7 @@ impl PackageProvider for PwaProvider {
             .ok_or_else(|| ArcError::PackageNotFound(appid.to_string()))?;
 
         let icon_name = if let Some(ref url) = pwa.icon_url {
-            let (name, _) = self.download_icon(appid, url).await;
-            name
+            self.download_icon(appid, url).await
         } else {
             format!("arc-pwa-{}", appid)
         };
@@ -427,13 +334,13 @@ impl PackageProvider for PwaProvider {
 
         let desktop = self.desktop_path(appid);
         if desktop.exists() {
-            std::fs::remove_file(&desktop)?;
+            fs::remove_file(&desktop)?;
         }
 
         for ext in ["png", "svg", "webp"] {
-            let icon = self.icons_dir.join(format!("arc-pwa-{}.{}", appid, ext));
+            let icon = self.icon_theme_path(appid, ext);
             if icon.exists() {
-                let _ = std::fs::remove_file(&icon);
+                let _ = fs::remove_file(&icon);
             }
         }
 

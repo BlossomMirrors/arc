@@ -1,4 +1,4 @@
-const FORGE: &str = "https://forge.blossomos.org";
+const FORGE: &str = libarc::FORGE_BASE_URL;
 
 #[derive(serde::Deserialize, Clone)]
 pub struct HomeAppMeta {

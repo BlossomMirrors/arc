@@ -38,14 +38,16 @@ Kirigami.ScrollablePage {
         return i18n("Installing");
     }
 
+    readonly property bool contentReady: !downloadListModel.loading && TransactionsModel.historyLoaded
+
     LoadingOverlay {
-        visible: downloadListModel.loading
+        visible: !root.contentReady
     }
 
     Kirigami.PlaceholderMessage {
         anchors.centerIn: parent
         width: parent.width - Kirigami.Units.gridUnit * 4
-        visible: !downloadListModel.loading
+        visible: root.contentReady
             && TransactionsModel.runningCount === 0
             && TransactionsModel.queuedCount === 0
             && TransactionsModel.doneCount === 0
@@ -141,29 +143,10 @@ Kirigami.ScrollablePage {
                             }
                         }
 
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: Kirigami.Units.gridUnit * 0.7
-                            visible: heroDelegate.progress > 0
-                            radius: height / 2
-                            color: Kirigami.Theme.alternateBackgroundColor
-
-                            Rectangle {
-                                width: parent.width * Math.min(1, heroDelegate.progress)
-                                height: parent.height
-                                radius: parent.radius
-                                color: Kirigami.Theme.highlightColor
-
-                                Behavior on width {
-                                    NumberAnimation { duration: 250; easing.type: Easing.OutQuad }
-                                }
-                            }
-                        }
 
                         ItemProgressBar {
                             Layout.fillWidth: true
-                            visible: heroDelegate.progress <= 0
-                            progress: 0
+                            progress: heroDelegate.progress
                         }
 
                         RowLayout {
@@ -256,7 +239,7 @@ Kirigami.ScrollablePage {
             RowLayout {
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.largeSpacing
-                visible: !downloadListModel.loading
+                visible: root.contentReady
                     && (updatesRepeater.count > 0
                         || TransactionsModel.runningCount > 0
                         || TransactionsModel.queuedCount > 0
@@ -285,7 +268,7 @@ Kirigami.ScrollablePage {
 
             Controls.Label {
                 Layout.fillWidth: true
-                visible: !downloadListModel.loading && updatesRepeater.count === 0
+                visible: root.contentReady && updatesRepeater.count === 0
                     && (TransactionsModel.runningCount > 0
                         || TransactionsModel.queuedCount > 0
                         || TransactionsModel.doneCount > 0)
@@ -325,7 +308,7 @@ Kirigami.ScrollablePage {
                     Timer {
                         interval: 200
                         running: updateRowHover.hovered
-                        onTriggered: DetailController.prefetch(updateDelegate.pkgId)
+                        onTriggered: DetailController.prefetch(updateDelegate.pkgId, Math.round(Kirigami.Units.gridUnit * 14 * 16 / 9 * 2))
                     }
 
                     contentItem: RowLayout {
@@ -420,13 +403,18 @@ Kirigami.ScrollablePage {
                             elide: Text.ElideRight
                         }
 
-                        Controls.Label {
+                        TextEdit {
                             Layout.fillWidth: true
                             text: doneDelegate.failed
                                 ? (doneDelegate.error.length > 0 ? doneDelegate.error : i18n("Failed"))
                                 : ""
                             color: Kirigami.Theme.negativeTextColor
-                            elide: Text.ElideRight
+                            font: Kirigami.Theme.defaultFont
+                            wrapMode: Text.Wrap
+                            readOnly: true
+                            selectByMouse: true
+                            selectionColor: Kirigami.Theme.highlightColor
+                            persistentSelection: true
                         }
 
                         Kirigami.Icon {

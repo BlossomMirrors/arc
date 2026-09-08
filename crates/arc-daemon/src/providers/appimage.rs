@@ -3,17 +3,22 @@ use anvil_appimage::{
     find_icons_in_dir, move_appimage, select_best_icon, set_executable_permissions,
 };
 use async_trait::async_trait;
+use futures_util::future::join_all;
 use futures_util::StreamExt;
+use libarc::desktop_entry::{quote_exec_arg, DesktopEntry};
 use libarc::{ArcError, Package, Provider};
 use notify::{
     event::{AccessKind, AccessMode},
     Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
 use reqwest::Client;
+use std::env;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+use tokio::spawn;
+use tokio::task::spawn_blocking;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -36,7 +41,7 @@ struct AppImageMeta {
 
 impl AppImageProvider {
     pub fn new() -> Self {
-        let home = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()));
+        let home = PathBuf::from(env::var("HOME").unwrap_or_else(|_| "/root".to_string()));
         Self {
             appimages_dir: home.join(".appimages"),
             desktop_dir: home.join(".local/share/applications"),
@@ -60,24 +65,12 @@ impl AppImageProvider {
     }
 
     async fn install_icon_to_hicolor(&self, stem: &str, icon_src: &Path) -> Option<String> {
-        let ext = icon_src
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("png")
-            .to_string();
-        let dest = self.hicolor_icon_path(stem, &ext);
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).await.ok()?;
-        }
-        fs::copy(icon_src, &dest).await.ok()?;
-        let hicolor_root = self.home.join(".local/share/icons/hicolor");
-        let _ = Command::new("gtk-update-icon-cache")
-            .arg("-f")
-            .arg("-t")
-            .arg(&hicolor_root)
-            .status()
-            .await;
-        Some(format!("arc-appimage-{}", stem))
+        let ext = icon_src.extension().and_then(|e| e.to_str()).unwrap_or("png");
+        let is_svg = ext == "svg" || ext == "svgz";
+        let bytes = fs::read(icon_src).await.ok()?;
+        let icon_name = format!("arc-appimage-{}", stem);
+        libarc::icons::install_icon(&icon_name, &bytes, is_svg)?;
+        Some(icon_name)
     }
 
     fn info_file(&self, stem: &str) -> PathBuf {
@@ -131,12 +124,12 @@ impl AppImageProvider {
         // spec and works without FUSE/extraction.
         let p = path.to_path_buf();
         let elf_update_info =
-            tokio::task::spawn_blocking(move || read_upd_info_from_elf(&p).unwrap_or_default())
+            spawn_blocking(move || read_upd_info_from_elf(&p).unwrap_or_default())
                 .await
                 .unwrap_or_default();
 
         let extract_dir =
-            std::env::temp_dir().join(format!("arc-appimage-{}", Uuid::new_v4().simple()));
+            env::temp_dir().join(format!("arc-appimage-{}", Uuid::new_v4().simple()));
 
         if fs::create_dir_all(&extract_dir).await.is_err() {
             let mut meta = AppImageMeta::default_from_path(path);
@@ -145,7 +138,7 @@ impl AppImageProvider {
         }
 
         let path_for_extract = path.to_path_buf();
-        tokio::task::spawn_blocking(move || {
+        spawn_blocking(move || {
             set_executable_permissions(&path_for_extract, false);
         })
         .await
@@ -181,7 +174,7 @@ impl AppImageProvider {
                     .extension()
                     .and_then(|e| e.to_str())
                     .unwrap_or("png");
-                let icon_tmp = std::env::temp_dir().join(format!(
+                let icon_tmp = env::temp_dir().join(format!(
                     "arc-icon-{}.{}",
                     Uuid::new_v4().simple(),
                     ext
@@ -225,7 +218,7 @@ impl AppImageProvider {
             .filter(|s| !s.is_empty() && !s.contains('/'));
 
         let sq = squashfs.to_path_buf();
-        meta.icon_path = tokio::task::spawn_blocking(move || {
+        meta.icon_path = spawn_blocking(move || {
             if let Some(ref name) = icon_name {
                 if let Some(path) = find_named_icon(&sq, name) {
                     return Some(path);
@@ -331,7 +324,7 @@ impl AppImageProvider {
 
         // make executable using anvil-appimage
         let path_for_perms = path.to_path_buf();
-        tokio::task::spawn_blocking(move || {
+        spawn_blocking(move || {
             set_executable_permissions(&path_for_perms, false);
         })
         .await
@@ -374,32 +367,26 @@ impl AppImageProvider {
             .unwrap_or_else(|| "application-x-executable".to_string());
 
         // write .desktop file
-        let desktop = format!(
-            "[Desktop Entry]\n\
-             Type=Application\n\
-             Name={}\n\
-             Comment={}\n\
-             Exec={}\n\
-             Icon={}\n\
-             Categories={}\n\
-             Version={}\n\
-             X-AppImage-Path={}\n\
-             X-AppImage-Update-Information={}\n",
-            meta.name,
-            meta.description,
-            path.display(),
-            icon_str,
-            if meta.categories.is_empty() {
-                "Utility;"
-            } else {
-                &meta.categories
-            },
-            meta.version,
-            path.display(),
-            meta.update_info,
-        );
-        fs::write(self.desktop_file(stem), &desktop)
-            .await
+        let categories = if meta.categories.is_empty() {
+            "Utility;".to_string()
+        } else {
+            meta.categories.clone()
+        };
+        let entry = DesktopEntry {
+            name: meta.name.clone(),
+            comment: meta.description.clone(),
+            exec: quote_exec_arg(&path.display().to_string()),
+            icon: icon_str,
+            categories,
+            version: meta.version.clone(),
+            extra: vec![
+                ("X-AppImage-Path".to_string(), path.display().to_string()),
+                ("X-AppImage-Update-Information".to_string(), meta.update_info.clone()),
+            ],
+            ..Default::default()
+        };
+        entry
+            .write(&self.desktop_file(stem))
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
 
         // write .info file, ICON_PATH lets the frontend and cleanup find the icon
@@ -477,7 +464,7 @@ impl AppImageProvider {
         })?;
         watcher.watch(&appimages_dir, RecursiveMode::NonRecursive)?;
 
-        tokio::spawn(async move {
+        spawn(async move {
             while let Some(res) = rx.recv().await {
                 match res {
                     Ok(event) => {
@@ -767,7 +754,7 @@ fn parse_info(content: &str) -> Option<Package> {
         icon_url: if icon_path.is_empty() {
             None
         } else {
-            Some(icon_path)
+            Some(libarc::media::normalize_local_ref(&icon_path))
         },
         remote: None,
         screenshots: vec![],
@@ -825,7 +812,7 @@ impl PackageProvider for AppImageProvider {
         let src_str = src.to_str().unwrap_or("").to_string();
         let dest_path = dest.clone();
         let file_name = dest.file_name().unwrap_or_default().to_os_string();
-        let moved = tokio::task::spawn_blocking(move || {
+        let moved = spawn_blocking(move || {
             move_appimage(&src_str, &dest_path, &file_name, false)
         })
         .await
@@ -878,7 +865,7 @@ impl PackageProvider for AppImageProvider {
                 stored_update_info
             } else {
                 let p = appimage_path.clone();
-                tokio::task::spawn_blocking(move || read_upd_info_from_elf(&p).unwrap_or_default())
+                spawn_blocking(move || read_upd_info_from_elf(&p).unwrap_or_default())
                     .await
                     .unwrap_or_default()
             };
@@ -914,8 +901,8 @@ impl PackageProvider for AppImageProvider {
         });
 
         let (known_results, guess_results) = tokio::join!(
-            futures_util::future::join_all(known_futures),
-            futures_util::future::join_all(guess_futures),
+            join_all(known_futures),
+            join_all(guess_futures),
         );
 
         let updates = with_info
@@ -957,7 +944,7 @@ impl PackageProvider for AppImageProvider {
             stored_update_info
         } else {
             let p = appimage_path.clone();
-            tokio::task::spawn_blocking(move || read_upd_info_from_elf(&p).unwrap_or_default())
+            spawn_blocking(move || read_upd_info_from_elf(&p).unwrap_or_default())
                 .await
                 .unwrap_or_default()
         };
@@ -966,7 +953,7 @@ impl PackageProvider for AppImageProvider {
             match github_latest_release(&self.http, &gh.owner, &gh.repo, &gh.asset_glob).await {
                 Some((tag, download_url)) => {
                     info!(
-                        "Downloading {} update from GitHub ({}) — {}",
+                        "Downloading {} update from GitHub ({}) - {}",
                         stem, tag, download_url
                     );
                     download_github_update(&self.http, &download_url, &appimage_path).await?;
@@ -992,7 +979,7 @@ impl PackageProvider for AppImageProvider {
                         github_latest_release(&self.http, &owner, &repo, "*.appimage").await
                     {
                         info!(
-                            "Downloading {} update via GitHub search ({}) — {}",
+                            "Downloading {} update via GitHub search ({}) - {}",
                             stem, tag, dl_url
                         );
                         download_github_update(&self.http, &dl_url, &appimage_path).await?;

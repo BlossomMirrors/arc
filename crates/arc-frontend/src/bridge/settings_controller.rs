@@ -30,6 +30,14 @@ pub mod qobject {
         #[cxx_name = "restartDaemon"]
         fn restart_daemon(self: Pin<&mut SettingsController>);
 
+        #[qinvokable]
+        #[cxx_name = "clearIconCache"]
+        fn clear_icon_cache(self: Pin<&mut SettingsController>);
+
+        #[qinvokable]
+        #[cxx_name = "setFrontendVisible"]
+        fn set_frontend_visible(self: Pin<&mut SettingsController>, visible: bool);
+
         #[qsignal]
         #[cxx_name = "actionFailed"]
         fn action_failed(self: Pin<&mut SettingsController>, message: QString);
@@ -41,6 +49,10 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "daemonReconnected"]
         fn daemon_reconnected(self: Pin<&mut SettingsController>);
+
+        #[qsignal]
+        #[cxx_name = "iconCacheCleared"]
+        fn icon_cache_cleared(self: Pin<&mut SettingsController>);
     }
 
     impl cxx_qt::Threading for SettingsController {}
@@ -50,6 +62,7 @@ use crate::runtime;
 use cxx_qt::{CxxQtThread, Threading};
 use cxx_qt_lib::QString;
 use libarc::{Provider, Settings};
+use std::fs;
 use std::pin::Pin;
 
 #[derive(Default)]
@@ -71,24 +84,19 @@ fn emit_result(qt_thread: &CxxQtThread<qobject::SettingsController>, message: St
     });
 }
 
-// resolves the actual executable path of whatever process is currently
-// running as `arc-daemon` — a dev session (`cargo run -p arc-dev`) runs
-// target/debug/arc-daemon, not the system-installed /usr/bin/arc-daemon a
-// hardcoded path would restart instead, silently leaving the one actually
-// in use untouched (and possibly reviving a stale system install instead)
 fn find_running_arc_daemon_exe() -> Option<std::path::PathBuf> {
-    let entries = std::fs::read_dir("/proc").ok()?;
+    let entries = fs::read_dir("/proc").ok()?;
     for entry in entries.flatten() {
         if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
             continue;
         }
-        let Ok(comm) = std::fs::read_to_string(entry.path().join("comm")) else {
+        let Ok(comm) = fs::read_to_string(entry.path().join("comm")) else {
             continue;
         };
         if comm.trim() != "arc-daemon" {
             continue;
         }
-        if let Ok(exe) = std::fs::read_link(entry.path().join("exe")) {
+        if let Ok(exe) = fs::read_link(entry.path().join("exe")) {
             return Some(exe);
         }
     }
@@ -146,6 +154,14 @@ impl qobject::SettingsController {
         });
     }
 
+    pub fn set_frontend_visible(self: Pin<&mut Self>, visible: bool) {
+        runtime::spawn(async move {
+            if let Some(proxy) = runtime::proxy().await {
+                let _ = proxy.set_frontend_visible(visible).await;
+            }
+        });
+    }
+
     pub fn force_update(mut self: Pin<&mut Self>) {
         let qt_thread = self.as_mut().qt_thread();
         runtime::spawn(async move {
@@ -164,6 +180,22 @@ impl qobject::SettingsController {
                     emit_result(&qt_thread, format!("flatpak update exited with {status}"), false);
                 }
                 Err(e) => emit_result(&qt_thread, format!("Failed to run flatpak update: {e}"), false),
+            }
+        });
+    }
+
+    pub fn clear_icon_cache(mut self: Pin<&mut Self>) {
+        let qt_thread = self.as_mut().qt_thread();
+        runtime::spawn(async move {
+            match crate::services::icons::clear_icon_cache() {
+                Ok(()) => {
+                    crate::bridge::models::invalidate_package_cache();
+                    emit_result(&qt_thread, "Icon cache cleared".into(), true);
+                    let _ = qt_thread.queue(|mut this| {
+                        this.as_mut().icon_cache_cleared();
+                    });
+                }
+                Err(e) => emit_result(&qt_thread, format!("Failed to clear icon cache: {e}"), false),
             }
         });
     }

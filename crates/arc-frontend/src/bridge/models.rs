@@ -165,6 +165,7 @@ pub mod qobject {
         #[qproperty(i32, done_count, cxx_name = "doneCount")]
         // pkgId to progress 0..1 for every pending or running transaction
         #[qproperty(QString, busy_packages_json, cxx_name = "busyPackagesJson")]
+        #[qproperty(bool, history_loaded, cxx_name = "historyLoaded")]
         type TransactionsModel = super::TransactionsModelRust;
 
         #[qinvokable]
@@ -227,7 +228,12 @@ pub mod qobject {
 
         #[qinvokable]
         #[cxx_name = "removePackage"]
-        fn remove_package(self: Pin<&mut TransactionsModel>, pkg_id: QString);
+        fn remove_package(
+            self: Pin<&mut TransactionsModel>,
+            pkg_id: QString,
+            name: QString,
+            icon_url: QString,
+        );
 
         #[qinvokable]
         fn cancel(self: Pin<&mut TransactionsModel>, tx_id: QString);
@@ -337,8 +343,8 @@ pub mod qobject {
         fn refresh(self: Pin<&mut HomeFeedModel>);
 
         // like refresh(), but for a disruptive event (daemon restart) where
-        // the old content shouldn't just sit there silently updating in the
-        // background — clears the page first so the loading state (page
+        // the old content shouldn't just sit there silently updating in the background.
+        // clears the page first so the loading state (page
         // conveyor, then per-row placeholders) is actually visible again
         #[qinvokable]
         fn reload(self: Pin<&mut HomeFeedModel>);
@@ -467,11 +473,13 @@ use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{
     QByteArray, QHash, QHashPair_i32_QByteArray, QList, QModelIndex, QString, QStringList, QVariant,
 };
+use futures_util::future::join_all;
 use futures_util::StreamExt;
 use libarc::{ArcDaemonProxy, Package};
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
+use tokio::task::spawn_blocking;
 
 #[derive(Clone)]
 struct PackageRow {
@@ -536,14 +544,18 @@ static PACKAGE_LIST_QT_THREADS: Mutex<Vec<CxxQtThread<qobject::PackageListModel>
 
 // keyed by "search:<q>" / "installed" / "updates" / "category:<id>",
 // cleared wholesale after any successful transaction
-static PACKAGE_CACHE: OnceLock<Mutex<HashMap<String, Vec<Package>>>> = OnceLock::new();
+static PACKAGE_CACHE: OnceLock<libarc::cache::PersistentMap<Vec<Package>>> = OnceLock::new();
 
-fn package_cache() -> &'static Mutex<HashMap<String, Vec<Package>>> {
-    PACKAGE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn package_cache() -> &'static libarc::cache::PersistentMap<Vec<Package>> {
+    PACKAGE_CACHE.get_or_init(|| {
+        libarc::cache::PersistentMap::new("frontend", "packages.json")
+            .with_entry_ttl(std::time::Duration::from_secs(24 * 3600))
+            .with_capacity_limit(64)
+    })
 }
 
-fn invalidate_package_cache() {
-    package_cache().lock().unwrap().clear();
+pub(crate) fn invalidate_package_cache() {
+    package_cache().clear();
 }
 
 impl qobject::PackageListModel {
@@ -673,15 +685,12 @@ impl qobject::PackageListModel {
         self.as_mut().set_loading(true);
 
         runtime::spawn(async move {
-            let cached = {
-                let guard = package_cache().lock().unwrap();
-                guard.get(&cache_key).cloned()
-            };
+            let cached = package_cache().get(&cache_key);
             let had_cache = cached.is_some();
             if let Some(cached) = cached {
                 let qt = qt_thread.clone();
                 if let Ok(built) =
-                    tokio::task::spawn_blocking(move || rows_and_providers(cached)).await
+                    spawn_blocking(move || rows_and_providers(cached)).await
                 {
                     fill_incrementally(qt, seq, built, false);
                 }
@@ -703,7 +712,7 @@ impl qobject::PackageListModel {
                 }
             };
 
-            let built = tokio::task::spawn_blocking(move || {
+            let built = spawn_blocking(move || {
                 let mut packages = packages;
                 for pkg in &mut packages {
                     pkg.icon_url = Some(crate::services::icons::resolve(
@@ -711,10 +720,7 @@ impl qobject::PackageListModel {
                         pkg.icon_url.as_deref(),
                     ));
                 }
-                package_cache()
-                    .lock()
-                    .unwrap()
-                    .insert(cache_key, packages.clone());
+                package_cache().insert(cache_key, packages.clone());
                 rows_and_providers(packages)
             })
             .await
@@ -921,6 +927,7 @@ fn sync_package_finished(pkg_id: &str, tx_type: &str, success: bool) {
         invalidate_package_cache();
         crate::bridge::detail_controller::sync_installed(pkg_id, !is_remove);
         crate::bridge::detail_controller::refresh_extensions_for_current();
+        sync_home_installed(pkg_id, !is_remove);
         if !is_remove {
             let id = pkg_id.to_string();
             runtime::spawn(async move { crate::services::forge::post_install(id).await });
@@ -944,7 +951,7 @@ fn sync_package_finished(pkg_id: &str, tx_type: &str, success: bool) {
                     return;
                 }
                 let drop_row = success
-                    && ((is_remove && model.mode == ListMode::Installed)
+                    && ((is_remove && matches!(model.mode, ListMode::Installed | ListMode::Updates))
                         || (is_update && model.mode == ListMode::Updates));
 
                 {
@@ -1064,10 +1071,24 @@ pub struct TransactionsModelRust {
     queued_count: i32,
     done_count: i32,
     busy_packages_json: QString,
+    history_loaded: bool,
 }
 
 static QT_THREAD: OnceLock<CxxQtThread<qobject::TransactionsModel>> = OnceLock::new();
 const DAEMON_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+async fn retry_until_daemon_answers<F, Fut>(mut call: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    for _ in 0..5 {
+        if tokio::time::timeout(DAEMON_STARTUP_TIMEOUT, call()).await.unwrap_or(false) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+}
 
 fn has_ongoing(transactions: &[Tx], pkg_id: &str) -> bool {
     transactions
@@ -1077,16 +1098,20 @@ fn has_ongoing(transactions: &[Tx], pkg_id: &str) -> bool {
 
 impl qobject::TransactionsModel {
     pub fn init(mut self: Pin<&mut Self>) {
-        if QT_THREAD.set(self.as_mut().qt_thread()).is_err() {
+        let qt_thread = self.as_mut().qt_thread();
+        if QT_THREAD.set(qt_thread.clone()).is_err() {
             return; // already initialized
         }
 
         runtime::spawn(async move {
             let Some(proxy) = runtime::proxy().await else {
+                let _ = qt_thread.queue(|mut this| this.as_mut().set_history_loaded(true));
                 return;
             };
-            let _ = tokio::time::timeout(DAEMON_STARTUP_TIMEOUT, load_running_transactions(&proxy)).await;
-            let _ = tokio::time::timeout(DAEMON_STARTUP_TIMEOUT, refresh_updates_count(&proxy)).await;
+
+            retry_until_daemon_answers(|| load_running_transactions(&proxy)).await;
+            let _ = qt_thread.queue(|mut this| this.as_mut().set_history_loaded(true));
+            retry_until_daemon_answers(|| refresh_updates_count(&proxy)).await;
 
             loop {
                 run_signal_listener(proxy.clone()).await;
@@ -1204,11 +1229,12 @@ impl qobject::TransactionsModel {
         });
     }
 
-    pub fn remove_package(mut self: Pin<&mut Self>, pkg_id: QString) {
+    pub fn remove_package(mut self: Pin<&mut Self>, pkg_id: QString, name: QString, icon_url: QString) {
         let pkg_id = pkg_id.to_string();
-        let name = pkg_id.clone();
+        let name = name.to_string();
+        let name = if name.is_empty() { pkg_id.clone() } else { name };
         self.as_mut()
-            .start_transaction(pkg_id, name, String::new(), "remove");
+            .start_transaction(pkg_id, name, icon_url.to_string(), "remove");
     }
 
     pub fn cancel(self: Pin<&mut Self>, tx_id: QString) {
@@ -1294,12 +1320,15 @@ impl qobject::TransactionsModel {
                 return;
             };
 
+            // the GUI always opts into notifications and lets frontend_visible
+            // (see SettingsController::set_frontend_visible) decide whether one
+            // actually shows
             let result = match tx_type {
-                "install" => proxy.install_package(&pkg_id).await,
-                "remove" => proxy.remove_package(&pkg_id).await,
-                "update" => proxy.update_package(&pkg_id).await,
-                "flatpakref" => proxy.install_flatpakref(&pkg_id).await,
-                "bundle" => proxy.install_flatpak_bundle(&pkg_id).await,
+                "install" => proxy.install_package(&pkg_id, true).await,
+                "remove" => proxy.remove_package(&pkg_id, true).await,
+                "update" => proxy.update_package(&pkg_id, true).await,
+                "flatpakref" => proxy.install_flatpakref(&pkg_id, true).await,
+                "bundle" => proxy.install_flatpak_bundle(&pkg_id, true).await,
                 _ => return,
             };
 
@@ -1501,14 +1530,27 @@ fn sync_launcher_badge(mut model: Pin<&mut qobject::TransactionsModel>) {
     libarc::launcher::update_transactions(active.len() as i32, progress);
 }
 
-async fn load_running_transactions(proxy: &ArcDaemonProxy<'static>) {
+async fn load_running_transactions(proxy: &ArcDaemonProxy<'static>) -> bool {
     let Ok(txs) = proxy.transactions().await else {
-        return;
+        return false;
     };
 
     let Some(qt_thread) = QT_THREAD.get() else {
-        return;
+        return false;
     };
+
+    let unique_ids: std::collections::HashSet<String> =
+        txs.iter().map(|tx| tx.package_id.clone()).collect();
+    let resolved: HashMap<String, Package> = join_all(
+        unique_ids
+            .into_iter()
+            .map(|id| async move { (id.clone(), proxy.app_info(&id).await.ok().flatten()) }),
+    )
+    .await
+    .into_iter()
+    .filter_map(|(id, pkg)| pkg.map(|pkg| (id, pkg)))
+    .collect();
+
     let _ = qt_thread.queue(move |mut model| {
         for tx in txs {
             let (status, error) = match &tx.status {
@@ -1526,7 +1568,15 @@ async fn load_running_transactions(proxy: &ArcDaemonProxy<'static>) {
                 libarc::TransactionType::Remove => "remove",
                 libarc::TransactionType::Update => "update",
             };
-            let icon_url = crate::services::icons::resolve(&tx.package_id, None);
+            let pkg = resolved.get(&tx.package_id);
+            let name = pkg
+                .map(|p| p.name.clone())
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| tx.package_id.clone());
+            let icon_url = crate::services::icons::resolve(
+                &tx.package_id,
+                pkg.and_then(|p| p.icon_url.as_deref()),
+            );
             let row = model.transactions.len() as i32;
             unsafe {
                 model
@@ -1535,7 +1585,7 @@ async fn load_running_transactions(proxy: &ArcDaemonProxy<'static>) {
                 model.as_mut().rust_mut().transactions.push(Tx {
                     id,
                     pkg_id: tx.package_id.clone(),
-                    name: tx.package_id,
+                    name,
                     icon_url,
                     progress: tx.progress as f32 / 100.0,
                     status,
@@ -1548,20 +1598,22 @@ async fn load_running_transactions(proxy: &ArcDaemonProxy<'static>) {
         }
         sync_launcher_badge(model.as_mut());
     });
+    true
 }
 
-async fn refresh_updates_count(proxy: &ArcDaemonProxy<'static>) {
+async fn refresh_updates_count(proxy: &ArcDaemonProxy<'static>) -> bool {
     let Ok(updates) = proxy.updates_packages().await else {
-        return;
+        return false;
     };
     let count = updates.len();
     libarc::launcher::update_badge(count as i32);
     let Some(qt_thread) = QT_THREAD.get() else {
-        return;
+        return false;
     };
     let _ = qt_thread.queue(move |mut model| {
         model.as_mut().set_updates_count(count as i32);
     });
+    true
 }
 
 async fn run_signal_listener(proxy: ArcDaemonProxy<'static>) {
@@ -1677,6 +1729,38 @@ impl Default for HomeFeedModelRust {
     }
 }
 
+static HOME_FEED_QT_THREAD: OnceLock<CxxQtThread<qobject::HomeFeedModel>> = OnceLock::new();
+
+fn sync_home_installed(pkg_id: &str, installed: bool) {
+    let Some(qt_thread) = HOME_FEED_QT_THREAD.get() else {
+        return;
+    };
+    let pkg_id = pkg_id.to_string();
+    let _ = qt_thread.queue(move |mut this| {
+        let mut changed_rows: Vec<i32> = Vec::new();
+        {
+            let mut rust = this.as_mut().rust_mut();
+            for (row, section) in rust.sections.iter_mut().enumerate() {
+                let mut touched = false;
+                for card in section.cards.iter_mut() {
+                    if card.id == pkg_id && card.installed != installed {
+                        card.installed = installed;
+                        touched = true;
+                    }
+                }
+                if touched {
+                    changed_rows.push(row as i32);
+                }
+            }
+        }
+        for row in changed_rows {
+            let idx = this.index(row, 0, &QModelIndex::default());
+            let roles = QList::<i32>::default();
+            this.as_mut().data_changed(&idx, &idx, &roles);
+        }
+    });
+}
+
 // off the GUI thread: writes to disk are cheap to trigger but the actual
 // I/O should never run on the thread driving the UI
 fn save_home_cache_in_background(
@@ -1684,7 +1768,7 @@ fn save_home_cache_in_background(
     stories: Vec<crate::services::home::Story>,
 ) {
     runtime::spawn(async move {
-        let _ = tokio::task::spawn_blocking(move || {
+        let _ = spawn_blocking(move || {
             crate::services::home_cache::save(&sections, &stories);
         })
         .await;
@@ -1697,26 +1781,25 @@ impl qobject::HomeFeedModel {
             return;
         }
         // kick off the live fetch and the disk-cache read at the same time
-        // — neither should wait on the other, whichever produces visible
+        // neither should wait on the other, whichever produces visible
         // content first wins
         self.as_mut().fetch();
 
         let qt_thread = self.qt_thread();
         runtime::spawn(async move {
-            let cached = tokio::task::spawn_blocking(crate::services::home_cache::load)
+            let cached = spawn_blocking(crate::services::home_cache::load)
                 .await
                 .ok()
                 .flatten();
-            let Some((sections, stories)) = cached else {
+            let Some((sections, _stories)) = cached else {
                 return;
             };
             let _ = qt_thread.queue(move |mut this| unsafe {
                 // the live fetch already produced (or is producing) newer
-                // content — don't clobber it with a stale disk snapshot
+                // content don't clobber it with a stale disk snapshot
                 if !this.sections.is_empty() {
                     return;
                 }
-                crate::bridge::home_model::stash_stories(stories);
                 this.as_mut().begin_reset_model();
                 this.as_mut().rust_mut().sections = sections;
                 this.as_mut().end_reset_model();
@@ -1749,6 +1832,7 @@ impl qobject::HomeFeedModel {
         };
 
         let qt_thread = self.qt_thread();
+        let _ = HOME_FEED_QT_THREAD.set(qt_thread.clone());
 
         runtime::spawn(async move {
             let proxy = runtime::proxy().await;
@@ -1757,19 +1841,6 @@ impl qobject::HomeFeedModel {
             let pending_count = plan.pending.len() as u32;
             let sections = plan.sections;
 
-            // Phase A: reveal the full page shape immediately — headings,
-            // row order, anything that didn't need per-app resolution.
-            // Rows still needing it show up as their own "loading" stub;
-            // Phase B below fills each one in independently as it resolves.
-            //
-            // The disk-cache read kicked off alongside this in load() is a
-            // local file read racing a live fetch that needs a network
-            // round trip — it almost always wins and populates `sections`
-            // first. If it did, don't stomp already-good cached content
-            // back down to loading stubs here; just let Phase B patch rows
-            // in place (indices line up unless the frontpage's row layout
-            // itself changed between the cached fetch and this one, which
-            // is rare and self-heals on the next save).
             let qt_reset = qt_thread.clone();
             let _ = qt_reset.queue(move |mut this| unsafe {
                 if this.request_seq != seq {
@@ -1794,7 +1865,7 @@ impl qobject::HomeFeedModel {
                 runtime::spawn(async move {
                     let (row_index, section, stories) =
                         crate::services::home::resolve_pending_section(pending, &ctx).await;
-                    let _ = qt_thread.queue(move |mut this| unsafe {
+                    let _ = qt_thread.queue(move |mut this| {
                         if this.request_seq != seq {
                             return;
                         }
@@ -1802,7 +1873,7 @@ impl qobject::HomeFeedModel {
                             *slot = section;
                         }
                         this.as_mut().rust_mut().all_stories.extend(stories);
-                        crate::bridge::home_model::stash_stories(this.all_stories.clone());
+                        crate::services::home_cache::set_stories(this.all_stories.clone());
 
                         let idx = this.index(row_index as i32, 0, &QModelIndex::default());
                         let roles = QList::<i32>::default();
@@ -1927,7 +1998,7 @@ impl qobject::RemotesModel {
         runtime::spawn(async move {
             let remotes = match runtime::proxy().await {
                 Some(proxy) => proxy.remotes().await.unwrap_or_default(),
-                none => vec![],
+                None => vec![],
             };
 
             qt_thread

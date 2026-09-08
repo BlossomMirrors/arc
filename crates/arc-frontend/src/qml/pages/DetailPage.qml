@@ -12,9 +12,18 @@ Kirigami.ScrollablePage {
 
     Kirigami.ColumnView.fillWidth: true
 
-    required property string pkgId
-    // optional row data from wherever the app was clicked
-    property var seed: null
+    property string pkgId: ""
+    property var failedShots: ({})
+
+    function openEntry(newPkgId, seed) {
+        root.pkgId = newPkgId;
+        root.failedShots = {};
+        if (seed) {
+            DetailController.loadWithSeed(newPkgId, seed.name ?? "", seed.summary ?? "", seed.iconUrl ?? "", seed.installed ?? false);
+        } else {
+            DetailController.load(newPkgId);
+        }
+    }
 
     readonly property var extensions: JSON.parse(DetailController.extensionsJson.length > 0 ? DetailController.extensionsJson : "[]")
 
@@ -23,16 +32,6 @@ Kirigami.ScrollablePage {
     readonly property real liveProgress: root.busyMap[DetailController.id] ?? 0
 
     title: DetailController.name
-
-    Component.onCompleted: {
-        if (seed) {
-            DetailController.loadWithSeed(pkgId, seed.name ?? "", seed.summary ?? "", seed.iconUrl ?? "", seed.installed ?? false);
-        } else {
-            DetailController.load(pkgId);
-        }
-    }
-
-    Component.onDestruction: DetailController.pageClosed(pkgId)
 
     ColumnLayout {
         visible: DetailController.loading
@@ -127,40 +126,64 @@ Kirigami.ScrollablePage {
                 Layout.preferredHeight: Kirigami.Units.gridUnit * 14
                 visible: DetailController.screenshots.length > 0
                 model: DetailController.screenshots
+                cardWidth: screenshotStrip.height * 16 / 9
+
+                Item {
+                    id: sharedShotMask
+                    width: screenshotStrip.height * 16 / 9
+                    height: screenshotStrip.height
+                    visible: false
+                    layer.enabled: true
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 10
+                    }
+                }
 
                 delegate: Item {
                     id: shotDelegate
 
-                    required property string modelData
-                    required property int index
+                    property string modelData: ""
+                    property int index
 
                     width: height * 16 / 9
                     height: screenshotStrip.height
 
+                    readonly property string requestUrl: shotDelegate.modelData + (shotDelegate.modelData.indexOf("?") >= 0 ? "&" : "?") + "w=" + Math.round(shotDelegate.width * 2)
+
+                    SkeletonBlock {
+                        anchors.fill: parent
+                        visible: shotImage.status !== Image.Ready && shotImage.status !== Image.Error
+                    }
+
                     Image {
                         id: shotImage
                         anchors.fill: parent
-                        source: shotDelegate.modelData
+                        source: root.failedShots[shotDelegate.requestUrl] ? "" : shotDelegate.requestUrl
+                        sourceSize.width: shotDelegate.width * 2
+                        sourceSize.height: shotDelegate.height * 2
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
+                        opacity: status === Image.Ready ? 1 : 0
+
+                        Behavior on opacity {
+                            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+                        }
 
                         layer.enabled: true
                         layer.effect: MultiEffect {
                             maskEnabled: true
-                            maskSource: shotMask
+                            maskSource: sharedShotMask
                             maskThresholdMin: 0.5
-                            maskSpreadAtMin: 1.0
+                            maskSpreadAtMin: 0.0
                         }
-                    }
 
-                    Item {
-                        id: shotMask
-                        anchors.fill: parent
-                        visible: false
-                        layer.enabled: true
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: 10
+                        onStatusChanged: {
+                            if (status === Image.Error) {
+                                var failed = Object.assign({}, root.failedShots);
+                                failed[shotDelegate.requestUrl] = true;
+                                root.failedShots = failed;
+                            }
                         }
                     }
 
@@ -169,6 +192,7 @@ Kirigami.ScrollablePage {
                     }
 
                     TapHandler {
+                        enabled: shotImage.status !== Image.Error
                         onTapped: {
                             lightbox.currentIndex = shotDelegate.index;
                             lightbox.open();
@@ -196,7 +220,7 @@ Kirigami.ScrollablePage {
                 Layout.fillWidth: true
                 visible: DetailController.description.length > 0
                 text: DetailController.description
-                textFormat: Text.RichText
+                textFormat: Text.StyledText
                 wrapMode: Text.WordWrap
                 onLinkActivated: link => Qt.openUrlExternally(link)
             }
@@ -220,7 +244,7 @@ Kirigami.ScrollablePage {
                 Controls.Label {
                     Layout.fillWidth: true
                     text: "<a href=\"" + DetailController.homepageUrl + "\">" + DetailController.homepageUrl + "</a>"
-                    textFormat: Text.RichText
+                    textFormat: Text.StyledText
                     elide: Text.ElideRight
                     onLinkActivated: link => Qt.openUrlExternally(link)
                 }
@@ -242,7 +266,7 @@ Kirigami.ScrollablePage {
                 text: i18n("Remove")
                 icon.name: "delete"
                 onTriggered: {
-                    TransactionsModel.removePackage(DetailController.id);
+                    TransactionsModel.removePackage(DetailController.id, DetailController.name, DetailController.iconUrl);
                     removeDialog.close();
                 }
             }
@@ -278,7 +302,7 @@ Kirigami.ScrollablePage {
                         pkgId: extDelegate.modelData.id
                         name: extDelegate.modelData.name
                         installed: extDelegate.modelData.installed
-                        onRemoveRequested: TransactionsModel.removePackage(extDelegate.modelData.id)
+                        onRemoveRequested: TransactionsModel.removePackage(extDelegate.modelData.id, extDelegate.modelData.name, "")
                     }
                 }
             }
@@ -289,6 +313,9 @@ Kirigami.ScrollablePage {
         id: lightbox
 
         property int currentIndex: 0
+        readonly property string currentScreenshot: lightbox.visible && lightbox.currentIndex < DetailController.screenshots.length
+            ? DetailController.screenshots[lightbox.currentIndex]
+            : ""
 
         parent: Controls.Overlay.overlay
         anchors.centerIn: parent
@@ -303,9 +330,7 @@ Kirigami.ScrollablePage {
         Image {
             anchors.fill: parent
             anchors.margins: Kirigami.Units.gridUnit * 2
-            source: lightbox.visible && lightbox.currentIndex < DetailController.screenshots.length
-                ? DetailController.screenshots[lightbox.currentIndex]
-                : ""
+            source: lightbox.currentScreenshot
             fillMode: Image.PreserveAspectFit
             asynchronous: true
         }

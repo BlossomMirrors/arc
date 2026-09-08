@@ -1,6 +1,10 @@
+pub mod cache;
+pub mod desktop_entry;
 pub mod errors;
 pub mod events;
+pub mod icons;
 pub mod launcher;
+pub mod media;
 pub mod search;
 pub mod settings;
 pub mod types;
@@ -17,28 +21,31 @@ use zbus::{proxy, Connection};
 pub const BUS_NAME: &str = "org.blossomos.arc.daemon";
 pub const OBJECT_PATH: &str = "/org/blossomos/arc/daemon";
 
+pub const FORGE_BASE_URL: &str = "https://forge.arcstore.net";
+pub const DAEMON_HTTP_BASE: &str = "http://localhost:1312";
+
 #[proxy(
     interface = "org.blossomos.arc.daemon",
     default_service = "org.blossomos.arc.daemon",
     default_path = "/org/blossomos/arc/daemon"
 )]
 pub trait ArcDaemon {
-    async fn install_package(&self, package_id: &str) -> zbus::Result<String>;
-    async fn install_flatpakref(&self, url: &str) -> zbus::Result<String>;
-    async fn remove_package(&self, package_id: &str) -> zbus::Result<String>;
-    async fn remove_package_with_data(&self, package_id: &str, delete_data: bool) -> zbus::Result<String>;
+    async fn install_package(&self, package_id: &str, notify: bool) -> zbus::Result<String>;
+    async fn install_flatpakref(&self, url: &str, notify: bool) -> zbus::Result<String>;
+    async fn remove_package(&self, package_id: &str, notify: bool) -> zbus::Result<String>;
+    async fn remove_package_with_data(&self, package_id: &str, delete_data: bool, notify: bool) -> zbus::Result<String>;
     async fn search(&self, query: &str) -> zbus::Result<String>;
     async fn search_category(&self, category: &str) -> zbus::Result<String>;
     async fn get_app_info(&self, package_id: &str) -> zbus::Result<String>;
     async fn get_app_metadata(&self, package_id: &str) -> zbus::Result<String>;
     async fn list_installed(&self) -> zbus::Result<String>;
     async fn list_updates(&self) -> zbus::Result<String>;
-    async fn update_package(&self, package_id: &str) -> zbus::Result<String>;
+    async fn update_package(&self, package_id: &str, notify: bool) -> zbus::Result<String>;
     async fn get_transaction(&self, transaction_id: &str) -> zbus::Result<String>;
     async fn list_transactions(&self) -> zbus::Result<String>;
     async fn clear_transaction_history(&self) -> zbus::Result<()>;
     async fn refresh_cache(&self) -> zbus::Result<bool>;
-    async fn set_foreground_package(&self, package_id: &str) -> zbus::Result<()>;
+    async fn set_frontend_visible(&self, visible: bool) -> zbus::Result<()>;
     async fn run_package(&self, package_id: &str) -> zbus::Result<String>;
     async fn cancel_transaction(&self, transaction_id: &str) -> zbus::Result<bool>;
     async fn get_home_apps(&self, popular_count: u32, recent_count: u32) -> zbus::Result<String>;
@@ -47,7 +54,7 @@ pub trait ArcDaemon {
     async fn add_remote(&self, name: &str, url: &str) -> zbus::Result<bool>;
     async fn remove_remote(&self, name: &str) -> zbus::Result<bool>;
     async fn add_flatpakrepo(&self, content: &str) -> zbus::Result<bool>;
-    async fn install_flatpak_bundle(&self, path: &str) -> zbus::Result<String>;
+    async fn install_flatpak_bundle(&self, path: &str, notify: bool) -> zbus::Result<String>;
     async fn set_concurrent_downloads(&self, count: u32) -> zbus::Result<()>;
 
     #[zbus(signal)]
@@ -117,17 +124,5 @@ impl ArcDaemonProxy<'_> {
 
     pub async fn app_metadata(&self, package_id: &str) -> Result<AppMetadata> {
         Ok(serde_json::from_str(&self.get_app_metadata(package_id).await?)?)
-    }
-}
-
-pub fn clear_foreground_blocking() {
-    if let Ok(conn) = zbus::blocking::Connection::session() {
-        let _ = conn.call_method(
-            Some(BUS_NAME),
-            OBJECT_PATH,
-            Some(BUS_NAME),
-            "SetForegroundPackage",
-            &("",),
-        );
     }
 }

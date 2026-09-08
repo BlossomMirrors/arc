@@ -4,6 +4,7 @@ use libarc::{ArcError, Package, Provider};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::process::Command;
+use tokio::spawn;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -469,7 +470,7 @@ fn parse_info(content: &str, home: &str) -> Option<Package> {
         _ => format!("Installed in container ({})", container),
     };
     let description = match desktop_comment {
-        Some(ref c) if !c.is_empty() => format!("{} — {}", c, container_label),
+        Some(ref c) if !c.is_empty() => format!("{} - {}", c, container_label),
         _ => container_label,
     };
 
@@ -480,7 +481,7 @@ fn parse_info(content: &str, home: &str) -> Option<Package> {
         description,
         provider: Provider::Distrobox,
         installed: true,
-        icon_url: desktop_icon,
+        icon_url: desktop_icon.map(|s| libarc::media::normalize_local_ref(&s)),
         remote: None,
         screenshots: vec![],
         developer_name: None,
@@ -653,7 +654,7 @@ async fn run_cancellable(
     // killed even if the outer tokio::select! drops this future first.
     let pid = child.id();
     let killer_token = cancel_token.clone();
-    let killer = tokio::spawn(async move {
+    let killer = spawn(async move {
         killer_token.cancelled().await;
         if let Some(pid) = pid {
             unsafe {
@@ -682,7 +683,7 @@ fn slow_tick(
     ceiling: u8,
     interval_secs: u64,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
+    spawn(async move {
         let mut p = from;
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(interval_secs)).await;

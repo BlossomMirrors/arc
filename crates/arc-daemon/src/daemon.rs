@@ -10,8 +10,10 @@ use crate::transaction_manager::TransactionManager;
 use anyhow::Result;
 use futures_util::StreamExt;
 use std::sync::Arc;
-use tokio::sync::Semaphore;
 use tokio::process::Command;
+use tokio::spawn;
+use tokio::sync::Semaphore;
+use tokio::task::spawn_blocking;
 use tracing::{info, warn};
 use zbus::connection::Builder as ConnectionBuilder;
 use zbus::fdo::{DBusProxy, NameLostStream, RequestNameFlags, RequestNameReply};
@@ -80,28 +82,40 @@ impl Daemon {
         // cost inline on their first request instead of the whole daemon being
         // unreachable until this finishes.
         let warmup_provider = Arc::clone(&provider);
-        tokio::spawn(async move {
-            info!("Refreshing AppStream data...");
-            match Command::new("flatpak").args(["update", "--appstream"]).status().await {
-                Ok(status) if status.success() => info!("AppStream data refreshed"),
-                Ok(status) => warn!("flatpak update --appstream exited with {}", status),
-                Err(e) => warn!("Failed to run flatpak update --appstream: {}", e),
+        spawn(async move {
+            if crate::appstream_db::should_refresh_remotes() {
+                info!("Refreshing AppStream data...");
+                match Command::new("flatpak").args(["update", "--appstream"]).status().await {
+                    Ok(status) if status.success() => info!("AppStream data refreshed"),
+                    Ok(status) => warn!("flatpak update --appstream exited with {}", status),
+                    Err(e) => warn!("Failed to run flatpak update --appstream: {}", e),
+                }
+                crate::appstream_db::mark_remotes_refreshed();
+            } else {
+                info!("AppStream remotes refreshed recently, skipping network update");
             }
 
-            tokio::task::spawn_blocking(AppStreamDb::refresh_if_stale).await.ok();
+            spawn_blocking(AppStreamDb::refresh_if_stale).await.ok();
 
-            info!("Pre-warming package cache...");
-            if let Err(e) = warmup_provider.refresh_cache().await {
-                warn!("Initial cache warm-up failed: {}", e);
+            // the disk-seeded package cache (see MultiProvider::new) is already
+            // fresh often enough that this boot doesn't need to pay for a live
+            // fetch across every provider on top of it
+            if warmup_provider.cache_is_fresh().await {
+                info!("Package cache still fresh from disk, skipping warm-up fetch");
             } else {
-                info!("Package cache ready");
+                info!("Pre-warming package cache...");
+                if let Err(e) = warmup_provider.refresh_cache().await {
+                    warn!("Initial cache warm-up failed: {}", e);
+                } else {
+                    info!("Package cache ready");
+                }
             }
         });
 
         // arc clone is a reference counted pointer so both the spawn and the
         // daemon struct share the same provider without copying it
         let bg_provider = Arc::clone(&provider);
-        tokio::spawn(async move {
+        spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(15 * 60)).await;
                 if let Err(e) = bg_provider.refresh_cache().await {
@@ -113,7 +127,7 @@ impl Daemon {
         });
 
         let au_provider = Arc::clone(&provider);
-        tokio::spawn(async move {
+        spawn(async move {
             loop {
                 if libarc::Settings::load().auto_updates {
                     info!("Auto-update: checking for updates...");
@@ -147,6 +161,8 @@ impl Daemon {
     pub async fn run(self, conn: Connection, mut name_lost: NameLostStream) -> Result<()> {
         info!("Starting Arc Communication Daemon");
 
+        crate::launcher_progress::init(conn.clone());
+
         // scan ~/.appimages on startup to pick up any AppImages placed there manually
         info!("Scanning AppImages directory...");
         self.provider.appimage.scan_and_sync().await;
@@ -164,8 +180,8 @@ impl Daemon {
             provider: self.provider,
             transaction_manager: self.transaction_manager.clone(),
             download_semaphore: Arc::new(Semaphore::new(concurrent)),
-            download_permits: Arc::new(std::sync::atomic::AtomicUsize::new(concurrent)),
-            foreground_package: Arc::new(tokio::sync::RwLock::new(String::new())),
+            download_permits: Arc::new(tokio::sync::Mutex::new(concurrent)),
+            frontend_visible: Arc::new(tokio::sync::RwLock::new(false)),
         };
 
         // the bus name was already claimed in claim_bus_name(), before the
@@ -201,6 +217,8 @@ impl Daemon {
         // Cancel all running transactions before shutdown
         info!("Cancelling all running transactions...");
         self.transaction_manager.cancel_all().await;
+
+        spawn_blocking(libarc::cache::flush_blocking).await.ok();
 
         info!("Shutting down Arc daemon");
 

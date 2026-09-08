@@ -1,5 +1,6 @@
 use super::home::{Card, Category, HeroItem, HomeSection, LinkItem, Story};
-use std::path::PathBuf;
+use libarc::cache::JsonCache;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SectionDto {
@@ -21,9 +22,21 @@ struct Snapshot {
     stories: Vec<Story>,
 }
 
-fn disk_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".cache/arc-frontend/home_feed.json"))
+fn store() -> &'static JsonCache<Snapshot> {
+    static STORE: OnceLock<JsonCache<Snapshot>> = OnceLock::new();
+    STORE.get_or_init(|| JsonCache::new("frontend", "home.json"))
+}
+
+// mirrors whatever the current sections resolved to, so StoryController can
+// look a story up without a refetch even before the next disk save happens
+static STORIES: OnceLock<Mutex<Vec<Story>>> = OnceLock::new();
+
+pub fn set_stories(stories: Vec<Story>) {
+    *STORIES.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap() = stories;
+}
+
+pub fn find_story(id: &str) -> Option<Story> {
+    STORIES.get()?.lock().unwrap().iter().find(|s| s.id == id).cloned()
 }
 
 fn static_item_type(s: &str) -> &'static str {
@@ -42,9 +55,7 @@ fn static_item_type(s: &str) -> &'static str {
 }
 
 pub fn load() -> Option<(Vec<HomeSection>, Vec<Story>)> {
-    let path = disk_path()?;
-    let bytes = std::fs::read(path).ok()?;
-    let snapshot: Snapshot = serde_json::from_slice(&bytes).ok()?;
+    let snapshot = store().load()?;
     let sections = snapshot
         .sections
         .into_iter()
@@ -64,11 +75,11 @@ pub fn load() -> Option<(Vec<HomeSection>, Vec<Story>)> {
             loading: false,
         })
         .collect();
+    set_stories(snapshot.stories.clone());
     Some((sections, snapshot.stories))
 }
 
 pub fn save(sections: &[HomeSection], stories: &[Story]) {
-    let Some(path) = disk_path() else { return };
     let snapshot = Snapshot {
         sections: sections
             .iter()
@@ -87,10 +98,5 @@ pub fn save(sections: &[HomeSection], stories: &[Story]) {
             .collect(),
         stories: stories.to_vec(),
     };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Ok(bytes) = serde_json::to_vec(&snapshot) {
-        let _ = std::fs::write(path, bytes);
-    }
+    store().store(&snapshot);
 }

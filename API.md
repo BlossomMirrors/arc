@@ -34,9 +34,9 @@ Full-text search across app ID, name, and summary. Results are sorted by relevan
 | `q` | yes | Search query string |
 | `lang` | no | Language tag (see above) |
 
-**Response** `200 OK` — JSON array of [App objects](#app-object) extended with a `score` field.
+**Response** `200 OK` - JSON array of [App objects](#app-object) extended with a `score` field.
 
-The `score` field is an integer in the range `1–100` indicating match quality:
+The `score` field is an integer in the range `1-100` indicating match quality:
 
 | Score | Meaning |
 |---|---|
@@ -62,7 +62,7 @@ Returns curated popular and recently-added app lists.
 |---|---|---|
 | `popular` | `12` | Number of popular apps to return |
 | `recent` | `24` | Number of recently-added apps to return |
-| `lang` | — | Language tag |
+| `lang` | - | Language tag |
 
 **Response** `200 OK`
 
@@ -95,7 +95,7 @@ Returns all apps in a given AppStream category.
 |---|---|
 | `lang` | Language tag |
 
-**Response** `200 OK` — JSON array of [App objects](#app-object).
+**Response** `200 OK` - JSON array of [App objects](#app-object).
 
 ```
 GET /api/v1/category/Graphics?lang=de
@@ -123,8 +123,8 @@ For installed apps that are absent from any AppStream catalog the daemon falls b
 
 **Response**
 
-- `200 OK` — [App object](#app-object)
-- `404 Not Found` — app not found in any catalog or metainfo file
+- `200 OK` - [App object](#app-object)
+- `404 Not Found` - app not found in any catalog or metainfo file
 
 ```
 GET /api/v1/apps/io.github.flattool.Warehouse?lang=de
@@ -146,9 +146,9 @@ Only apps whose icon is served from a remote `https://` URL are supported. Apps 
 
 **Response**
 
-- `200 OK` — image bytes with upstream `Content-Type`
-- `404 Not Found` — no remote icon available
-- `502 Bad Gateway` — upstream fetch failed
+- `200 OK` - image bytes with upstream `Content-Type`
+- `404 Not Found` - no remote icon available
+- `502 Bad Gateway` - upstream fetch failed
 
 ```
 GET /api/v1/apps/org.gnome.Gedit/icon
@@ -170,9 +170,9 @@ Only `http://` and `https://` URLs are accepted.
 
 **Response**
 
-- `200 OK` — image bytes with upstream `Content-Type`
-- `400 Bad Request` — non-http(s) URL
-- `502 Bad Gateway` — upstream fetch failed
+- `200 OK` - image bytes with upstream `Content-Type`
+- `400 Bad Request` - non-http(s) URL
+- `502 Bad Gateway` - upstream fetch failed
 
 ```
 GET /api/v1/image?url=https%3A%2F%2Fdl.flathub.org%2Fmedia%2F...%2Fscreenshot.png
@@ -217,4 +217,4 @@ All list and detail endpoints return objects with the following shape.
 | `content_rating` | string | `"All ages"`, `"7+"`, `"12+"`, or `"18+"` |
 | `developer_name` | string \| null | Developer or publisher name (localized) |
 | `verified` | bool | `true` for Flathub-verified developers (read from the AppStream catalog) and all blossomos apps |
-| `score` | integer | **Search only.** Relevance score `1–100`; absent on all other endpoints |
+| `score` | integer | **Search only.** Relevance score `1-100`; absent on all other endpoints |

@@ -57,13 +57,18 @@ RowLayout {
 
         Controls.Label {
             Layout.fillWidth: true
-            visible: DetailController.developerName.length > 0
             text: DetailController.developerName
             opacity: 0.65
             elide: Text.ElideRight
         }
 
+        FontMetrics {
+            id: pillFontMetrics
+            font: Kirigami.Theme.smallFont
+        }
+
         RowLayout {
+            Layout.preferredHeight: pillFontMetrics.height + Kirigami.Units.smallSpacing
             spacing: Kirigami.Units.smallSpacing
 
             Pill {

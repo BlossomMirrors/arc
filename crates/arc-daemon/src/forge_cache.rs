@@ -1,12 +1,13 @@
 use futures_util::future::join_all;
+use libarc::cache::JsonCache;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::OnceLock;
+use tokio::spawn;
 use tokio::sync::{Mutex, RwLock};
+use tokio::task::spawn_blocking;
 use tracing::{info, warn};
 
-const FORGE_BASE: &str = "https://forge.blossomos.org";
-const DAEMON_BASE: &str = "http://localhost:1312";
+const FORGE_BASE: &str = libarc::FORGE_BASE_URL;
 
 #[derive(Default)]
 struct Inner {
@@ -19,8 +20,6 @@ struct Inner {
     app_metadata_json: String,
     // id -> original remote icon URL (used by the icon proxy endpoint)
     original_icon_urls: HashMap<String, String>,
-    // id -> (bytes, content_type)
-    icons: HashMap<String, (Vec<u8>, String)>,
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -44,15 +43,14 @@ fn refresh_gate() -> &'static Mutex<()> {
     REFRESH_GATE.get_or_init(|| Mutex::new(()))
 }
 
-fn disk_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".cache/arc-daemon/forge_cache.json"))
+static STORE: OnceLock<JsonCache<Persisted>> = OnceLock::new();
+
+fn store() -> &'static JsonCache<Persisted> {
+    STORE.get_or_init(|| JsonCache::new("daemon", "forge.json"))
 }
 
 pub async fn warm_from_disk() {
-    let Some(path) = disk_path() else { return };
-    let Ok(bytes) = std::fs::read(&path) else { return };
-    let Ok(p) = serde_json::from_slice::<Persisted>(&bytes) else { return };
+    let Some(p) = store().load_async().await else { return };
     let mut w = lock().write().await;
     w.top_json = p.top_json;
     w.new_json = p.new_json;
@@ -64,7 +62,6 @@ pub async fn warm_from_disk() {
 }
 
 async fn save_to_disk() {
-    let Some(path) = disk_path() else { return };
     let p = {
         let r = lock().read().await;
         Persisted {
@@ -76,16 +73,7 @@ async fn save_to_disk() {
             original_icon_urls: r.original_icon_urls.clone(),
         }
     };
-    tokio::task::spawn_blocking(move || {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(bytes) = serde_json::to_vec(&p) {
-            let _ = std::fs::write(&path, bytes);
-        }
-    })
-    .await
-    .ok();
+    store().store(&p);
 }
 
 async fn ensure_fresh() {
@@ -162,16 +150,16 @@ fn collect_home_app_ids(
 }
 
 pub async fn refresh() {
-    let client = reqwest::Client::new();
+    let client = crate::media::http_client();
     let url_top = format!("{}/api/top?limit=12", FORGE_BASE);
     let url_new = format!("{}/api/new?limit=20", FORGE_BASE);
     let url_trending = format!("{}/api/trending?limit=12", FORGE_BASE);
     let url_charts = format!("{}/api/charts?limit=12", FORGE_BASE);
     let (top, new, trending, charts) = tokio::join!(
-        fetch_text(&client, &url_top),
-        fetch_text(&client, &url_new),
-        fetch_text(&client, &url_trending),
-        fetch_text(&client, &url_charts),
+        fetch_text(client, &url_top),
+        fetch_text(client, &url_new),
+        fetch_text(client, &url_trending),
+        fetch_text(client, &url_charts),
     );
 
     let top_str = top.as_deref().unwrap_or("");
@@ -181,10 +169,10 @@ pub async fn refresh() {
 
     let app_ids = collect_home_app_ids(top_str, new_str, trend_str, chart_str);
 
-    // Resolve metadata from AppStreamDb — runs in a blocking thread since the
+    // Resolve metadata from AppStreamDb. Runs in a blocking thread since the
     // db scan is CPU-bound, and returns (metadata_json, original_icon_urls)
     let app_ids_for_db = app_ids.clone();
-    let (app_metadata_json, original_icon_urls) = tokio::task::spawn_blocking(move || {
+    let (app_metadata_json, original_icon_urls) = spawn_blocking(move || {
         let db = crate::appstream_db::AppStreamDb::get();
         let mut original_urls: HashMap<String, String> = HashMap::new();
         let entries: Vec<serde_json::Value> = app_ids_for_db
@@ -192,9 +180,9 @@ pub async fn refresh() {
             .filter_map(|id| db.find_by_id(id).map(|e| (id, e)))
             .map(|(id, e)| {
                 let display_url = match &e.icon_url {
-                    Some(url) if url.starts_with("http") => {
+                    Some(url) if matches!(libarc::media::classify(url), libarc::media::MediaRef::Remote(_)) => {
                         original_urls.insert(id.clone(), url.clone());
-                        format!("{}/forge/icon/{}", DAEMON_BASE, id)
+                        crate::media::forge_icon_proxy_url(id)
                     }
                     other => other.clone().unwrap_or_default(),
                 };
@@ -238,41 +226,16 @@ pub async fn refresh() {
 
     save_to_disk().await;
 
-    // Download icon bytes in the background so the cache is warm for the
-    // next request without blocking startup
-    tokio::spawn(async move {
+    spawn(async move {
         let futs: Vec<_> = original_icon_urls
-            .into_iter()
-            .map(|(id, url)| async move {
-                let resp = reqwest::Client::new()
-                    .get(&url)
-                    .timeout(std::time::Duration::from_secs(10))
-                    .send()
-                    .await;
-                match resp {
-                    Ok(r) => {
-                        let ct = r
-                            .headers()
-                            .get(reqwest::header::CONTENT_TYPE)
-                            .and_then(|v| v.to_str().ok())
-                            .unwrap_or("image/png")
-                            .to_string();
-                        r.bytes().await.ok().map(|b| (id, b.to_vec(), ct))
-                    }
-                    Err(_) => None,
-                }
-            })
+            .into_values()
+            .map(|url| async move { crate::media::fetch(crate::media::MediaKind::Icon, &url, None).await.is_some() })
             .collect();
 
         let results = join_all(futs).await;
         let total = results.len();
-        let mut icons: HashMap<String, (Vec<u8>, String)> = HashMap::new();
-        for entry in results.into_iter().flatten() {
-            icons.insert(entry.0, (entry.1, entry.2));
-        }
-        let (ok, fail) = (icons.len(), total - icons.len());
-        lock().write().await.icons = icons;
-        info!("Icon cache populated ({} ok, {} failed)", ok, fail);
+        let ok = results.into_iter().filter(|ok| *ok).count();
+        info!("Icon cache warmed ({} ok, {} failed)", ok, total - ok);
     });
 }
 
@@ -298,29 +261,6 @@ pub async fn app_metadata() -> String {
 }
 
 pub async fn icon_bytes(id: &str) -> Option<(Vec<u8>, String)> {
-    // Try the warm cache first
-    if let Some(entry) = lock().read().await.icons.get(id).cloned() {
-        return Some(entry);
-    }
-    // Cache miss: fetch from the original URL and store for next time
     let original_url = lock().read().await.original_icon_urls.get(id).cloned()?;
-    let resp = reqwest::Client::new()
-        .get(&original_url)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .ok()?;
-    let ct = resp
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("image/png")
-        .to_string();
-    let bytes = resp.bytes().await.ok()?.to_vec();
-    lock()
-        .write()
-        .await
-        .icons
-        .insert(id.to_string(), (bytes.clone(), ct.clone()));
-    Some((bytes, ct))
+    crate::media::fetch(crate::media::MediaKind::Icon, &original_url, None).await
 }

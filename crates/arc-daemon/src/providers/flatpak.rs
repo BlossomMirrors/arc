@@ -6,6 +6,7 @@ use libflatpak::glib;
 use libflatpak::prelude::*;
 use std::sync::Arc;
 use tokio::sync::{mpsc::UnboundedSender, Semaphore};
+use tokio::task::spawn_blocking;
 use tracing::warn;
 
 pub struct FlatpakProvider {
@@ -203,7 +204,7 @@ impl FlatpakProvider {
             .acquire()
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
-        tokio::task::spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
+        spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
             let db = AppStreamDb::get();
 
@@ -249,7 +250,7 @@ impl FlatpakProvider {
                     if let Some(entry) = db.find_by_id(&id) {
                         Some(entry_to_flatpak_package(entry, is_installed))
                     } else if is_installed {
-                        // Installed but absent from any catalog — try the exported metainfo.
+                        // Installed but absent from any catalog, try the exported metainfo.
                         let pkg = db
                             .load_from_exported_metainfo(&id)
                             .map(|e| entry_to_flatpak_package(e, true))
@@ -271,7 +272,7 @@ impl FlatpakProvider {
                             });
                         Some(pkg)
                     } else {
-                        // Not installed and no catalog entry — skip so it doesn't
+                        // Not installed and no catalog entry, skip so it doesn't
                         // show up as a nameless ghost in search results.
                         None
                     }
@@ -284,7 +285,7 @@ impl FlatpakProvider {
 
     pub async fn search_category(&self, category: &str) -> Result<Vec<Package>, ArcError> {
         let category = category.to_string();
-        tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
+        spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
             let mut installed_ids: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
@@ -319,7 +320,7 @@ impl FlatpakProvider {
             .acquire()
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
-        tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
+        spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
             let prefix = format!("{}.", app_id);
 
@@ -462,7 +463,7 @@ impl FlatpakProvider {
 
     pub async fn get_app_info(&self, app_id: &str) -> Result<Option<Package>, ArcError> {
         let app_id = app_id.to_string();
-        tokio::task::spawn_blocking(move || -> Result<Option<Package>, ArcError> {
+        spawn_blocking(move || -> Result<Option<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
             // same lookup list_installed() uses; installed_ref() with no
             // explicit arch/branch doesn't reliably match despite being
@@ -475,7 +476,7 @@ impl FlatpakProvider {
             });
             // fast path: an installed app's own exported metainfo is a
             // single small local file, independent of the shared
-            // AppStreamDb OnceLock's full-catalog parse — try it first so
+            // AppStreamDb OnceLock's full-catalog parse, try it first so
             // clicking into something you already have installed doesn't
             // queue behind that bulk warm-up
             let entry = crate::appstream_db::load_local_metainfo(&app_id)
@@ -493,7 +494,7 @@ impl FlatpakProvider {
         gio_cancel: libflatpak::gio::Cancellable,
     ) -> Result<(), ArcError> {
         let app_id = app_id.to_string();
-        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+        spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = Some(&gio_cancel);
             let primary_remote = AppStreamDb::try_get()
                 .find_by_id(&app_id)
@@ -626,7 +627,7 @@ impl FlatpakProvider {
         gio_cancel: libflatpak::gio::Cancellable,
     ) -> Result<(), ArcError> {
         let url = url.to_string();
-        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+        spawn_blocking(move || -> Result<(), ArcError> {
             let rt = tokio::runtime::Handle::current();
             let bytes: Vec<u8> = rt.block_on(async {
                 if let Some(path) = url.strip_prefix("file://") {
@@ -731,7 +732,7 @@ impl FlatpakProvider {
         gio_cancel: libflatpak::gio::Cancellable,
     ) -> Result<(), ArcError> {
         let app_id = app_id.to_string();
-        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+        spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = Some(&gio_cancel);
             let (inst, installed) = installation_with_updatable_ref(&app_id)?;
             let full_ref = installed
@@ -905,7 +906,7 @@ impl FlatpakProvider {
         gio_cancel: libflatpak::gio::Cancellable,
     ) -> Result<(), ArcError> {
         let path = path.to_string();
-        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+        spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = Some(&gio_cancel);
             let inst = libflatpak::Installation::new_user(cancel)
                 .map_err(|e: glib::Error| ArcError::ProviderError(e.to_string()))?;
@@ -940,7 +941,7 @@ impl FlatpakProvider {
 impl PackageProvider for FlatpakProvider {
     async fn search(&self, query: &str) -> Result<Vec<Package>, ArcError> {
         let query = query.to_string();
-        tokio::task::spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
+        spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
 
             Ok(AppStreamDb::try_get()
                 .search_apps(&query)
@@ -961,7 +962,7 @@ impl PackageProvider for FlatpakProvider {
     }
 
     async fn list_installed(&self) -> Result<Vec<Package>, ArcError> {
-        tokio::task::spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
+        spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
             let mut packages = Vec::new();
             for inst in all_installations() {
@@ -982,7 +983,7 @@ impl PackageProvider for FlatpakProvider {
             .acquire()
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
-        tokio::task::spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
+        spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
             let mut packages = Vec::new();
             for inst in all_installations() {
@@ -1013,7 +1014,7 @@ impl PackageProvider for FlatpakProvider {
 
     async fn install(&self, package_id: &str) -> Result<(), ArcError> {
         let package_id = package_id.to_string();
-        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+        spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
 
             // a cold miss falls through to the flathub fallback below
@@ -1128,17 +1129,29 @@ impl PackageProvider for FlatpakProvider {
 
     async fn remove(&self, package_id: &str) -> Result<(), ArcError> {
         let package_id = package_id.to_string();
-        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+        spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
             let (inst, installed) = installation_with_ref(&package_id)?;
             let full_ref = installed
                 .format_ref()
                 .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?;
 
-            // Best-effort: kill any running instances before uninstalling.
-            let _ = std::process::Command::new("flatpak")
+            match std::process::Command::new("flatpak")
                 .args(["kill", &package_id])
-                .status();
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
+                .output()
+            {
+                Ok(output) if !output.status.success() => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stderr = stderr.trim();
+                    if !stderr.contains("is not running") {
+                        warn!("flatpak kill {} failed: {}", package_id, stderr);
+                    }
+                }
+                Err(e) => warn!("failed to run flatpak kill for {}: {}", package_id, e),
+                _ => {}
+            }
 
             let tx = libflatpak::Transaction::for_installation(&inst, cancel)
                 .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
@@ -1154,7 +1167,7 @@ impl PackageProvider for FlatpakProvider {
 
     async fn update(&self, package_id: &str) -> Result<(), ArcError> {
         let package_id = package_id.to_string();
-        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+        spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
             let (inst, installed) = installation_with_updatable_ref(&package_id)?;
             let full_ref = installed
@@ -1174,7 +1187,7 @@ impl PackageProvider for FlatpakProvider {
 
     async fn run(&self, package_id: &str) -> Result<(), ArcError> {
         let package_id = package_id.to_string();
-        tokio::task::spawn_blocking(move || -> Result<(), ArcError> {
+        spawn_blocking(move || -> Result<(), ArcError> {
             let _cancel = libflatpak::gio::Cancellable::NONE;
             let (_inst, _installed) = installation_with_app(&package_id)?;
 

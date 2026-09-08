@@ -41,6 +41,7 @@ anvil-appimage = "1.0.1"
 krateio = "1.0.0"
 tr = { version = "0.1", default-features = false }
 sys-locale = "0.3"
+percent-encoding = "2.3.2"
 
 [build-dependencies]
 include-po = "0.2"

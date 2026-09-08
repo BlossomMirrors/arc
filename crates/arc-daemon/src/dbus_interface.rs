@@ -2,10 +2,24 @@ use crate::providers::flatpak::FlatpakProvider;
 use crate::providers::MultiProvider;
 use crate::providers::PackageProvider;
 use crate::transaction_manager::TransactionManager;
-use libarc::{Provider, TransactionType};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use libarc::{Package, Provider, TransactionType};
+use std::env;
+use std::fs;
 use std::sync::Arc;
-use tokio::sync::Semaphore;
+use tokio::spawn;
+use tokio::sync::{Mutex, Semaphore};
+use tokio::task::spawn_blocking;
+
+fn proxy_icon_url(pkg: &mut Package) {
+    crate::media::proxy_icon_url_field(&mut pkg.icon_url, &pkg.id);
+    crate::media::proxy_screenshot_urls(&mut pkg.screenshots);
+}
+
+fn proxy_icon_urls(packages: &mut [Package]) {
+    for pkg in packages {
+        proxy_icon_url(pkg);
+    }
+}
 
 // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no slashes or semicolons).
 // distrobox ids look like "distrobox:container:name:type" or are file paths for installs.
@@ -37,23 +51,36 @@ use zbus::interface;
 use zbus::object_server::SignalEmitter;
 
 // AppStreamDb's cold parse can take well over a minute; fail fast instead of
-// making a UI click hang for that whole window — the caller can just retry
+// making a UI click hang for that whole window - the caller can just retry
 // once the background warm-up (kicked off at daemon startup) finishes.
-const APP_INFO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+const APP_INFO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub struct ArcDaemonInterface {
     pub provider: Arc<MultiProvider>,
     pub transaction_manager: Arc<TransactionManager>,
     pub download_semaphore: Arc<Semaphore>,
-    pub download_permits: Arc<AtomicUsize>,
-    // package whose detail page the frontend currently shows so its
-    // transactions skip the job notification
-    pub foreground_package: Arc<tokio::sync::RwLock<String>>,
+    // the concurrency target last requested via set_concurrent_downloads;
+    // a Mutex (not an AtomicUsize) so a shrink and a subsequent resize can't
+    // race and compute their deltas against a half-applied target
+    pub download_permits: Arc<Mutex<usize>>,
+    // whether the frontend window is currently on screen (not minimized,
+    // not closed); while it is, the Downloads/Detail pages already show
+    // install/remove progress in-app, so the OS-level job notification
+    // would just be a redundant popup
+    pub frontend_visible: Arc<tokio::sync::RwLock<bool>>,
 }
 
 impl ArcDaemonInterface {
-    async fn kio_hidden(&self, package_id: &str) -> bool {
-        *self.foreground_package.read().await == package_id
+    // notify: caller-level opt-out. the GUI always passes true and lets
+    // frontend_visible decide; the CLI passes false unless the user asked
+    // for a notification with --notify.
+    async fn kio_hidden(&self, notify: bool) -> bool {
+        if !notify {
+            return true;
+        }
+        let visible = *self.frontend_visible.read().await;
+        info!("kio_hidden: notify={notify} frontend_visible={visible} -> hidden={visible}");
+        visible
     }
 }
 
@@ -62,6 +89,7 @@ impl ArcDaemonInterface {
     async fn install_package(
         &self,
         package_id: String,
+        notify: bool,
         // zbus injects this automatically, it is how we push events back to
         // all listening clients without them polling us
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
@@ -86,8 +114,8 @@ impl ArcDaemonInterface {
 
         // spawn so we return the tx id to the caller right away and do the
         // actual install in the background, progress comes via signals
-        let kio_hidden = self.kio_hidden(&package_id).await;
-        tokio::spawn(async move {
+        let kio_hidden = self.kio_hidden(notify).await;
+        spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
             let kio = crate::kio::KioJob::start(
@@ -117,7 +145,7 @@ impl ArcDaemonInterface {
             let tm_fwd = tm.clone();
             let cancel_token_fwd = cancel_token.clone();
             let kio_fwd = kio.clone();
-            tokio::spawn(async move {
+            spawn(async move {
                 loop {
                     tokio::select! {
                         _ = cancel_token_fwd.cancelled() => {
@@ -193,6 +221,7 @@ impl ArcDaemonInterface {
     async fn install_flatpakref(
         &self,
         url: String,
+        notify: bool,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> String {
         info!("InstallFlatpakref: {}", url);
@@ -211,8 +240,8 @@ impl ArcDaemonInterface {
         let semaphore = self.download_semaphore.clone();
         let emitter = emitter.to_owned();
 
-        let kio_hidden = self.kio_hidden(&url).await;
-        tokio::spawn(async move {
+        let kio_hidden = self.kio_hidden(notify).await;
+        spawn(async move {
             let _ = Self::transaction_started(&emitter, tx_id.to_string(), url.clone()).await;
             let kio = crate::kio::KioJob::start(
                 &tr!("Installing application"),
@@ -239,7 +268,7 @@ impl ArcDaemonInterface {
             let tm_fwd = tm.clone();
             let cancel_token_fwd = cancel_token.clone();
             let kio_fwd = kio.clone();
-            tokio::spawn(async move {
+            spawn(async move {
                 loop {
                     tokio::select! {
                         _ = cancel_token_fwd.cancelled() => {
@@ -315,6 +344,7 @@ impl ArcDaemonInterface {
     async fn remove_package(
         &self,
         package_id: String,
+        notify: bool,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> String {
         info!("RemovePackage: {}", package_id);
@@ -332,8 +362,8 @@ impl ArcDaemonInterface {
         let tm = self.transaction_manager.clone();
         let emitter = emitter.to_owned();
 
-        let kio_hidden = self.kio_hidden(&package_id).await;
-        tokio::spawn(async move {
+        let kio_hidden = self.kio_hidden(notify).await;
+        spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
             let kio =
@@ -380,6 +410,7 @@ impl ArcDaemonInterface {
         &self,
         package_id: String,
         delete_data: bool,
+        notify: bool,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> String {
         info!("RemovePackageWithData: {} delete_data={}", package_id, delete_data);
@@ -397,8 +428,8 @@ impl ArcDaemonInterface {
         let tm = self.transaction_manager.clone();
         let emitter = emitter.to_owned();
 
-        let kio_hidden = self.kio_hidden(&package_id).await;
-        tokio::spawn(async move {
+        let kio_hidden = self.kio_hidden(notify).await;
+        spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
             let kio =
@@ -410,18 +441,18 @@ impl ArcDaemonInterface {
             match provider.remove(&package_id).await {
                 Ok(()) => {
                     if delete_data {
-                        if let Some(home) = std::env::var_os("HOME") {
+                        if let Some(home) = env::var_os("HOME") {
                             let home = std::path::PathBuf::from(home);
                             let flatpak_dir = home.join(".var/app").join(&package_id);
                             if flatpak_dir.exists() {
-                                let _ = std::fs::remove_dir_all(&flatpak_dir);
+                                let _ = fs::remove_dir_all(&flatpak_dir);
                             }
                             if let Some(appid) = package_id.strip_prefix("pwa:") {
                                 let pwa_dir = home
                                     .join(".local/share/blossomos-webapps")
                                     .join(appid);
                                 if pwa_dir.exists() {
-                                    let _ = std::fs::remove_dir_all(&pwa_dir);
+                                    let _ = fs::remove_dir_all(&pwa_dir);
                                 }
                             }
                         }
@@ -459,6 +490,7 @@ impl ArcDaemonInterface {
     async fn update_package(
         &self,
         package_id: String,
+        notify: bool,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> String {
         info!("UpdatePackage: {}", package_id);
@@ -477,8 +509,8 @@ impl ArcDaemonInterface {
         let semaphore = self.download_semaphore.clone();
         let emitter = emitter.to_owned();
 
-        let kio_hidden = self.kio_hidden(&package_id).await;
-        tokio::spawn(async move {
+        let kio_hidden = self.kio_hidden(notify).await;
+        spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
             let kio = crate::kio::KioJob::start(
@@ -506,7 +538,7 @@ impl ArcDaemonInterface {
             let tm_fwd = tm.clone();
             let cancel_token_fwd = cancel_token.clone();
             let kio_fwd = kio.clone();
-            tokio::spawn(async move {
+            spawn(async move {
                 loop {
                     tokio::select! {
                         _ = cancel_token_fwd.cancelled() => {
@@ -579,19 +611,41 @@ impl ArcDaemonInterface {
         tx_id.to_string()
     }
 
-    // the frontend reports which app its detail page currently shows so
-    // transactions for it run without a job notification
-    async fn set_foreground_package(&self, package_id: String) {
-        *self.foreground_package.write().await = package_id;
+    // the frontend reports whether its window is currently on screen so job
+    // notifications only appear while there's no in-app UI to show progress
+    async fn set_frontend_visible(&self, visible: bool) {
+        info!("SetFrontendVisible: {visible}");
+        *self.frontend_visible.write().await = visible;
     }
 
     async fn set_concurrent_downloads(&self, count: u32) {
         let target = count.max(1) as usize;
-        let current = self.download_permits.swap(target, Ordering::SeqCst);
-        if target > current {
-            self.download_semaphore.add_permits(target - current);
-        } else if target < current {
-            self.download_semaphore.forget_permits(current - target);
+        let mut current = self.download_permits.lock().await;
+        if target == *current {
+            return;
+        }
+        let previous = *current;
+        *current = target;
+        drop(current);
+
+        if target > previous {
+            self.download_semaphore.add_permits(target - previous);
+        } else {
+            // Semaphore::forget_permits only forgets currently-*available*
+            // permits, so shrinking while every slot is checked out by an
+            // in-progress download silently forgot 0 and the old (higher)
+            // limit kept applying until every download finished on its own.
+            // acquiring the deficit and forgetting the acquired permits
+            // instead waits for slots to free up naturally and always
+            // converges to the real target, no matter how busy the
+            // semaphore is right now.
+            let deficit = (previous - target) as u32;
+            let semaphore = self.download_semaphore.clone();
+            spawn(async move {
+                if let Ok(permits) = semaphore.acquire_many_owned(deficit).await {
+                    permits.forget();
+                }
+            });
         }
     }
 
@@ -611,7 +665,10 @@ impl ArcDaemonInterface {
     async fn search(&self, query: String) -> String {
         info!("Search: {}", query);
         match self.provider.search(&query).await {
-            Ok(packages) => serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string()),
+            Ok(mut packages) => {
+                proxy_icon_urls(&mut packages);
+                serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string())
+            }
             Err(e) => {
                 error!("Search failed: {}", e);
                 format!("{{\"error\":\"{}\"}}", e)
@@ -622,7 +679,10 @@ impl ArcDaemonInterface {
     async fn search_category(&self, category: String) -> String {
         info!("SearchCategory: {}", category);
         match self.provider.search_category(&category).await {
-            Ok(packages) => serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string()),
+            Ok(mut packages) => {
+                proxy_icon_urls(&mut packages);
+                serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string())
+            }
             Err(e) => {
                 error!("SearchCategory failed: {}", e);
                 "[]".to_string()
@@ -634,7 +694,8 @@ impl ArcDaemonInterface {
         info!("GetAppInfo: {}", package_id);
         match tokio::time::timeout(APP_INFO_TIMEOUT, self.provider.get_app_info(&package_id)).await
         {
-            Ok(Ok(Some(package))) => {
+            Ok(Ok(Some(mut package))) => {
+                proxy_icon_url(&mut package);
                 serde_json::to_string(&Some(package)).unwrap_or_else(|_| "null".to_string())
             }
             Ok(Ok(None)) => "null".to_string(),
@@ -656,19 +717,22 @@ impl ArcDaemonInterface {
         }
 
         let fast_id = package_id.clone();
-        if let Ok(Some(json)) = tokio::task::spawn_blocking(move || {
-            crate::appstream_db::load_local_metainfo(&fast_id).and_then(|e| serde_json::to_string(&e).ok())
-        })
-        .await
+        if let Some(mut entry) = spawn_blocking(move || crate::appstream_db::load_local_metainfo(&fast_id))
+            .await
+            .ok()
+            .flatten()
         {
-            return json;
+            crate::media::proxy_screenshot_urls(&mut entry.screenshots);
+            if let Ok(json) = serde_json::to_string(&entry) {
+                return json;
+            }
         }
 
         // resolve_now checks the already-loaded db first then decompresses
         // and scans just the catalog files not yet folded in
         // stays well under APP_INFO_TIMEOUT instead of waiting on the full parse
         let resolve_id = package_id.clone();
-        let fetch = tokio::task::spawn_blocking(move || {
+        let fetch = spawn_blocking(move || {
             crate::appstream_db::resolve_now(&resolve_id)
                 .or_else(|| crate::appstream_db::AppStreamDb::try_get().load_from_exported_metainfo(&resolve_id))
         });
@@ -677,7 +741,8 @@ impl ArcDaemonInterface {
             .ok()
             .and_then(|r| r.ok())
             .flatten();
-        if let Some(entry) = entry {
+        if let Some(mut entry) = entry {
+            crate::media::proxy_screenshot_urls(&mut entry.screenshots);
             if let Ok(json) = serde_json::to_string(&entry) {
                 return json;
             }
@@ -686,8 +751,11 @@ impl ArcDaemonInterface {
         // id missing from every catalog file
         // fall back to the disk-seeded package cache for a partial answer
         match self.provider.cached_package(&package_id).await {
-            Some(pkg) => serde_json::to_string(&crate::appstream_db::partial_entry_from_package(&pkg))
-                .unwrap_or_else(|_| "null".to_string()),
+            Some(pkg) => {
+                let mut entry = crate::appstream_db::partial_entry_from_package(&pkg);
+                crate::media::proxy_screenshot_urls(&mut entry.screenshots);
+                serde_json::to_string(&entry).unwrap_or_else(|_| "null".to_string())
+            }
             None => "null".to_string(),
         }
     }
@@ -695,7 +763,10 @@ impl ArcDaemonInterface {
     async fn list_installed(&self) -> String {
         info!("ListInstalled");
         match self.provider.list_installed().await {
-            Ok(packages) => serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string()),
+            Ok(mut packages) => {
+                proxy_icon_urls(&mut packages);
+                serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string())
+            }
             Err(e) => {
                 error!("ListInstalled failed: {}", e);
                 format!("{{\"error\":\"{}\"}}", e)
@@ -706,13 +777,14 @@ impl ArcDaemonInterface {
     async fn list_updates(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) -> String {
         info!("ListUpdates");
         match self.provider.list_updates().await {
-            Ok(packages) => {
+            Ok(mut packages) => {
                 let count = packages.len() as u32;
                 // fire the signal so any notification daemon listening can
                 // show a badge or popup without polling list_updates itself
                 if count > 0 {
                     let _ = Self::updates_available(&emitter, count).await;
                 }
+                proxy_icon_urls(&mut packages);
                 serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string())
             }
             Err(e) => {
@@ -780,10 +852,14 @@ impl ArcDaemonInterface {
     }
 
     async fn get_home_apps(&self, popular_count: u32, recent_count: u32) -> String {
-        tokio::task::spawn_blocking(move || {
+        spawn_blocking(move || {
             let db = crate::appstream_db::AppStreamDb::try_get();
-            let popular = db.get_popular_apps(popular_count as usize);
-            let recent = db.get_recent_apps(recent_count as usize);
+            let mut popular = db.get_popular_apps(popular_count as usize);
+            let mut recent = db.get_recent_apps(recent_count as usize);
+            for entry in popular.iter_mut().chain(recent.iter_mut()) {
+                crate::media::proxy_icon_url_field(&mut entry.icon_url, &entry.id);
+                crate::media::proxy_screenshot_urls(&mut entry.screenshots);
+            }
             serde_json::json!({ "popular": popular, "recent": recent }).to_string()
         })
         .await
@@ -793,7 +869,10 @@ impl ArcDaemonInterface {
     async fn list_extensions(&self, app_id: String) -> String {
         info!("ListExtensions: {}", app_id);
         match self.provider.list_extensions(&app_id).await {
-            Ok(packages) => serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string()),
+            Ok(mut packages) => {
+                proxy_icon_urls(&mut packages);
+                serde_json::to_string(&packages).unwrap_or_else(|_| "[]".to_string())
+            }
             Err(e) => {
                 error!("ListExtensions failed: {}", e);
                 "[]".to_string()
@@ -803,7 +882,7 @@ impl ArcDaemonInterface {
 
     async fn list_remotes(&self) -> String {
         info!("ListRemotes");
-        tokio::task::spawn_blocking(FlatpakProvider::list_remotes)
+        spawn_blocking(FlatpakProvider::list_remotes)
             .await
             .ok()
             .and_then(|v| serde_json::to_string(&v).ok())
@@ -812,7 +891,7 @@ impl ArcDaemonInterface {
 
     async fn add_remote(&self, name: String, url: String) -> bool {
         info!("AddRemote: {} {}", name, url);
-        tokio::task::spawn_blocking(move || FlatpakProvider::add_remote_from_url(&name, &url))
+        spawn_blocking(move || FlatpakProvider::add_remote_from_url(&name, &url))
             .await
             .map(|r| r.is_ok())
             .unwrap_or(false)
@@ -820,7 +899,7 @@ impl ArcDaemonInterface {
 
     async fn remove_remote(&self, name: String) -> bool {
         info!("RemoveRemote: {}", name);
-        tokio::task::spawn_blocking(move || FlatpakProvider::remove_remote(&name))
+        spawn_blocking(move || FlatpakProvider::remove_remote(&name))
             .await
             .map(|r| r.is_ok())
             .unwrap_or(false)
@@ -828,7 +907,7 @@ impl ArcDaemonInterface {
 
     async fn add_flatpakrepo(&self, content: String) -> bool {
         info!("AddFlatpakrepo");
-        tokio::task::spawn_blocking(move || FlatpakProvider::add_remote_from_flatpakrepo(&content))
+        spawn_blocking(move || FlatpakProvider::add_remote_from_flatpakrepo(&content))
             .await
             .map(|r| r.is_ok())
             .unwrap_or(false)
@@ -837,6 +916,7 @@ impl ArcDaemonInterface {
     async fn install_flatpak_bundle(
         &self,
         path: String,
+        notify: bool,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> String {
         info!("InstallFlatpakBundle: {}", path);
@@ -851,8 +931,8 @@ impl ArcDaemonInterface {
         let semaphore = self.download_semaphore.clone();
         let emitter = emitter.to_owned();
 
-        let kio_hidden = self.kio_hidden(&path).await;
-        tokio::spawn(async move {
+        let kio_hidden = self.kio_hidden(notify).await;
+        spawn(async move {
             let _ = Self::transaction_started(&emitter, tx_id.to_string(), path.clone()).await;
             let kio = crate::kio::KioJob::start(
                 &tr!("Installing application"),
@@ -878,7 +958,7 @@ impl ArcDaemonInterface {
             let tm_fwd = tm.clone();
             let cancel_token_fwd = cancel_token.clone();
             let kio_fwd = kio.clone();
-            tokio::spawn(async move {
+            spawn(async move {
                 loop {
                     tokio::select! {
                         _ = cancel_token_fwd.cancelled() => break,
