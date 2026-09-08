@@ -181,7 +181,10 @@ impl PwaProvider {
             exec.push_str(" --tray");
         }
         if !pwa.url_filter.is_empty() {
-            exec.push_str(&format!(" --url-filter={}", quote_exec_arg(&pwa.url_filter)));
+            exec.push_str(&format!(
+                " --url-filter={}",
+                quote_exec_arg(&pwa.url_filter)
+            ));
         }
         exec
     }

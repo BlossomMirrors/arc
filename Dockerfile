@@ -33,7 +33,7 @@ RUN dnf install -y \
 RUN flatpak remote-add --system --if-not-exists \
         flathub https://flathub.org/repo/flathub.flatpakrepo \
     && flatpak remote-add --system --if-not-exists \
-        blossomos https://forge.blossomos.org/flatpak.flatpakrepo \
+        blossomos https://forge.arcstore.net/flatpak.flatpakrepo \
     && flatpak update --appstream --system
 
 COPY --from=builder /build/target/release/arc-daemon /usr/local/bin/arc-daemon
@@ -65,4 +65,4 @@ EXPOSE 1312
 ENV ARC_HTTP_HOST=0.0.0.0
 ENV ARC_HTTP_ONLY=1
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/usr/local/bin/entrypoint.sh"]

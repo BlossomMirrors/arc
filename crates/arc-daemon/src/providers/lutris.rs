@@ -140,7 +140,13 @@ impl LutrisProvider {
 
     async fn scrape_screenshots(&self, game_slug: &str) -> Vec<String> {
         let url = format!("https://lutris.net/games/{}/", game_slug);
-        let html = match self.http_client.get(&url).timeout(Duration::from_secs(10)).send().await {
+        let html = match self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+        {
             Ok(r) => match r.text().await {
                 Ok(t) => t,
                 Err(_) => return vec![],
@@ -204,8 +210,8 @@ impl LutrisProvider {
                         None
                     }
                 }
-            }),
-        )
+            },
+        ))
         .await
         .into_iter()
         .flatten()

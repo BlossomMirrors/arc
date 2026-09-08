@@ -11,7 +11,8 @@ use tokio::task::spawn_blocking;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::appstream_db::{
-    find_local_flatpak_icon_bytes, parse_locale_candidates, score_entry, AppStreamDb, AppStreamEntry,
+    find_local_flatpak_icon_bytes, parse_locale_candidates, score_entry, AppStreamDb,
+    AppStreamEntry,
 };
 use crate::providers::lutris::LutrisProvider;
 use crate::providers::pwa::PwaProvider;
