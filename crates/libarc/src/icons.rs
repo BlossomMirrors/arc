@@ -1,9 +1,11 @@
 use image::{imageops::FilterType, DynamicImage, GenericImageView, Rgba, RgbaImage};
 use ini::Ini;
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex, OnceLock};
 
 const OUTPUT_SIZE: u32 = 256;
 const PADDING_PX: u32 = 22;
@@ -104,7 +106,34 @@ pub fn icon_content_type(path: &Path) -> &'static str {
     }
 }
 
+type ThemeIndex = Arc<HashMap<String, PathBuf>>;
+
+#[derive(Default)]
+struct ThemeCache {
+    system_theme: Option<Option<String>>,
+    indexes: HashMap<PathBuf, ThemeIndex>,
+}
+
+fn theme_cache() -> &'static Mutex<ThemeCache> {
+    static CACHE: OnceLock<Mutex<ThemeCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(ThemeCache::default()))
+}
+
+pub fn invalidate_theme_cache() {
+    *theme_cache().lock().unwrap() = ThemeCache::default();
+}
+
 pub fn system_theme_name() -> Option<String> {
+    let mut cache = theme_cache().lock().unwrap();
+    if let Some(cached) = &cache.system_theme {
+        return cached.clone();
+    }
+    let name = read_system_theme_name();
+    cache.system_theme = Some(name.clone());
+    name
+}
+
+fn read_system_theme_name() -> Option<String> {
     let config_dir = dirs::config_dir()?;
     read_ini_value(&config_dir.join("kdeglobals"), "Icons", "Theme")
         .or_else(|| read_ini_value(&config_dir.join("gtk-4.0/settings.ini"), "Settings", "gtk-icon-theme-name"))
@@ -135,12 +164,60 @@ pub fn find_icon_theme_icon(app_id: &str) -> Option<PathBuf> {
 
     for base in &bases {
         for theme in &themes {
-            if let Some(p) = find_in_theme_dir(&base.join(theme), app_id) {
-                return Some(p);
+            if let Some(p) = theme_index(&base.join(theme)).get(app_id) {
+                return Some(p.clone());
             }
         }
     }
     None
+}
+
+fn theme_index(theme_dir: &Path) -> ThemeIndex {
+    let mut cache = theme_cache().lock().unwrap();
+    if let Some(index) = cache.indexes.get(theme_dir) {
+        return index.clone();
+    }
+    let index = Arc::new(build_theme_index(theme_dir));
+    cache.indexes.insert(theme_dir.to_path_buf(), index.clone());
+    index
+}
+
+fn build_theme_index(theme_dir: &Path) -> HashMap<String, PathBuf> {
+    let mut index: HashMap<String, PathBuf> = HashMap::new();
+    for dir in icon_dirs(theme_dir, "apps") {
+        let Ok(entries) = fs::read_dir(theme_dir.join(&dir)) else {
+            continue;
+        };
+        let mut best: HashMap<String, (u8, PathBuf)> = HashMap::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(rank) = path.extension().and_then(|e| e.to_str()).and_then(ext_rank) else {
+                continue;
+            };
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            match best.get(stem) {
+                Some((current, _)) if *current <= rank => {}
+                _ => {
+                    best.insert(stem.to_string(), (rank, path));
+                }
+            }
+        }
+        for (stem, (_, path)) in best {
+            index.entry(stem).or_insert(path);
+        }
+    }
+    index
+}
+
+fn ext_rank(ext: &str) -> Option<u8> {
+    match ext {
+        "png" => Some(0),
+        "svg" => Some(1),
+        "svgz" => Some(2),
+        _ => None,
+    }
 }
 
 pub fn find_in_theme_dir(theme_dir: &Path, app_id: &str) -> Option<PathBuf> {

@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QIcon>
 #include <KLocalizedQmlContext>
+#include <KLocalizedString>
 #include <cstdio>
 #include <cstdlib>
 
@@ -31,11 +32,26 @@ extern "C" void arc_install_message_handler() {
     qInstallMessageHandler(arc_message_handler);
 }
 
+extern "C" void arc_add_locale_dir(const char *domain, const char *dir) {
+    const QString path = QString::fromUtf8(dir);
+    if (!path.isEmpty()) {
+        KLocalizedString::addDomainLocaleDir(QByteArray(domain), path);
+    }
+}
+
 extern "C" void arc_setup_i18n(void *engine_ptr, const char *domain) {
     auto *engine = reinterpret_cast<QQmlApplicationEngine *>(engine_ptr);
+    const QString domainName = QString::fromUtf8(domain);
+
     auto *ctx = KLocalization::setupLocalizedContext(engine);
     if (ctx) {
-        ctx->setTranslationDomain(QString::fromUtf8(domain));
+        ctx->setTranslationDomain(domainName);
+    }
+
+    auto *singleton = engine->singletonInstance<KLocalizedQmlContext *>(
+        QStringLiteral("org.kde.ki18n"), QStringLiteral("KI18n"));
+    if (singleton) {
+        singleton->setTranslationDomain(domainName);
     }
 }
 

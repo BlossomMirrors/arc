@@ -5,12 +5,11 @@ use crate::providers::distrobox::DistroboxProvider;
 use crate::providers::flatpak::FlatpakProvider;
 use crate::providers::lutris::LutrisProvider;
 use crate::providers::pwa::PwaProvider;
-use crate::providers::{MultiProvider, PackageProvider};
+use crate::providers::MultiProvider;
 use crate::transaction_manager::TransactionManager;
 use anyhow::Result;
 use futures_util::StreamExt;
 use std::sync::Arc;
-use tokio::process::Command;
 use tokio::spawn;
 use tokio::sync::Semaphore;
 use tokio::task::spawn_blocking;
@@ -18,6 +17,7 @@ use tracing::{info, warn};
 use zbus::connection::Builder as ConnectionBuilder;
 use zbus::fdo::{DBusProxy, NameLostStream, RequestNameFlags, RequestNameReply};
 use zbus::names::BusName;
+use zbus::object_server::SignalEmitter;
 use zbus::Connection;
 
 const BUS_NAME: &str = "org.blossomos.arc.daemon";
@@ -83,17 +83,7 @@ impl Daemon {
         // unreachable until this finishes.
         let warmup_provider = Arc::clone(&provider);
         spawn(async move {
-            if crate::appstream_db::should_refresh_remotes() {
-                info!("Refreshing AppStream data...");
-                match Command::new("flatpak").args(["update", "--appstream"]).status().await {
-                    Ok(status) if status.success() => info!("AppStream data refreshed"),
-                    Ok(status) => warn!("flatpak update --appstream exited with {}", status),
-                    Err(e) => warn!("Failed to run flatpak update --appstream: {}", e),
-                }
-                crate::appstream_db::mark_remotes_refreshed();
-            } else {
-                info!("AppStream remotes refreshed recently, skipping network update");
-            }
+            crate::appstream_db::refresh_remotes_if_due().await;
 
             spawn_blocking(AppStreamDb::refresh_if_stale).await.ok();
 
@@ -116,6 +106,7 @@ impl Daemon {
         // daemon struct share the same provider without copying it
         let bg_provider = Arc::clone(&provider);
         spawn(async move {
+            let mut ticks: u32 = 0;
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(15 * 60)).await;
                 if let Err(e) = bg_provider.refresh_cache().await {
@@ -123,32 +114,14 @@ impl Daemon {
                 } else {
                     info!("Package cache refreshed");
                 }
-            }
-        });
-
-        let au_provider = Arc::clone(&provider);
-        spawn(async move {
-            loop {
-                if libarc::Settings::load().auto_updates {
-                    info!("Auto-update: checking for updates...");
-                    match au_provider.list_updates().await {
-                        Err(e) => warn!("Auto-update: list_updates failed: {}", e),
-                        Ok(updates) if updates.is_empty() => {
-                            info!("Auto-update: nothing to update");
-                        }
-                        Ok(updates) => {
-                            info!("Auto-update: updating {} package(s)", updates.len());
-                            for pkg in updates {
-                                info!("Auto-update: updating {}", pkg.id);
-                                if let Err(e) = au_provider.update(&pkg.id).await {
-                                    warn!("Auto-update: failed to update {}: {}", pkg.id, e);
-                                }
-                            }
-                            info!("Auto-update: done");
-                        }
+                // hourly
+                ticks += 1;
+                if ticks % 4 == 0 {
+                    match bg_provider.pwa.refresh_installed_icons().await {
+                        0 => {}
+                        n => info!("Refreshed {n} PWA icon(s)"),
                     }
                 }
-                tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
             }
         });
 
@@ -176,6 +149,7 @@ impl Daemon {
 
         let settings = libarc::Settings::load();
         let concurrent = (settings.concurrent_downloads as usize).max(1);
+        let auto_update_provider = Arc::clone(&self.provider);
         let interface = ArcDaemonInterface {
             provider: self.provider,
             transaction_manager: self.transaction_manager.clone(),
@@ -191,6 +165,14 @@ impl Daemon {
             .await?;
 
         info!("D-Bus service registered at {BUS_NAME}");
+
+        let emitter = SignalEmitter::new(&conn, "/org/blossomos/arc/daemon")?.to_owned();
+        spawn(crate::dbus_interface::run_auto_updates(
+            auto_update_provider,
+            self.transaction_manager.clone(),
+            emitter,
+        ));
+
         info!("Arc daemon running. Press Ctrl+C to stop.");
 
         // wait here until ctrl+c/sigterm or until a newer daemon replaces us,

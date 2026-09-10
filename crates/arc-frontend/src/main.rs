@@ -10,6 +10,7 @@ use std::pin::Pin;
 
 extern "C" {
     fn arc_setup_i18n(engine: *mut c_void, domain: *const std::ffi::c_char);
+    fn arc_add_locale_dir(domain: *const std::ffi::c_char, dir: *const std::ffi::c_char);
     fn arc_install_message_handler();
     fn arc_engine_has_root(engine: *mut c_void) -> bool;
     fn arc_set_icon_theme(name: *const std::ffi::c_char);
@@ -45,6 +46,9 @@ fn main() {
     let mut engine = QQmlApplicationEngine::new();
     if let Some(mut engine) = engine.as_mut() {
         let domain = CString::new("arc-frontend").unwrap();
+        if let Ok(dir) = CString::new(env!("ARC_LOCALE_DIR")) {
+            unsafe { arc_add_locale_dir(domain.as_ptr(), dir.as_ptr()) };
+        }
         unsafe {
             let raw: *mut QQmlApplicationEngine = Pin::as_mut(&mut engine).get_unchecked_mut();
             arc_setup_i18n(raw as *mut c_void, domain.as_ptr());

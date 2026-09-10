@@ -5,13 +5,14 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.blossomos.arc
+import org.kde.ki18n
 
 Kirigami.ScrollablePage {
     id: root
 
     Kirigami.ColumnView.fillWidth: true
 
-    title: i18n("Downloads")
+    title: KI18n.i18n("Downloads")
 
     PackageListModel {
         id: downloadListModel
@@ -27,15 +28,15 @@ Kirigami.ScrollablePage {
     }
 
     function formatEta(secs) {
-        if (secs >= 3600) return i18n("%1 h %2 min remaining", Math.floor(secs / 3600), Math.floor((secs % 3600) / 60));
-        if (secs >= 60) return i18n("%1 min remaining", Math.floor(secs / 60));
-        return i18n("%1 s remaining", secs);
+        if (secs >= 3600) return KI18n.i18n("%1 h %2 min remaining", Math.floor(secs / 3600), Math.floor((secs % 3600) / 60));
+        if (secs >= 60) return KI18n.i18n("%1 min remaining", Math.floor(secs / 60));
+        return KI18n.i18n("%1 s remaining", secs);
     }
 
     function txTypeLabel(txType) {
-        if (txType === "remove") return i18n("Removing");
-        if (txType === "update") return i18n("Updating");
-        return i18n("Installing");
+        if (txType === "remove") return KI18n.i18n("Removing");
+        if (txType === "update") return KI18n.i18n("Updating");
+        return KI18n.i18n("Installing");
     }
 
     readonly property bool contentReady: !downloadListModel.loading && TransactionsModel.historyLoaded
@@ -53,13 +54,13 @@ Kirigami.ScrollablePage {
             && TransactionsModel.doneCount === 0
             && updatesRepeater.count === 0
         icon.name: "checkmark"
-        text: i18n("Everything is up to date")
-        explanation: i18n("No updates available. Installs, removals and updates show up here.")
+        text: KI18n.i18n("Everything is up to date")
+        explanation: KI18n.i18n("No updates available. Installs, removals and updates show up here.")
 
         helpfulAction: Kirigami.Action {
             icon.name: "view-refresh-symbolic"
-            text: i18n("Check for Updates")
-            onTriggered: downloadListModel.loadUpdates()
+            text: KI18n.i18n("Check for Updates")
+            onTriggered: downloadListModel.checkForUpdates()
         }
     }
 
@@ -81,6 +82,7 @@ Kirigami.ScrollablePage {
 
                     required property int index
                     required property string txId
+                    required property string pkgId
                     required property string name
                     required property string iconUrl
                     required property real progress
@@ -94,6 +96,12 @@ Kirigami.ScrollablePage {
                     visible: status === "running"
                     Layout.fillWidth: true
 
+                    showClickFeedback: true
+                    onClicked: NavController.openApp(heroDelegate.pkgId, JSON.stringify({
+                        name: heroDelegate.name,
+                        iconUrl: heroDelegate.iconUrl
+                    }))
+
                     contentItem: ColumnLayout {
                         spacing: Kirigami.Units.largeSpacing
 
@@ -101,8 +109,8 @@ Kirigami.ScrollablePage {
                             Layout.fillWidth: true
                             spacing: Kirigami.Units.largeSpacing
 
-                            Kirigami.Icon {
-                                source: heroDelegate.iconUrl.length > 0 ? heroDelegate.iconUrl : "application-x-executable"
+                            AppIcon {
+                                source: heroDelegate.iconUrl
                                 Layout.preferredWidth: Kirigami.Units.iconSizes.huge
                                 Layout.preferredHeight: Kirigami.Units.iconSizes.huge
                             }
@@ -135,8 +143,8 @@ Kirigami.ScrollablePage {
                                 Layout.alignment: Qt.AlignVCenter
                                 icon.name: "process-stop-symbolic"
                                 display: Controls.Button.IconOnly
-                                text: i18n("Cancel")
-                                Controls.ToolTip.text: i18n("Cancel")
+                                text: KI18n.i18n("Cancel")
+                                Controls.ToolTip.text: KI18n.i18n("Cancel")
                                 Controls.ToolTip.visible: hovered
                                 Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                                 onClicked: TransactionsModel.cancel(heroDelegate.txId)
@@ -155,7 +163,7 @@ Kirigami.ScrollablePage {
 
                             Controls.Label {
                                 visible: heroDelegate.bytesTotal > 0
-                                text: i18n("%1 of %2", root.formatBytes(heroDelegate.bytesDone), root.formatBytes(heroDelegate.bytesTotal))
+                                text: KI18n.i18n("%1 of %2", root.formatBytes(heroDelegate.bytesDone), root.formatBytes(heroDelegate.bytesTotal))
                                 opacity: 0.7
                             }
 
@@ -183,7 +191,7 @@ Kirigami.ScrollablePage {
                 Layout.topMargin: Kirigami.Units.largeSpacing
                 level: 2
                 visible: TransactionsModel.queuedCount > 0
-                text: i18n("Up Next")
+                text: KI18n.i18n("Up Next")
             }
 
             Repeater {
@@ -194,6 +202,7 @@ Kirigami.ScrollablePage {
 
                     required property int index
                     required property string txId
+                    required property string pkgId
                     required property string name
                     required property string iconUrl
                     required property string status
@@ -202,11 +211,17 @@ Kirigami.ScrollablePage {
                     visible: status === "pending"
                     Layout.fillWidth: true
 
+                    showClickFeedback: true
+                    onClicked: NavController.openApp(queuedDelegate.pkgId, JSON.stringify({
+                        name: queuedDelegate.name,
+                        iconUrl: queuedDelegate.iconUrl
+                    }))
+
                     contentItem: RowLayout {
                         spacing: Kirigami.Units.largeSpacing
 
-                        Kirigami.Icon {
-                            source: queuedDelegate.iconUrl.length > 0 ? queuedDelegate.iconUrl : "application-x-executable"
+                        AppIcon {
+                            source: queuedDelegate.iconUrl
                             Layout.preferredWidth: Kirigami.Units.iconSizes.medium
                             Layout.preferredHeight: Kirigami.Units.iconSizes.medium
                         }
@@ -219,15 +234,15 @@ Kirigami.ScrollablePage {
                         }
 
                         Controls.Label {
-                            text: i18n("Queued")
+                            text: KI18n.i18n("Queued")
                             opacity: 0.7
                         }
 
                         Controls.Button {
                             icon.name: "process-stop-symbolic"
                             display: Controls.Button.IconOnly
-                            text: i18n("Cancel")
-                            Controls.ToolTip.text: i18n("Cancel")
+                            text: KI18n.i18n("Cancel")
+                            Controls.ToolTip.text: KI18n.i18n("Cancel")
                             Controls.ToolTip.visible: hovered
                             Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                             onClicked: TransactionsModel.cancel(queuedDelegate.txId)
@@ -248,19 +263,19 @@ Kirigami.ScrollablePage {
                 Kirigami.Heading {
                     Layout.fillWidth: true
                     level: 2
-                    text: i18n("Available Updates")
+                    text: KI18n.i18n("Available Updates")
                 }
 
                 Controls.ToolButton {
                     icon.name: "view-refresh-symbolic"
-                    text: i18n("Check")
-                    onClicked: downloadListModel.loadUpdates()
+                    text: KI18n.i18n("Check")
+                    onClicked: downloadListModel.checkForUpdates()
                 }
 
                 Controls.Button {
                     visible: updatesRepeater.count > 0
                     icon.name: "update-none-symbolic"
-                    text: i18n("Update All")
+                    text: KI18n.i18n("Update All")
                     highlighted: true
                     onClicked: TransactionsModel.updateAll()
                 }
@@ -272,7 +287,7 @@ Kirigami.ScrollablePage {
                     && (TransactionsModel.runningCount > 0
                         || TransactionsModel.queuedCount > 0
                         || TransactionsModel.doneCount > 0)
-                text: i18n("Everything is up to date.")
+                text: KI18n.i18n("Everything is up to date.")
                 opacity: 0.7
             }
 
@@ -295,11 +310,11 @@ Kirigami.ScrollablePage {
                     Layout.fillWidth: true
 
                     showClickFeedback: true
-                    onClicked: applicationWindow().openApp(updateDelegate.pkgId, {
+                    onClicked: NavController.openApp(updateDelegate.pkgId, JSON.stringify({
                         name: updateDelegate.name,
                         iconUrl: updateDelegate.iconUrl,
                         installed: true
-                    })
+                    }))
 
                     HoverHandler {
                         id: updateRowHover
@@ -359,12 +374,12 @@ Kirigami.ScrollablePage {
                 Kirigami.Heading {
                     Layout.fillWidth: true
                     level: 2
-                    text: i18n("Completed")
+                    text: KI18n.i18n("Completed")
                 }
 
                 Controls.ToolButton {
                     icon.name: "edit-clear-history-symbolic"
-                    text: i18n("Clear")
+                    text: KI18n.i18n("Clear")
                     onClicked: TransactionsModel.clearFinished()
                 }
             }
@@ -376,38 +391,81 @@ Kirigami.ScrollablePage {
                     id: doneDelegate
 
                     required property int index
+                    required property string pkgId
                     required property string name
                     required property string iconUrl
                     required property string status
                     required property string txType
                     required property string error
+                    required property real finishedAt
+                    required property bool automatic
 
                     readonly property bool failed: status === "failed"
+
+                    readonly property string actionText: {
+                        const removal = txType === "remove" || txType === "remove_with_data";
+                        if (failed) {
+                            return removal ? KI18n.i18n("Removal failed")
+                                : txType === "update" ? KI18n.i18n("Update failed")
+                                : KI18n.i18n("Installation failed");
+                        }
+                        if (removal) {
+                            return KI18n.i18n("Removed");
+                        }
+                        if (txType === "update") {
+                            return automatic ? KI18n.i18n("Updated in the background") : KI18n.i18n("Updated");
+                        }
+                        return KI18n.i18n("Installed");
+                    }
+
+                    readonly property string finishedText: finishedAt > 0
+                        ? new Date(finishedAt * 1000).toLocaleString(Qt.locale(), Locale.ShortFormat)
+                        : ""
 
                     visible: status === "completed" || failed
                     Layout.fillWidth: true
                     opacity: failed ? 1 : 0.7
 
+                    showClickFeedback: true
+                    onClicked: NavController.openApp(doneDelegate.pkgId, JSON.stringify({
+                        name: doneDelegate.name,
+                        iconUrl: doneDelegate.iconUrl
+                    }))
+
                     contentItem: RowLayout {
                         spacing: Kirigami.Units.largeSpacing
 
-                        Kirigami.Icon {
-                            source: doneDelegate.iconUrl.length > 0 ? doneDelegate.iconUrl : "application-x-executable"
+                        AppIcon {
+                            source: doneDelegate.iconUrl
                             Layout.preferredWidth: Kirigami.Units.iconSizes.medium
                             Layout.preferredHeight: Kirigami.Units.iconSizes.medium
                         }
 
-                        Kirigami.Heading {
-                            level: 3
-                            text: doneDelegate.name
-                            elide: Text.ElideRight
+                        ColumnLayout {
+                            spacing: 0
+
+                            Kirigami.Heading {
+                                level: 3
+                                Layout.fillWidth: true
+                                text: doneDelegate.name
+                                elide: Text.ElideRight
+                            }
+
+                            Controls.Label {
+                                Layout.fillWidth: true
+                                text: doneDelegate.finishedText.length > 0
+                                    ? KI18n.i18nc("what happened to an app and when", "%1 · %2", doneDelegate.actionText, doneDelegate.finishedText)
+                                    : doneDelegate.actionText
+                                elide: Text.ElideRight
+                                opacity: 0.7
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            }
                         }
 
                         TextEdit {
                             Layout.fillWidth: true
-                            text: doneDelegate.failed
-                                ? (doneDelegate.error.length > 0 ? doneDelegate.error : i18n("Failed"))
-                                : ""
+                            visible: doneDelegate.failed && doneDelegate.error.length > 0
+                            text: doneDelegate.error
                             color: Kirigami.Theme.negativeTextColor
                             font: Kirigami.Theme.defaultFont
                             wrapMode: Text.Wrap
@@ -416,6 +474,8 @@ Kirigami.ScrollablePage {
                             selectionColor: Kirigami.Theme.highlightColor
                             persistentSelection: true
                         }
+
+                        Item { Layout.fillWidth: true }
 
                         Kirigami.Icon {
                             source: doneDelegate.failed ? "dialog-error-symbolic" : "checkmark-symbolic"

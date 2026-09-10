@@ -17,7 +17,7 @@ pub fn resolve(pkg_id: &str, raw_icon_url: Option<&str>) -> String {
     find_flatpak_appstream_icon(pkg_id)
         .or_else(|| find_flatpak_export_icon(pkg_id))
         .map(|p| padded_file_url(pkg_id, &p))
-        .unwrap_or_else(|| pkg_id.to_string())
+        .unwrap_or_default()
 }
 
 fn padded_file_url(pkg_id: &str, source: &Path) -> String {
@@ -36,6 +36,7 @@ pub fn clear_icon_cache() -> std::io::Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
     };
+    libarc::icons::invalidate_theme_cache();
     CACHE_GENERATION.fetch_add(1, Ordering::Relaxed);
     result
 }

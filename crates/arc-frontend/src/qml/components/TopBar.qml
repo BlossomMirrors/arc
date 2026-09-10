@@ -3,28 +3,19 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.blossomos.arc
+import org.kde.ki18n
 
 Controls.ToolBar {
     id: root
 
-    property alias searchText: searchField.text
     property string currentView: "home"
-    readonly property bool onSearchPage: currentView === "search"
 
     signal homeRequested()
-    signal searchRequested(string query)
-    signal searchTextEdited(string query)
     signal installedRequested()
     signal downloadsRequested()
     signal settingsRequested()
 
-    function focusSearch(prefill) {
-        searchField.forceActiveFocus();
-        if (prefill !== undefined) {
-            searchField.text = prefill;
-        }
-        searchField.cursorPosition = searchField.text.length;
-    }
+    signal searchFocusRequested(string prefill)
 
     position: Controls.ToolBar.Header
     padding: Kirigami.Units.smallSpacing
@@ -41,10 +32,7 @@ Controls.ToolBar {
 
     Shortcut {
         sequence: StandardKey.Find
-        onActivated: {
-            searchField.forceActiveFocus();
-            searchField.selectAll();
-        }
+        onActivated: root.searchFocusRequested("")
     }
 
     component CountBadge: Rectangle {
@@ -80,7 +68,7 @@ Controls.ToolBar {
                 icon.name: "go-previous-symbolic"
                 enabled: NavController.canGoBack
                 onClicked: NavController.goBack()
-                Controls.ToolTip.text: i18n("Back (Alt+Left)")
+                Controls.ToolTip.text: KI18n.i18n("Back (Alt+Left)")
                 Controls.ToolTip.visible: hovered
                 Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
             }
@@ -89,7 +77,7 @@ Controls.ToolBar {
                 icon.name: "go-next-symbolic"
                 enabled: NavController.canGoForward
                 onClicked: NavController.goForward()
-                Controls.ToolTip.text: i18n("Forward (Alt+Right)")
+                Controls.ToolTip.text: KI18n.i18n("Forward (Alt+Right)")
                 Controls.ToolTip.visible: hovered
                 Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
             }
@@ -98,7 +86,6 @@ Controls.ToolBar {
         Controls.TabBar {
             id: viewTabs
 
-            // centered between the nav arrows and the search group
             x: Math.max(
                 navButtons.width + Kirigami.Units.largeSpacing,
                 Math.min(
@@ -106,6 +93,11 @@ Controls.ToolBar {
                     rightGroup.x - width - Kirigami.Units.largeSpacing))
             anchors.verticalCenter: parent.verticalCenter
             width: implicitWidth
+
+            WheelHandler {
+                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                onWheel: event => event.accepted = true
+            }
 
             Binding on currentIndex {
                 value: root.currentView === "home" ? 0
@@ -115,22 +107,22 @@ Controls.ToolBar {
 
             Controls.TabButton {
                 width: implicitWidth
-                text: i18n("Home")
-                onClicked: {
-                    searchField.text = "";
-                    root.homeRequested();
-                }
+                text: KI18n.i18n("Home")
+                icon.name: "go-home-symbolic"
+                onClicked: root.homeRequested()
             }
 
             Controls.TabButton {
                 width: implicitWidth
-                text: i18n("Installed")
+                text: KI18n.i18n("Installed")
+                icon.name: "drive-harddisk-symbolic"
                 onClicked: root.installedRequested()
             }
 
             Controls.TabButton {
                 width: implicitWidth
-                text: i18n("Downloads")
+                text: KI18n.i18n("Downloads")
+                icon.name: "download-symbolic"
                 onClicked: root.downloadsRequested()
 
                 CountBadge {
@@ -151,80 +143,10 @@ Controls.ToolBar {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Kirigami.Units.smallSpacing
 
-            Kirigami.SearchField {
-                id: searchField
-
-                Layout.preferredWidth: activeFocus || text.length > 0
-                    ? Kirigami.Units.gridUnit * 24
-                    : Kirigami.Units.gridUnit * 16
-                Layout.preferredHeight: Kirigami.Units.gridUnit * 1.8
-                placeholderText: i18n("Search apps…")
-                font.pointSize: Kirigami.Theme.defaultFont.pointSize + 1
-
-                Behavior on Layout.preferredWidth {
-                    NumberAnimation {
-                        duration: Kirigami.Units.shortDuration
-                        easing.type: Easing.InOutQuad
-                    }
-                }
-
-                autoAccept: false
-
-                property bool pendingFocusRestore: false
-
-                onTextChanged: {
-                    if (text.length === 0) {
-                        liveSearchTimer.stop();
-                        return;
-                    }
-                    if (!root.onSearchPage) {
-                        liveSearchTimer.stop();
-                        pendingFocusRestore = true;
-                        root.searchRequested(text);
-                    } else {
-                        liveSearchTimer.restart();
-                    }
-                }
-
-                onAccepted: {
-                    liveSearchTimer.stop();
-                    if (text.length === 0) {
-                        return;
-                    }
-                    if (root.onSearchPage) {
-                        root.searchTextEdited(text);
-                    } else {
-                        pendingFocusRestore = true;
-                        root.searchRequested(text);
-                    }
-                }
-
-                onActiveFocusChanged: {
-                    if (!activeFocus && pendingFocusRestore) {
-                        pendingFocusRestore = false;
-                        focusRestoreTimer.start();
-                    }
-                }
-
-                Keys.onEscapePressed: applicationWindow().pageStack.forceActiveFocus()
-
-                Timer {
-                    id: liveSearchTimer
-                    interval: 220
-                    onTriggered: root.searchTextEdited(searchField.text)
-                }
-
-                Timer {
-                    id: focusRestoreTimer
-                    interval: 0
-                    onTriggered: searchField.forceActiveFocus()
-                }
-            }
-
             Controls.ToolButton {
                 icon.name: "settings-configure-symbolic"
                 onClicked: root.settingsRequested()
-                Controls.ToolTip.text: i18n("Settings")
+                Controls.ToolTip.text: KI18n.i18n("Settings")
                 Controls.ToolTip.visible: hovered
                 Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
             }

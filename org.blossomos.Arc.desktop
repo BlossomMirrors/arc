@@ -9,7 +9,7 @@ Terminal=false
 Categories=System;PackageManager;
 StartupNotify=true
 StartupWMClass=arc-frontend
-MimeType=application/x-deb;application/x-rpm;application/vnd.archlinux.pkg;application/x-appimage;application/vnd.flatpak.ref;application/vnd.flatpak;x-scheme-handler/appstream;x-scheme-handler/flatpak+https;x-scheme-handler/flatpak+http;
+MimeType=application/x-deb;application/x-rpm;application/vnd.archlinux.pkg;application/x-appimage;application/vnd.flatpak.ref;application/vnd.flatpak;x-scheme-handler/arc;x-scheme-handler/appstream;x-scheme-handler/flatpak+https;x-scheme-handler/flatpak+http;
 Actions=ManageExtensions;
 
 [Desktop Action ManageExtensions]

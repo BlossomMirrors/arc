@@ -71,6 +71,7 @@ pub fn pkg_name_from_filename(filename: &str) -> String {
 
 pub enum LaunchIntent {
     Detail { pkg_id: String },
+    List { slug: String },
     InstallFlatpakref { source: String, is_local_file: bool },
     AddRepo { content: String },
     InstallFile { path: String, file_name: String, pkg_name: String, is_appimage: bool, is_bundle: bool },
@@ -88,6 +89,19 @@ pub fn parse_args() -> Option<LaunchIntent> {
         let id = id.strip_suffix(".desktop").unwrap_or(id);
         if !id.is_empty() {
             return Some(LaunchIntent::Detail { pkg_id: id.to_string() });
+        }
+    }
+
+    if let Some(a) = args.iter().find(|a| a.starts_with("arc://") || a.starts_with("arc:")) {
+        let rest = a
+            .trim_start_matches("arc://")
+            .trim_start_matches("arc:")
+            .trim_start_matches("//");
+        if let Some(slug) = rest.strip_prefix("list/").or_else(|| rest.strip_prefix("list")) {
+            let slug = slug.trim_matches('/').trim();
+            if !slug.is_empty() {
+                return Some(LaunchIntent::List { slug: slug.to_string() });
+            }
         }
     }
 

@@ -24,6 +24,95 @@ fn proxy_icon_urls(packages: &mut [Package]) {
 // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no slashes or semicolons).
 // distrobox ids look like "distrobox:container:name:type" or are file paths for installs.
 // lutris ids look like "lutris:<slug>".
+pub async fn run_auto_updates(
+    provider: Arc<MultiProvider>,
+    transaction_manager: Arc<TransactionManager>,
+    emitter: SignalEmitter<'static>,
+) {
+    loop {
+        if libarc::Settings::load().auto_updates {
+            info!("Auto-update: checking for updates...");
+            match provider.list_updates().await {
+                Err(e) => warn!("Auto-update: list_updates failed: {}", e),
+                Ok(updates) if updates.is_empty() => {
+                    info!("Auto-update: nothing to update");
+                }
+                Ok(updates) => {
+                    info!("Auto-update: updating {} package(s)", updates.len());
+                    let mut any_succeeded = false;
+                    for pkg in updates {
+                        any_succeeded |=
+                            auto_update_one(&provider, &transaction_manager, &emitter, &pkg.id)
+                                .await;
+                    }
+
+                    if any_succeeded {
+                        provider.invalidate_package_cache().await;
+                    }
+                    info!("Auto-update: done");
+                    let remaining =
+                        provider.list_updates().await.map(|u| u.len() as u32).unwrap_or(0);
+                    let _ = ArcDaemonInterface::updates_available(&emitter, remaining).await;
+                }
+            }
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+    }
+}
+
+async fn auto_update_one(
+    provider: &MultiProvider,
+    tm: &TransactionManager,
+    emitter: &SignalEmitter<'static>,
+    package_id: &str,
+) -> bool {
+    info!("Auto-update: updating {}", package_id);
+    let (tx, _cancel_token) = tm
+        .create_automatic(
+            TransactionType::Update,
+            package_id.to_string(),
+            provider_from_id(package_id),
+        )
+        .await;
+    let tx_id = tx.id;
+
+    let _ = ArcDaemonInterface::transaction_started(
+        emitter,
+        tx_id.to_string(),
+        package_id.to_string(),
+    )
+    .await;
+    tm.update_progress(tx_id, 10).await;
+    let _ = ArcDaemonInterface::transaction_progress(emitter, tx_id.to_string(), 10).await;
+
+    match provider.update(package_id).await {
+        Ok(()) => {
+            tm.complete(tx_id, true, "Update successful".to_string()).await;
+            let _ = ArcDaemonInterface::transaction_progress(emitter, tx_id.to_string(), 100).await;
+            let _ = ArcDaemonInterface::transaction_finished(
+                emitter,
+                tx_id.to_string(),
+                true,
+                "Update successful".to_string(),
+            )
+            .await;
+            true
+        }
+        Err(e) => {
+            warn!("Auto-update: failed to update {}: {}", package_id, e);
+            tm.complete(tx_id, false, e.to_string()).await;
+            let _ = ArcDaemonInterface::transaction_finished(
+                emitter,
+                tx_id.to_string(),
+                false,
+                e.to_string(),
+            )
+            .await;
+            false
+        }
+    }
+}
+
 fn provider_from_id(package_id: &str) -> Provider {
     if package_id.starts_with("pwa:") {
         return Provider::Pwa;
@@ -774,6 +863,28 @@ impl ArcDaemonInterface {
         }
     }
 
+    async fn refresh_catalog(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
+        info!("RefreshCatalog");
+
+        let provider = self.provider.clone();
+        let emitter = emitter.to_owned();
+        spawn(async move {
+            crate::appstream_db::refresh_remotes_now().await;
+            spawn_blocking(crate::appstream_db::AppStreamDb::refresh_if_stale).await.ok();
+            crate::forge_cache::refresh().await;
+
+            crate::media::clear_icons();
+
+            provider.pwa.refresh_installed_icons().await;
+            provider.invalidate_package_cache().await;
+
+            let count = provider.list_updates().await.map(|u| u.len() as u32).unwrap_or(0);
+            info!("RefreshCatalog: done, {} update(s)", count);
+            let _ = Self::updates_available(&emitter, count).await;
+            let _ = Self::catalog_refreshed(&emitter).await;
+        });
+    }
+
     async fn list_updates(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) -> String {
         info!("ListUpdates");
         match self.provider.list_updates().await {
@@ -1006,14 +1117,14 @@ impl ArcDaemonInterface {
 
     // the next four are signal declarations, zbus generates the actual emit
     #[zbus(signal)]
-    async fn transaction_started(
+    pub(crate) async fn transaction_started(
         signal_emitter: &SignalEmitter<'_>,
         transaction_id: String,
         package_id: String,
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]
-    async fn transaction_progress(
+    pub(crate) async fn transaction_progress(
         signal_emitter: &SignalEmitter<'_>,
         transaction_id: String,
         progress: u8,
@@ -1028,7 +1139,7 @@ impl ArcDaemonInterface {
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]
-    async fn transaction_finished(
+    pub(crate) async fn transaction_finished(
         signal_emitter: &SignalEmitter<'_>,
         transaction_id: String,
         success: bool,
@@ -1036,5 +1147,8 @@ impl ArcDaemonInterface {
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]
-    async fn updates_available(signal_emitter: &SignalEmitter<'_>, count: u32) -> zbus::Result<()>;
+    pub(crate) async fn updates_available(signal_emitter: &SignalEmitter<'_>, count: u32) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub(crate) async fn catalog_refreshed(signal_emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
 }

@@ -991,6 +991,28 @@ fn remote_refresh_stamp_path() -> Option<PathBuf> {
     libarc::cache::namespace("daemon").map(|dir| dir.join("appstream-remote-refresh.stamp"))
 }
 
+pub async fn refresh_remotes_if_due() {
+    if !should_refresh_remotes() {
+        tracing::info!("AppStream remotes refreshed recently, skipping network update");
+        return;
+    }
+    refresh_remotes_now().await;
+}
+
+pub async fn refresh_remotes_now() {
+    tracing::info!("Refreshing AppStream data...");
+    match tokio::process::Command::new("flatpak")
+        .args(["update", "--appstream"])
+        .status()
+        .await
+    {
+        Ok(status) if status.success() => tracing::info!("AppStream data refreshed"),
+        Ok(status) => tracing::warn!("flatpak update --appstream exited with {}", status),
+        Err(e) => tracing::warn!("Failed to run flatpak update --appstream: {}", e),
+    }
+    mark_remotes_refreshed();
+}
+
 pub fn should_refresh_remotes() -> bool {
     let Some(path) = remote_refresh_stamp_path() else { return true };
     match fs::metadata(&path).and_then(|m| m.modified()) {

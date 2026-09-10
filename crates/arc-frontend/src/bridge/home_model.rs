@@ -43,7 +43,7 @@ impl Default for StoryControllerRust {
             story_id: QString::default(),
             title: QString::default(),
             banner_url: QString::default(),
-            blocks_json: QString::default(),
+            blocks_json: QString::from("[]"),
         }
     }
 }
@@ -51,13 +51,12 @@ impl Default for StoryControllerRust {
 impl qobject::StoryController {
     pub fn load(mut self: Pin<&mut Self>, story_id: QString) {
         let id = story_id.to_string();
-        self.as_mut().set_loading(true);
         self.as_mut().set_story_id(story_id);
-        self.as_mut().set_blocks_json(QString::from("[]"));
 
-        let story = crate::services::home_cache::find_story(&id);
-
-        let Some(story) = story else {
+        let Some(story) = crate::services::stories::get(&id) else {
+            self.as_mut().set_title(QString::default());
+            self.as_mut().set_banner_url(QString::default());
+            self.as_mut().set_blocks_json(QString::from("[]"));
             self.as_mut().set_loading(false);
             return;
         };
@@ -65,15 +64,38 @@ impl qobject::StoryController {
         self.as_mut().set_title(QString::from(&story.title));
         self.as_mut().set_banner_url(QString::from(&story.banner_url));
 
+        let cached_blocks = serde_json::from_str::<Vec<crate::services::blocks::DescBlock>>(
+            &story.blocks_json,
+        )
+        .ok()
+        .filter(|b| crate::services::blocks::blocks_worth_caching(b));
+
+        if cached_blocks.is_some() {
+            self.as_mut().set_blocks_json(QString::from(&story.blocks_json));
+            self.as_mut().set_loading(false);
+            return;
+        }
+
+        self.as_mut().set_blocks_json(QString::from("[]"));
+        self.as_mut().set_loading(true);
+
         let qt_thread = self.qt_thread();
         runtime::spawn(async move {
             let mut blocks = crate::services::blocks::html_to_blocks(&story.body_html);
             let proxy = runtime::proxy().await;
             crate::services::blocks::resolve_app_blocks(&mut blocks, proxy.as_ref()).await;
+            let worth_caching = crate::services::blocks::blocks_worth_caching(&blocks);
+            blocks.retain(|b| !b.is_app || !b.app_name.is_empty());
             let json = serde_json::to_string(&blocks).unwrap_or_else(|_| "[]".into());
+            if worth_caching {
+                crate::services::stories::store_blocks(&id, &json);
+            }
 
             qt_thread
                 .queue(move |mut this| {
+                    if this.story_id.to_string() != id {
+                        return;
+                    }
                     this.as_mut().set_blocks_json(QString::from(&json));
                     this.as_mut().set_loading(false);
                 })

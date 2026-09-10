@@ -5,6 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.blossomos.arc
+import org.kde.ki18n
 
 Kirigami.ScrollablePage {
     id: root
@@ -12,9 +13,29 @@ Kirigami.ScrollablePage {
     property PackageListModel packageListModel
     property string emptyText: ""
     property bool showFilters: false
+    property bool showSearch: false
+    property string searchQuery: ""
+
     property bool markInstalled: true
     property string headerColor: ""
     property string headerIcon: ""
+
+    readonly property alias rowCount: listView.count
+
+    readonly property real maxContentWidth: Kirigami.Units.gridUnit * 70
+
+    signal searchEdited(string query)
+
+    function focusSearch(prefill) {
+        if (!root.showSearch) {
+            return;
+        }
+        barSearchField.forceActiveFocus();
+        if (prefill !== undefined && prefill.length > 0) {
+            barSearchField.text = prefill;
+        }
+        barSearchField.cursorPosition = barSearchField.text.length;
+    }
 
     Kirigami.ColumnView.fillWidth: true
 
@@ -54,48 +75,73 @@ Kirigami.ScrollablePage {
         }
     }
 
-    header: Loader {
-        active: root.showFilters
-        visible: active
+    header: Controls.ToolBar {
+        id: filterBar
+        position: Controls.ToolBar.Header
+        visible: root.showFilters || root.showSearch
+        height: visible ? implicitHeight : 0
+        leftPadding: Kirigami.Units.largeSpacing
+        rightPadding: Kirigami.Units.largeSpacing
 
-        sourceComponent: Controls.ToolBar {
-            position: Controls.ToolBar.Header
+        contentItem: RowLayout {
+            spacing: Kirigami.Units.smallSpacing
 
-            contentItem: RowLayout {
-                spacing: Kirigami.Units.smallSpacing
+            function applyFilters() {
+                root.packageListModel.setFilters(
+                    sourceCombo.currentIndex === 0 ? "" : sourceCombo.currentText,
+                    stateCombo.currentIndex,
+                    sortCombo.currentIndex === 1);
+            }
 
-                function applyFilters() {
-                    root.packageListModel.setFilters(
-                        sourceCombo.currentIndex === 0 ? "" : sourceCombo.currentText,
-                        stateCombo.currentIndex,
-                        sortCombo.currentIndex === 1);
+            Controls.ComboBox {
+                id: sourceCombo
+                visible: root.showFilters && root.packageListModel.providers.length > 1
+                model: [KI18n.i18n("All sources")].concat(root.packageListModel.providers)
+                onActivated: parent.applyFilters()
+            }
+
+            Controls.ComboBox {
+                id: stateCombo
+                visible: root.showFilters
+                model: [KI18n.i18n("Everything"), KI18n.i18n("Installed"), KI18n.i18n("Not installed")]
+                onActivated: parent.applyFilters()
+            }
+
+            Controls.ComboBox {
+                id: sortCombo
+                visible: root.showFilters
+                model: [KI18n.i18n("Relevance"), KI18n.i18n("Name A-Z")]
+                onActivated: parent.applyFilters()
+            }
+
+            Item { Layout.fillWidth: true }
+
+            Controls.Label {
+                visible: !root.packageListModel.loading
+                text: KI18n.i18np("%1 app", "%1 apps", listView.count)
+                opacity: 0.7
+            }
+
+            Kirigami.SearchField {
+                id: barSearchField
+                visible: root.showSearch
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 24
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 1.8
+                placeholderText: KI18n.i18n("Search apps...")
+                font.pointSize: Kirigami.Theme.defaultFont.pointSize + 1
+                autoAccept: false
+                text: root.searchQuery
+
+                onTextChanged: if (text !== root.searchQuery) liveSearchTimer.restart()
+                onAccepted: {
+                    liveSearchTimer.stop();
+                    root.searchEdited(text);
                 }
 
-                Controls.ComboBox {
-                    id: sourceCombo
-                    visible: root.packageListModel.providers.length > 1
-                    model: [i18n("All sources")].concat(root.packageListModel.providers)
-                    onActivated: parent.applyFilters()
-                }
-
-                Controls.ComboBox {
-                    id: stateCombo
-                    model: [i18n("Everything"), i18n("Installed"), i18n("Not installed")]
-                    onActivated: parent.applyFilters()
-                }
-
-                Controls.ComboBox {
-                    id: sortCombo
-                    model: [i18n("Relevance"), i18n("Name A-Z")]
-                    onActivated: parent.applyFilters()
-                }
-
-                Item { Layout.fillWidth: true }
-
-                Controls.Label {
-                    visible: !root.packageListModel.loading
-                    text: i18np("%1 app", "%1 apps", listView.count)
-                    opacity: 0.7
+                Timer {
+                    id: liveSearchTimer
+                    interval: 220
+                    onTriggered: root.searchEdited(barSearchField.text)
                 }
             }
         }
@@ -158,6 +204,10 @@ Kirigami.ScrollablePage {
         delegate: Kirigami.AbstractCard {
             id: delegate
 
+            width: Math.min(listView.width - Kirigami.Units.largeSpacing * 2,
+                root.maxContentWidth)
+            x: Math.round((listView.width - width) / 2)
+
             required property int index
             required property string pkgId
             required property string name
@@ -170,12 +220,12 @@ Kirigami.ScrollablePage {
             required property real progress
 
             showClickFeedback: true
-            onClicked: applicationWindow().openApp(delegate.pkgId, {
+            onClicked: NavController.openApp(delegate.pkgId, JSON.stringify({
                 name: delegate.name,
                 summary: delegate.description,
                 iconUrl: delegate.iconUrl,
                 installed: delegate.installed
-            })
+            }))
 
             HoverHandler {
                 id: rowHover
@@ -226,12 +276,22 @@ Kirigami.ScrollablePage {
                         }
 
                         Controls.Label {
+                            id: descriptionLabel
+
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            Layout.preferredHeight: descriptionMetrics.height * 2
                             text: delegate.description
                             wrapMode: Text.WordWrap
                             elide: Text.ElideRight
                             maximumLineCount: 2
+                            verticalAlignment: Text.AlignTop
                             opacity: 0.7
+
+                            FontMetrics {
+                                id: descriptionMetrics
+                                font: descriptionLabel.font
+                            }
                         }
 
                         Row {
@@ -245,7 +305,7 @@ Kirigami.ScrollablePage {
                             MetaPill {
                                 visible: root.markInstalled && delegate.installed
                                 pillIcon: "checkmark-symbolic"
-                                text: i18n("Installed")
+                                text: KI18n.i18n("Installed")
                                 textColor: Kirigami.Theme.positiveTextColor
                             }
                         }

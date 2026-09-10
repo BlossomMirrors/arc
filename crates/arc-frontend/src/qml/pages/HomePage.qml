@@ -5,14 +5,20 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.blossomos.arc
+import org.kde.ki18n
 
 Kirigami.ScrollablePage {
     id: root
 
     Kirigami.ColumnView.fillWidth: true
     padding: 0
+    readonly property real contentMargin: Kirigami.Units.largeSpacing * 2
 
-    title: i18n("Home")
+    readonly property real maxContentWidth: Kirigami.Units.gridUnit * 70
+    readonly property real sideInset:
+        Math.max(root.contentMargin, (root.width - root.maxContentWidth) / 2)
+
+    title: KI18n.i18n("Home")
 
     Binding {
         target: root.contentItem
@@ -22,35 +28,55 @@ Kirigami.ScrollablePage {
 
     Component.onCompleted: HomeFeedModel.load()
 
+    readonly property bool feedEmpty: !HomeFeedModel.loading && sectionsRepeater.count === 0
+
     Timer {
         id: coldStartRetry
         property int attempts: 0
         interval: 30000
-        running: true
+        running: root.feedEmpty || attempts < 4
         repeat: true
         onTriggered: {
             attempts += 1;
             HomeFeedModel.refresh();
-            if (attempts >= 4) {
-                stop();
-            }
         }
     }
 
     function openApp(pkgId, seed) {
-        applicationWindow().openApp(pkgId, seed);
+        NavController.openApp(pkgId, seed ? JSON.stringify(seed) : "");
     }
 
     function openStory(storyId) {
-        applicationWindow().openStory(storyId);
+        NavController.openStory(storyId);
     }
 
     function openCategory(categoryId, categoryLabel, categoryColor, categoryIcon) {
-        applicationWindow().openCategory(categoryId, categoryLabel, categoryColor, categoryIcon);
+        NavController.openCategory(categoryId, categoryLabel, categoryColor, categoryIcon);
+    }
+
+    property alias searchText: badgeBar.searchText
+
+    function focusSearch(prefill) {
+        badgeBar.focusSearch(prefill);
     }
 
     LoadingOverlay {
-        visible: HomeFeedModel.loading || sectionsRepeater.count === 0
+        visible: HomeFeedModel.loading
+    }
+
+    Kirigami.PlaceholderMessage {
+        anchors.centerIn: parent
+        width: parent.width - Kirigami.Units.gridUnit * 4
+        visible: root.feedEmpty
+        icon.name: "network-disconnect-symbolic"
+        text: KI18n.i18n("Could not load the front page")
+        explanation: KI18n.i18n("Check your connection. This retries on its own.")
+
+        helpfulAction: Kirigami.Action {
+            icon.name: "view-refresh-symbolic"
+            text: KI18n.i18n("Try again")
+            onTriggered: HomeFeedModel.reload()
+        }
     }
 
     ColumnLayout {
@@ -59,9 +85,13 @@ Kirigami.ScrollablePage {
         width: root.width
         spacing: 0
 
+        Item {
+            Layout.preferredHeight: badgeBar.height
+        }
+
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 0
+            spacing: Kirigami.Units.largeSpacing * 2
 
             Repeater {
                 id: sectionsRepeater
@@ -84,6 +114,15 @@ Kirigami.ScrollablePage {
 
                     Layout.fillWidth: true
 
+                    visible: rowLoader.sourceComponent !== null
+
+                    Layout.leftMargin: rowLoader.itemType === "carousel" ? 0
+                        : rowLoader.itemType === "app-row" ? root.contentMargin
+                        : root.sideInset
+                    Layout.rightMargin: rowLoader.itemType === "carousel" ? 0
+                        : rowLoader.itemType === "app-row" ? root.contentMargin
+                        : root.sideInset
+
                     sourceComponent: {
                         switch (rowLoader.itemType) {
                         case "h1":
@@ -102,6 +141,8 @@ Kirigami.ScrollablePage {
                             return appRowComponent;
                         case "app-grid":
                             return appGridComponent;
+                        case "app-wide-grid":
+                            return appWideGridComponent;
                         case "carousel":
                             return carouselComponent;
                         case "links":
@@ -137,11 +178,11 @@ Kirigami.ScrollablePage {
                     Component {
                         id: categoriesComponent
                         ColumnLayout {
-                            spacing: Kirigami.Units.largeSpacing * 2
+                            spacing: Kirigami.Units.largeSpacing
 
                             Kirigami.Heading {
                                 level: 2
-                                text: i18n("Categories")
+                                text: KI18n.i18n("Categories")
                             }
 
                             GridLayout {
@@ -173,7 +214,7 @@ Kirigami.ScrollablePage {
                     Component {
                         id: appRowComponent
                         ColumnLayout {
-                            spacing: Kirigami.Units.largeSpacing * 2
+                            spacing: Kirigami.Units.largeSpacing
 
                             Kirigami.Heading {
                                 level: 2
@@ -204,12 +245,12 @@ Kirigami.ScrollablePage {
                                     summary: modelData.summary
                                     iconUrl: modelData.icon_url
                                     installed: modelData.installed
-                                    onActivated: root.openApp(modelData.id, {
+                                    onActivated: NavController.openApp(modelData.id, JSON.stringify({
                                         name: modelData.name,
                                         summary: modelData.summary,
                                         iconUrl: modelData.icon_url,
                                         installed: modelData.installed
-                                    })
+                                    }))
                                 }
                             }
                         }
@@ -218,7 +259,7 @@ Kirigami.ScrollablePage {
                     Component {
                         id: appGridComponent
                         ColumnLayout {
-                            spacing: Kirigami.Units.largeSpacing * 2
+                            spacing: Kirigami.Units.largeSpacing
 
                             Kirigami.Heading {
                                 level: 2
@@ -252,12 +293,62 @@ Kirigami.ScrollablePage {
                                         summary: modelData.summary
                                         iconUrl: modelData.icon_url
                                         installed: modelData.installed
-                                        onActivated: root.openApp(modelData.id, {
+                                        onActivated: NavController.openApp(modelData.id, JSON.stringify({
                                             name: modelData.name,
                                             summary: modelData.summary,
                                             iconUrl: modelData.icon_url,
                                             installed: modelData.installed
-                                        })
+                                        }))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Component {
+                        id: appWideGridComponent
+                        ColumnLayout {
+                            spacing: Kirigami.Units.largeSpacing
+
+                            Kirigami.Heading {
+                                level: 2
+                                text: rowLoader.title
+                                visible: text.length > 0
+                            }
+
+                            RowLoadingPlaceholder {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Kirigami.Units.gridUnit * 6
+                                visible: rowLoader.loading
+                            }
+
+                            GridLayout {
+                                id: wideGrid
+                                Layout.fillWidth: true
+                                visible: !rowLoader.loading
+                                columns: Math.max(1, Math.floor(width / (Kirigami.Units.gridUnit * 16)))
+                                columnSpacing: Kirigami.Units.largeSpacing
+                                rowSpacing: Kirigami.Units.smallSpacing
+
+                                Repeater {
+                                    model: JSON.parse(rowLoader.cardsJson)
+
+                                    delegate: AppGridCard {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        Layout.preferredWidth: 1
+                                        Layout.minimumWidth: 0
+                                        pkgId: modelData.id
+                                        appName: modelData.name
+                                        summary: modelData.summary
+                                        iconUrl: modelData.icon_url
+                                        installed: modelData.installed
+                                        onActivated: NavController.openApp(modelData.id, JSON.stringify({
+                                            name: modelData.name,
+                                            summary: modelData.summary,
+                                            iconUrl: modelData.icon_url,
+                                            installed: modelData.installed
+                                        }))
                                     }
                                 }
                             }
@@ -267,7 +358,7 @@ Kirigami.ScrollablePage {
                     Component {
                         id: carouselComponent
                         ColumnLayout {
-                            spacing: Kirigami.Units.largeSpacing * 2
+                            spacing: Kirigami.Units.largeSpacing
 
                             RowLoadingPlaceholder {
                                 Layout.fillWidth: true
@@ -276,18 +367,20 @@ Kirigami.ScrollablePage {
                             }
 
                             HeroCarousel {
+                                id: heroCarousel
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 400
-                                visible: !rowLoader.loading && items.length > 0
+                                Layout.preferredHeight: heroCarousel.implicitHeight
+                                visible: !rowLoader.loading && heroCarousel.items.length > 0
                                 items: JSON.parse(rowLoader.heroItemsJson)
-                                onStoryActivated: storyIndex => root.openStory("story-" + storyIndex)
-                                onAppActivated: pkgId => root.openApp(pkgId)
+                                onStoryActivated: storyIndex => NavController.openStory("story-" + storyIndex)
+                                onAppActivated: pkgId => NavController.openApp(pkgId, "")
                             }
 
                             CardCarousel {
+                                id: editorialCarousel
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 150
-                                visible: count > 0
+                                visible: editorialCarousel.count > 0
                                 model: JSON.parse(rowLoader.editorialItemsJson)
                                 cardWidth: 220
 
@@ -300,33 +393,43 @@ Kirigami.ScrollablePage {
                                     iconUrl: modelData.icon_url
                                     heroTitle: modelData.title
                                     body: modelData.body
-                                    onActivated: modelData.is_story ? root.openStory("story-" + modelData.story_index) : root.openApp(modelData.id)
+                                    onActivated: modelData.is_story ? NavController.openStory("story-" + modelData.story_index) : NavController.openApp(modelData.id, "")
                                 }
                             }
 
-                            CardCarousel {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: Kirigami.Units.gridUnit * 10
-                                visible: count > 0
-                                model: JSON.parse(rowLoader.cardsJson)
-                                cardWidth: Kirigami.Units.gridUnit * 10
+                            GridLayout {
+                                id: carouselGrid
 
-                                delegate: AppCard {
-                                    property var modelData: ({})
-                                    property int index
-                                    width: Kirigami.Units.gridUnit * 10
-                                    height: Kirigami.Units.gridUnit * 10
-                                    pkgId: modelData.id
-                                    appName: modelData.name
-                                    summary: modelData.summary
-                                    iconUrl: modelData.icon_url
-                                    installed: modelData.installed
-                                    onActivated: root.openApp(modelData.id, {
-                                        name: modelData.name,
-                                        summary: modelData.summary,
-                                        iconUrl: modelData.icon_url,
+                                readonly property var cards: JSON.parse(rowLoader.cardsJson)
+
+                                Layout.fillWidth: true
+                                Layout.leftMargin: root.sideInset
+                                Layout.rightMargin: root.sideInset
+                                visible: carouselGrid.cards.length > 0
+                                columns: Math.max(1, Math.floor(width / (Kirigami.Units.gridUnit * 16)))
+                                columnSpacing: Kirigami.Units.largeSpacing
+                                rowSpacing: Kirigami.Units.smallSpacing
+
+                                Repeater {
+                                    model: carouselGrid.cards
+
+                                    delegate: AppGridCard {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        Layout.preferredWidth: 1
+                                        Layout.minimumWidth: 0
+                                        pkgId: modelData.id
+                                        appName: modelData.name
+                                        summary: modelData.summary
+                                        iconUrl: modelData.icon_url
                                         installed: modelData.installed
-                                    })
+                                        onActivated: NavController.openApp(modelData.id, JSON.stringify({
+                                            name: modelData.name,
+                                            summary: modelData.summary,
+                                            iconUrl: modelData.icon_url,
+                                            installed: modelData.installed
+                                        }))
+                                    }
                                 }
                             }
                         }
@@ -365,9 +468,9 @@ Kirigami.ScrollablePage {
                                         icon.name: linkRow.modelData.href.length > 0 ? "link-symbolic" : ""
                                         onClicked: {
                                             if (linkRow.modelData.story_index >= 0) {
-                                                root.openStory("story-" + linkRow.modelData.story_index);
+                                                NavController.openStory("story-" + linkRow.modelData.story_index);
                                             } else if (linkRow.modelData.app_id.length > 0) {
-                                                root.openApp(linkRow.modelData.app_id);
+                                                NavController.openApp(linkRow.modelData.app_id, "");
                                             } else if (linkRow.modelData.href.length > 0) {
                                                 Qt.openUrlExternally(linkRow.modelData.href);
                                             }
@@ -388,5 +491,21 @@ Kirigami.ScrollablePage {
         Item {
             Layout.preferredHeight: Kirigami.Units.gridUnit * 2
         }
+    }
+
+    ListBadgeBar {
+        id: badgeBar
+        parent: root
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        z: 10
+        backdrop: root.flickable
+        inset: Math.max(Kirigami.Units.largeSpacing,
+            (root.width - root.maxContentWidth) / 2)
+
+        onListActivated: (slug, label) => NavController.openList(slug, label)
+        onSearchRequested: query => NavController.goSearch(query)
+        onSearchDismissed: root.forceActiveFocus()
     }
 }

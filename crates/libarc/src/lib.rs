@@ -13,7 +13,10 @@ pub use errors::ArcError;
 pub use events::ArcEvent;
 pub use search::{is_subsequence, score_field, score_package, search_and_rank};
 pub use settings::Settings;
-pub use types::{AppMetadata, Package, Provider, RemoteInfo, Transaction, TransactionStatus, TransactionType};
+pub use types::{
+    unix_now, AppMetadata, Package, Provider, RemoteInfo, Transaction, TransactionStatus,
+    TransactionType,
+};
 
 use anyhow::Result;
 use zbus::{proxy, Connection};
@@ -40,6 +43,7 @@ pub trait ArcDaemon {
     async fn get_app_metadata(&self, package_id: &str) -> zbus::Result<String>;
     async fn list_installed(&self) -> zbus::Result<String>;
     async fn list_updates(&self) -> zbus::Result<String>;
+    async fn refresh_catalog(&self) -> zbus::Result<()>;
     async fn update_package(&self, package_id: &str, notify: bool) -> zbus::Result<String>;
     async fn get_transaction(&self, transaction_id: &str) -> zbus::Result<String>;
     async fn list_transactions(&self) -> zbus::Result<String>;
@@ -81,6 +85,9 @@ pub trait ArcDaemon {
 
     #[zbus(signal)]
     fn updates_available(&self, count: u32) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    fn catalog_refreshed(&self) -> zbus::Result<()>;
 }
 
 pub async fn connect() -> Result<ArcDaemonProxy<'static>> {

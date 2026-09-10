@@ -4,11 +4,12 @@ import QtQuick.Window
 import org.kde.kirigami as Kirigami
 import org.kde.kirigami.layouts as KL
 import org.blossomos.arc
+import org.kde.ki18n
 
 Kirigami.ApplicationWindow {
     id: root
 
-    title: i18n("Arc Store")
+    title: KI18n.i18n("Arc Store")
     minimumWidth: Kirigami.Units.gridUnit * 45
     minimumHeight: Kirigami.Units.gridUnit * 32
     width: Kirigami.Units.gridUnit * 66
@@ -35,7 +36,15 @@ Kirigami.ApplicationWindow {
             anchors.fill: parent
             interactive: false
 
-            HomePage {}
+            Binding {
+                target: tabView.contentItem
+                property: "highlightMoveDuration"
+                value: 0
+            }
+
+            HomePage {
+                id: homePageItem
+            }
             SearchPage {
                 id: searchPageItem
             }
@@ -45,7 +54,9 @@ Kirigami.ApplicationWindow {
             DownloadsPage {
                 id: downloadsPageItem
             }
-            SettingsPage {}
+            SettingsPage {
+                onNotificationRequested: message => root.showPassiveNotification(message)
+            }
 
             // InstalledPage and DownloadsPage share the PackageListModel singleton,
             // so only the active tab may trigger a load or their requests race
@@ -70,6 +81,42 @@ Kirigami.ApplicationWindow {
         width: parent.width
         height: parent.height
         x: root.categoryVisible ? 0 : width
+        visible: x < width
+
+        Behavior on x {
+            NumberAnimation {
+                duration: 220
+                easing.type: Easing.OutCubic
+            }
+        }
+    }
+
+    property bool listVisible: false
+
+    ListPage {
+        id: listPageItem
+        y: 0
+        width: parent.width
+        height: parent.height
+        x: root.listVisible ? 0 : width
+        visible: x < width
+
+        Behavior on x {
+            NumberAnimation {
+                duration: 220
+                easing.type: Easing.OutCubic
+            }
+        }
+    }
+
+    property bool storyVisible: false
+
+    StoryPage {
+        id: storyPageItem
+        y: 0
+        width: parent.width
+        height: parent.height
+        x: root.storyVisible ? 0 : width
         visible: x < width
 
         Behavior on x {
@@ -108,8 +155,6 @@ Kirigami.ApplicationWindow {
 
     function entryComponent(entry) {
         switch (entry.kind) {
-        case "story":
-            return storyPageComponent;
         case "flatpakref":
             return installFlatpakrefPageComponent;
         case "addrepo":
@@ -117,21 +162,52 @@ Kirigami.ApplicationWindow {
         case "installfile":
             return installFilePageComponent;
         }
-        return storyPageComponent;
-    }
-
-    function entryProps(entry) {
-        switch (entry.kind) {
-        case "story":
-            return {
-                storyId: entry.a
-            };
-        }
-        return {};
+        return null;
     }
 
     function pushEntry(entry) {
-        pageStack.push(entryComponent(entry), entryProps(entry));
+        const component = entryComponent(entry);
+        if (component)
+            pageStack.push(component);
+    }
+
+    function isOverlayKind(kind) {
+        return kind === "detail" || kind === "category" || kind === "story" || kind === "list";
+    }
+
+    function overlayShows(entry) {
+        switch (entry.kind) {
+        case "detail":
+            return root.detailVisible && detailPageItem.pkgId === entry.a;
+        case "category":
+            return root.categoryVisible && categoryPageItem.categoryId === entry.a;
+        case "story":
+            return root.storyVisible && storyPageItem.storyId === entry.a;
+        case "list":
+            return root.listVisible && listPageItem.slug === entry.a;
+        }
+        return false;
+    }
+
+    function openOverlay(entry) {
+        switch (entry.kind) {
+        case "detail":
+            detailPageItem.openEntry(entry.a, entry.c ?? null);
+            root.detailVisible = true;
+            break;
+        case "category":
+            categoryPageItem.openCategory(entry.a, entry.b, entry.c ?? "", entry.d ?? "");
+            root.categoryVisible = true;
+            break;
+        case "story":
+            storyPageItem.openStory(entry.a);
+            root.storyVisible = true;
+            break;
+        case "list":
+            listPageItem.openList(entry.a, entry.b ?? "");
+            root.listVisible = true;
+            break;
+        }
     }
 
     readonly property var tabIndex: ({
@@ -151,48 +227,64 @@ Kirigami.ApplicationWindow {
     function runNavOp(json) {
         const op = JSON.parse(json);
 
-        function popOne() {
+        function popOne(revealed) {
             const kind = root.localStack.pop();
-            if (kind === "detail")
-                root.detailVisible = false;
-            else if (kind === "category")
-                root.categoryVisible = false;
-            else
-                pageStack.pop();
+            const restore = revealed && root.isOverlayKind(revealed.kind) && !root.overlayShows(revealed);
+            if (!restore || revealed.kind !== kind) {
+                if (kind === "detail")
+                    root.detailVisible = false;
+                else if (kind === "category")
+                    root.categoryVisible = false;
+                else if (kind === "story")
+                    root.storyVisible = false;
+                else if (kind === "list")
+                    root.listVisible = false;
+                else
+                    pageStack.pop();
+            }
+            if (restore)
+                root.openOverlay(revealed);
         }
 
         switch (op.action) {
         case "tab":
             root.detailVisible = false;
             root.categoryVisible = false;
+            root.storyVisible = false;
+            root.listVisible = false;
             root.localStack = [];
             if (pageStack.depth > 1)
                 pageStack.pop(pageStack.get(0));
             tabView.currentIndex = root.tabIndex[op.entry.kind] ?? 0;
-            if (op.entry.kind === "search")
+            if (op.entry.kind === "search") {
                 searchPageItem.query = op.entry.a ?? "";
+                searchPageItem.focusSearch();
+            } else if (op.entry.kind === "home") {
+                homePageItem.searchText = "";
+            }
             break;
         case "push":
-            if (op.entry.kind === "detail") {
-                detailPageItem.openEntry(op.entry.a, op.entry.c ?? null);
-                root.detailVisible = true;
-            } else if (op.entry.kind === "category") {
-                root.detailVisible = false;
-                categoryPageItem.openCategory(op.entry.a, op.entry.b, op.entry.c ?? "", op.entry.d ?? "");
-                root.categoryVisible = true;
+            if (root.isOverlayKind(op.entry.kind)) {
+                if (op.entry.kind !== "detail")
+                    root.detailVisible = false;
+                if (op.entry.kind === "category" || op.entry.kind === "list")
+                    root.storyVisible = false;
+                root.openOverlay(op.entry);
             } else {
                 root.detailVisible = false;
                 root.categoryVisible = false;
+                root.storyVisible = false;
+                root.listVisible = false;
                 pushEntry(op.entry);
             }
-            root.localStack.push(op.entry.kind === "detail" || op.entry.kind === "category" ? op.entry.kind : "page");
+            root.localStack.push(root.isOverlayKind(op.entry.kind) ? op.entry.kind : "page");
             break;
         case "pop":
-            popOne();
+            popOne(op.top);
             break;
         case "popTo":
             while (root.localStack.length > op.depth)
-                popOne();
+                popOne(root.localStack.length === op.depth + 1 ? op.top : null);
             break;
         }
     }
@@ -211,14 +303,6 @@ Kirigami.ApplicationWindow {
                 a: query
             }
         ]);
-    }
-    function liveSearch(query) {
-        if (currentView === "search") {
-            searchPageItem.query = query;
-            NavController.updateQuery(query);
-            return;
-        }
-        goSearch(query);
     }
     function goInstalled() {
         navigate([
@@ -262,10 +346,21 @@ Kirigami.ApplicationWindow {
         ]);
     }
     function openStory(storyId) {
-        NavController.openChild(JSON.stringify({
-            kind: "story",
-            a: storyId
-        }));
+        navigate([
+            {
+                kind: "story",
+                a: storyId
+            }
+        ]);
+    }
+    function openList(slug, label) {
+        navigate([
+            {
+                kind: "list",
+                a: slug,
+                b: label ?? ""
+            }
+        ]);
     }
 
     header: TopBar {
@@ -273,11 +368,20 @@ Kirigami.ApplicationWindow {
         currentView: root.currentView
 
         onHomeRequested: root.goHome()
-        onSearchRequested: query => root.goSearch(query)
-        onSearchTextEdited: query => root.liveSearch(query)
         onInstalledRequested: root.goInstalled()
         onDownloadsRequested: root.goDownloads()
         onSettingsRequested: root.goSettings()
+        onSearchFocusRequested: prefill => root.focusSearch(prefill)
+    }
+
+    function focusSearch(prefill) {
+        if (root.currentView === "home") {
+            homePageItem.focusSearch(prefill);
+        } else if (root.currentView === "search") {
+            searchPageItem.focusSearch(prefill);
+        } else {
+            root.goSearch(prefill ?? "");
+        }
     }
 
     function handleTypeAhead(event) {
@@ -291,7 +395,7 @@ Kirigami.ApplicationWindow {
         if (t.length === 0 || t.charCodeAt(0) < 0x20 || t.charCodeAt(0) === 0x7f) {
             return;
         }
-        topBar.focusSearch(t);
+        root.focusSearch(t);
         event.accepted = true;
     }
 
@@ -323,11 +427,6 @@ Kirigami.ApplicationWindow {
     }
 
     Component {
-        id: storyPageComponent
-        StoryPage {}
-    }
-
-    Component {
         id: installFlatpakrefPageComponent
         InstallFlatpakrefPage {}
     }
@@ -350,12 +449,13 @@ Kirigami.ApplicationWindow {
     Connections {
         target: TransactionsModel
         function onEulaRequired(pkgId, name, iconUrl, eulaUrl) {
-            root.pageStack.push(eulaPageComponent, {
+            const page = root.pageStack.push(eulaPageComponent, {
                 pkgId: pkgId,
                 appName: name,
                 iconUrl: iconUrl,
                 eulaUrl: eulaUrl
             });
+            page.closeRequested.connect(() => root.pageStack.pop());
         }
     }
 
@@ -370,6 +470,9 @@ Kirigami.ApplicationWindow {
                         a: DeepLinkController.pkgId
                     }
                 ]);
+                break;
+            case "list":
+                root.openList(DeepLinkController.listSlug, "");
                 break;
             case "flatpakref":
                 root.navigate([

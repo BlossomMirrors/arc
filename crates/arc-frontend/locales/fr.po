@@ -1,0 +1,341 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: arc-frontend\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: fr\n"
+"Language-Team: French\n"
+"Plural-Forms: nplurals=2; plural=n > 1;\n"
+
+msgid "Proprietary"
+msgstr ""
+
+msgid "All ages"
+msgstr ""
+
+msgid "Add-ons"
+msgstr ""
+
+msgid "Cancel"
+msgstr ""
+
+msgid "Remove"
+msgstr ""
+
+msgid "Start"
+msgstr ""
+
+msgid "Update"
+msgstr ""
+
+msgid "Install"
+msgstr ""
+
+msgid "All sources"
+msgstr ""
+
+msgid "Everything"
+msgstr ""
+
+msgid "Installed"
+msgstr ""
+
+msgid "Not installed"
+msgstr ""
+
+msgid "Relevance"
+msgstr ""
+
+msgid "Name A-Z"
+msgstr ""
+
+msgid "%1 app"
+msgid_plural "%1 apps"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Back (Alt+Left)"
+msgstr ""
+
+msgid "Forward (Alt+Right)"
+msgstr ""
+
+msgid "Home"
+msgstr ""
+
+msgid "Downloads"
+msgstr ""
+
+msgid "Search apps..."
+msgstr ""
+
+msgid "Settings"
+msgstr ""
+
+msgid "Arc Store"
+msgstr ""
+
+msgid "Category"
+msgstr ""
+
+msgid "No apps found in this category"
+msgstr ""
+
+msgid "Website"
+msgstr ""
+
+msgid "Remove %1?"
+msgstr ""
+
+msgid "The application will be uninstalled from your system."
+msgstr ""
+
+msgid "Add Repository"
+msgstr ""
+
+msgid "License Agreement"
+msgstr ""
+
+msgid "%1 requires you to accept its End User License Agreement before installing."
+msgstr ""
+
+msgid "Read License Agreement"
+msgstr ""
+
+msgid "Accept & Install"
+msgstr ""
+
+msgid "Install File"
+msgstr ""
+
+msgid "A Flatpak version of this app is also available: %1"
+msgstr ""
+
+msgid "Install AppImage"
+msgstr ""
+
+msgid "Install Flatpak Bundle"
+msgstr ""
+
+msgid "Install via Distrobox"
+msgstr ""
+
+msgid "Install Flatpak Instead"
+msgstr ""
+
+msgid "Install App"
+msgstr ""
+
+msgid "This app comes from a third-party source outside your configured repositories."
+msgstr ""
+
+msgid "%1 h %2 min remaining"
+msgstr ""
+
+msgid "%1 min remaining"
+msgstr ""
+
+msgid "%1 s remaining"
+msgstr ""
+
+msgid "Removing"
+msgstr ""
+
+msgid "Updating"
+msgstr ""
+
+msgid "Installing"
+msgstr ""
+
+msgid "Everything is up to date"
+msgstr ""
+
+msgid "No updates available. Installs, removals and updates show up here."
+msgstr ""
+
+msgid "Check for Updates"
+msgstr ""
+
+msgid "%1 of %2"
+msgstr ""
+
+msgid "Up Next"
+msgstr ""
+
+msgid "Queued"
+msgstr ""
+
+msgid "Available Updates"
+msgstr ""
+
+msgid "Check"
+msgstr ""
+
+msgid "Update All"
+msgstr ""
+
+msgid "Everything is up to date."
+msgstr ""
+
+msgid "Completed"
+msgstr ""
+
+msgid "Clear"
+msgstr ""
+
+msgid "Removal failed"
+msgstr ""
+
+msgid "Update failed"
+msgstr ""
+
+msgid "Installation failed"
+msgstr ""
+
+msgid "Removed"
+msgstr ""
+
+msgid "Updated in the background"
+msgstr ""
+
+msgid "Updated"
+msgstr ""
+
+msgctxt "what happened to an app and when"
+msgid "%1 · %2"
+msgstr ""
+
+msgid "Categories"
+msgstr ""
+
+msgid "Nothing installed yet"
+msgstr ""
+
+msgid "Search"
+msgstr ""
+
+msgid "Search for apps to install"
+msgstr ""
+
+msgid "General"
+msgstr ""
+
+msgid "Automatic updates"
+msgstr ""
+
+msgid "Update installed apps in the background"
+msgstr ""
+
+msgid "Security warnings"
+msgstr ""
+
+msgid "Warn before installing third-party software or adding repositories"
+msgstr ""
+
+msgid "Concurrent downloads"
+msgstr ""
+
+msgid "Repositories"
+msgstr ""
+
+msgid "Loading..."
+msgstr ""
+
+msgid "Protected system repository"
+msgstr ""
+
+msgid "Remove repository"
+msgstr ""
+
+msgid "Add Repository..."
+msgstr ""
+
+msgid "Danger Zone"
+msgstr ""
+
+msgid "Force update"
+msgstr ""
+
+msgid "Runs flatpak update directly, bypassing the daemon"
+msgstr ""
+
+msgid "Restart daemon"
+msgstr ""
+
+msgid "Kills the running arc-daemon and starts a fresh one"
+msgstr ""
+
+msgid "Clear icon cache"
+msgstr ""
+
+msgid "Reprocesses app icons the next time they're shown"
+msgstr ""
+
+msgid "Name"
+msgstr ""
+
+msgid "URL"
+msgstr ""
+
+msgid "Apps installed from this repository keep working, but it will no longer offer updates or new installs."
+msgstr ""
+
+msgid "Force update now?"
+msgstr ""
+
+msgid "Runs flatpak update directly, bypassing the daemon and its progress tracking."
+msgstr ""
+
+msgid "Restart the daemon?"
+msgstr ""
+
+msgid "Cancels every running install, remove and update right now."
+msgstr ""
+
+msgid "Restart"
+msgstr ""
+
+msgid "Office"
+msgstr ""
+
+msgid "Creative"
+msgstr ""
+
+msgid "Chat"
+msgstr ""
+
+msgid "Gaming"
+msgstr ""
+
+msgid "Browser"
+msgstr ""
+
+msgid "Music"
+msgstr ""
+
+msgid "Code"
+msgstr ""
+
+msgid "Select all"
+msgstr ""
+
+msgid "Select none"
+msgstr ""
+
+msgid "This list is empty"
+msgstr ""
+
+msgid "Install %1 app"
+msgid_plural "Install %1 apps"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Could not load the front page"
+msgstr ""
+
+msgid "Check your connection. This retries on its own."
+msgstr ""
+
+msgid "Try again"
+msgstr ""

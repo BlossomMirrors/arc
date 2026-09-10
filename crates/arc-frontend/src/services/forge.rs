@@ -1,5 +1,54 @@
 const FORGE: &str = libarc::FORGE_BASE_URL;
 
+pub struct ListDef {
+    pub slug: &'static str,
+    pub icon_name: &'static str,
+    pub color: &'static str,
+}
+
+pub const LISTS: &[ListDef] = &[
+    ListDef { slug: "office", icon_name: "arc-list-office-symbolic", color: "#ab4e1c" },
+    ListDef { slug: "creative", icon_name: "arc-list-creative-symbolic", color: "#8f45c9" },
+    ListDef { slug: "chat", icon_name: "arc-list-chat-symbolic", color: "#1a5fb4" },
+    ListDef { slug: "gaming", icon_name: "arc-list-gaming-symbolic", color: "#26a269" },
+    ListDef { slug: "browser", icon_name: "arc-list-browser-symbolic", color: "#f66151" },
+    ListDef { slug: "music", icon_name: "arc-list-music-symbolic", color: "#ff3d3d" },
+    ListDef { slug: "code", icon_name: "arc-list-code-symbolic", color: "#2d89f2" },
+];
+
+pub fn list_def(slug: &str) -> Option<&'static ListDef> {
+    LISTS.iter().find(|l| l.slug == slug)
+}
+
+#[derive(serde::Deserialize, Clone)]
+pub struct ForgeListApp {
+    #[serde(rename = "ref")]
+    pub app_ref: String,
+    pub name: String,
+    pub icon_url: Option<String>,
+}
+
+#[derive(serde::Deserialize, Clone)]
+pub struct ForgeList {
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub apps: Vec<ForgeListApp>,
+}
+
+pub async fn fetch_list(slug: &str) -> Option<ForgeList> {
+    let url = format!("{}/api/lists/{}", FORGE, slug);
+    reqwest::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .ok()?
+        .json::<ForgeList>()
+        .await
+        .ok()
+}
+
 #[derive(serde::Deserialize, Clone)]
 pub struct HomeAppMeta {
     pub id: String,
@@ -148,6 +197,7 @@ pub struct ForgeStory {
     pub banner_url: Option<String>,
     pub title: String,
     pub body: String,
+    pub app_ids: Vec<String>,
 }
 
 pub async fn post_install(appid: String) {
@@ -160,7 +210,44 @@ pub async fn post_install(appid: String) {
         .await;
 }
 
+pub fn user_lang() -> String {
+    sys_locale::get_locale()
+        .unwrap_or_default()
+        .split(['_', '-'])
+        .next()
+        .unwrap_or("en")
+        .to_string()
+}
+
+fn keep_one_links_language(sections: &mut Vec<FpSection>, user_lang: &str) {
+    let mut langs: Vec<&str> = sections
+        .iter()
+        .filter_map(|s| match s {
+            FpSection::LinksSection { title_lang, .. } => Some(title_lang.as_str()),
+            _ => None,
+        })
+        .collect();
+    langs.dedup();
+    if langs.len() < 2 {
+        return;
+    }
+    let chosen = if langs.contains(&user_lang) {
+        user_lang.to_string()
+    } else if langs.contains(&"en") {
+        "en".to_string()
+    } else {
+        langs[0].to_string()
+    };
+    sections.retain(
+        |s| !matches!(s, FpSection::LinksSection { title_lang, .. } if title_lang != &chosen),
+    );
+}
+
 fn parse_frontpage(xml: &str) -> Vec<FpSection> {
+    parse_frontpage_for(xml, &user_lang())
+}
+
+fn parse_frontpage_for(xml: &str, user_lang: &str) -> Vec<FpSection> {
     let mut sections = Vec::new();
     let mut pos = 0;
 
@@ -309,16 +396,7 @@ fn parse_frontpage(xml: &str) -> Vec<FpSection> {
         }
     }
 
-    let sys = sys_locale::get_locale().unwrap_or_default();
-    let user_lang = sys.split(['_', '-']).next().unwrap_or("en").to_string();
-    let has_user_lang = sections.iter().any(
-        |s| matches!(s, FpSection::LinksSection { title_lang, .. } if title_lang == &user_lang),
-    );
-    if has_user_lang {
-        sections.retain(|s| {
-            !matches!(s, FpSection::LinksSection { title_lang, .. } if title_lang != &user_lang)
-        });
-    }
+    keep_one_links_language(&mut sections, user_lang);
 
     sections
 }
@@ -472,9 +550,46 @@ fn extract_carousel_items(xml: &str) -> Vec<CarouselItem> {
     });
     let preferred: &str = if has_user_lang { &user_lang } else { "en" };
 
+    let mut group_of: Vec<usize> = Vec::with_capacity(raw.len());
+    let mut group_langs: Vec<Vec<String>> = Vec::new();
+    let mut current: Option<usize> = None;
+
+    for item in &raw {
+        match item {
+            RawCarouselItem::Story(s) => {
+                let langs: Vec<String> = s.titles.iter().map(|(l, _)| l.clone()).collect();
+                let repeats = current
+                    .map(|g: usize| langs.iter().any(|l| group_langs[g].contains(l)))
+                    .unwrap_or(true);
+                if repeats {
+                    group_langs.push(langs);
+                    current = Some(group_langs.len() - 1);
+                } else if let Some(g) = current {
+                    group_langs[g].extend(langs);
+                }
+                group_of.push(current.unwrap_or(usize::MAX));
+            }
+            RawCarouselItem::App(_) => {
+                current = None;
+                group_of.push(usize::MAX);
+            }
+        }
+    }
+
+    let mut apps_by_group: std::collections::HashMap<usize, Vec<String>> =
+        std::collections::HashMap::new();
+    for (i, item) in raw.iter().enumerate() {
+        if let RawCarouselItem::Story(s) = item {
+            let ids = extract_app_ids(&s.body);
+            if !ids.is_empty() {
+                apps_by_group.entry(group_of[i]).or_insert(ids);
+            }
+        }
+    }
+
     let mut items = Vec::new();
     let mut hide_following_apps = false;
-    for item in raw {
+    for (i, item) in raw.into_iter().enumerate() {
         match item {
             RawCarouselItem::App(id) => {
                 if !hide_following_apps {
@@ -490,10 +605,21 @@ fn extract_carousel_items(xml: &str) -> Vec<CarouselItem> {
                 hide_following_apps = title.is_none();
 
                 if let Some(title) = title {
+                    let mut body = s.body;
+                    let mut app_ids = extract_app_ids(&body);
+                    if app_ids.is_empty() {
+                        if let Some(shared) = apps_by_group.get(&group_of[i]) {
+                            app_ids = shared.clone();
+                            for id in &app_ids {
+                                body.push_str(&format!("\n<App id=\"{id}\" />"));
+                            }
+                        }
+                    }
                     items.push(CarouselItem::Story(ForgeStory {
                         banner_url: s.banner_url,
                         title,
-                        body: s.body,
+                        body,
+                        app_ids,
                     }));
                 }
             }
@@ -503,21 +629,29 @@ fn extract_carousel_items(xml: &str) -> Vec<CarouselItem> {
     items
 }
 
-fn extract_app_ids(xml: &str) -> Vec<String> {
+pub fn extract_app_ids(xml: &str) -> Vec<String> {
+    let lower = xml.to_ascii_lowercase();
     let mut ids = Vec::new();
-    let mut s = xml;
-    while let Some(p) = s.find("<app") {
-        s = &s[p + 4..];
-        if let Some(q) = s.find("id=\"") {
-            s = &s[q + 4..];
-            if let Some(e) = s.find('"') {
-                let id = s[..e].trim().to_string();
+    let mut pos = 0;
+
+    while let Some(rel) = lower[pos..].find("<app") {
+        let start = pos + rel;
+        let after = lower[start + 4..].chars().next();
+        if !matches!(after, Some(c) if c.is_ascii_whitespace() || c == '>' || c == '/') {
+            pos = start + 4;
+            continue;
+        }
+        let end = lower[start..].find('>').map(|e| start + e).unwrap_or(lower.len());
+        if let Some(idp) = lower[start..end].find("id=\"") {
+            let value_start = start + idp + 4;
+            if let Some(rel_end) = xml[value_start..end].find('"') {
+                let id = xml[value_start..value_start + rel_end].trim();
                 if !id.is_empty() {
-                    ids.push(id);
+                    ids.push(id.to_string());
                 }
-                s = &s[e + 1..];
             }
         }
+        pos = end.max(start + 4);
     }
     ids
 }
@@ -649,10 +783,12 @@ fn extract_links_items(xml: &str) -> Vec<FpLinksItem> {
                 hide_following = title.is_none();
 
                 if let Some(title) = title {
+                    let app_ids = extract_app_ids(&s.body);
                     items.push(FpLinksItem::Story(ForgeStory {
                         banner_url: s.banner_url,
                         title,
                         body: s.body,
+                        app_ids,
                     }));
                 }
             }

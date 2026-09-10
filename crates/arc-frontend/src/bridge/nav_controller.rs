@@ -17,8 +17,46 @@ pub mod qobject {
         fn navigate(self: Pin<&mut NavController>, spec: QString);
 
         #[qinvokable]
-        #[cxx_name = "openChild"]
-        fn open_child(self: Pin<&mut NavController>, entry: QString);
+        #[cxx_name = "openApp"]
+        fn open_app(self: Pin<&mut NavController>, pkg_id: QString, seed_json: QString);
+
+        #[qinvokable]
+        #[cxx_name = "openStory"]
+        fn open_story(self: Pin<&mut NavController>, story_id: QString);
+
+        #[qinvokable]
+        #[cxx_name = "openCategory"]
+        fn open_category(
+            self: Pin<&mut NavController>,
+            id: QString,
+            label: QString,
+            color: QString,
+            icon: QString,
+        );
+
+        #[qinvokable]
+        #[cxx_name = "openList"]
+        fn open_list(self: Pin<&mut NavController>, slug: QString, label: QString);
+
+        #[qinvokable]
+        #[cxx_name = "goHome"]
+        fn go_home(self: Pin<&mut NavController>);
+
+        #[qinvokable]
+        #[cxx_name = "goSearch"]
+        fn go_search(self: Pin<&mut NavController>, query: QString);
+
+        #[qinvokable]
+        #[cxx_name = "goInstalled"]
+        fn go_installed(self: Pin<&mut NavController>);
+
+        #[qinvokable]
+        #[cxx_name = "goDownloads"]
+        fn go_downloads(self: Pin<&mut NavController>);
+
+        #[qinvokable]
+        #[cxx_name = "goSettings"]
+        fn go_settings(self: Pin<&mut NavController>);
 
         #[qinvokable]
         #[cxx_name = "updateQuery"]
@@ -67,13 +105,12 @@ fn is_tab_kind(kind: &str) -> bool {
 
 fn view_of(stack: &[Entry], current_tab: &Entry) -> String {
     match stack.last() {
-        Some(e) if e.kind == "category" => "search".to_string(),
+        Some(e) if e.kind == "category" || e.kind == "list" => "search".to_string(),
         Some(e) => e.kind.clone(),
         None => current_tab.kind.clone(),
     }
 }
 
-#[derive(Default)]
 pub struct NavControllerRust {
     stack: Vec<Entry>,
     forward: Vec<Entry>,
@@ -81,6 +118,19 @@ pub struct NavControllerRust {
     can_go_back: bool,
     can_go_forward: bool,
     current_view: QString,
+}
+
+impl Default for NavControllerRust {
+    fn default() -> Self {
+        Self {
+            stack: Vec::new(),
+            forward: Vec::new(),
+            current_tab: Entry::default(),
+            can_go_back: false,
+            can_go_forward: false,
+            current_view: QString::from("home"),
+        }
+    }
 }
 
 impl Default for Entry {
@@ -109,16 +159,83 @@ impl qobject::NavController {
         self.nav_op(QString::from(&op.to_string()));
     }
 
-    pub fn navigate(mut self: Pin<&mut Self>, spec: QString) {
+    pub fn navigate(self: Pin<&mut Self>, spec: QString) {
         let Some(target) = serde_json::from_str::<Vec<Entry>>(&spec.to_string())
             .ok()
             .and_then(|v| v.into_iter().next())
         else {
             return;
         };
+        self.go(target);
+    }
 
+    pub fn open_app(self: Pin<&mut Self>, pkg_id: QString, seed_json: QString) {
+        let seed = serde_json::from_str(&seed_json.to_string()).unwrap_or(serde_json::Value::Null);
+        self.go(Entry {
+            kind: "detail".to_string(),
+            a: pkg_id.to_string(),
+            c: seed,
+            ..Default::default()
+        });
+    }
+
+    pub fn open_story(self: Pin<&mut Self>, story_id: QString) {
+        self.go(Entry { kind: "story".to_string(), a: story_id.to_string(), ..Default::default() });
+    }
+
+    pub fn open_category(
+        self: Pin<&mut Self>,
+        id: QString,
+        label: QString,
+        color: QString,
+        icon: QString,
+    ) {
+        self.go(Entry {
+            kind: "category".to_string(),
+            a: id.to_string(),
+            b: label.to_string(),
+            c: serde_json::Value::String(color.to_string()),
+            d: icon.to_string(),
+        });
+    }
+
+    pub fn open_list(self: Pin<&mut Self>, slug: QString, label: QString) {
+        self.go(Entry {
+            kind: "list".to_string(),
+            a: slug.to_string(),
+            b: label.to_string(),
+            ..Default::default()
+        });
+    }
+
+    pub fn go_home(self: Pin<&mut Self>) {
+        self.go(Entry { kind: "home".to_string(), ..Default::default() });
+    }
+
+    pub fn go_search(self: Pin<&mut Self>, query: QString) {
+        self.go(Entry {
+            kind: "search".to_string(),
+            a: query.to_string(),
+            ..Default::default()
+        });
+    }
+
+    pub fn go_installed(self: Pin<&mut Self>) {
+        self.go(Entry { kind: "installed".to_string(), ..Default::default() });
+    }
+
+    pub fn go_downloads(self: Pin<&mut Self>) {
+        self.go(Entry { kind: "downloads".to_string(), ..Default::default() });
+    }
+
+    pub fn go_settings(self: Pin<&mut Self>) {
+        self.go(Entry { kind: "settings".to_string(), ..Default::default() });
+    }
+
+    fn go(mut self: Pin<&mut Self>, target: Entry) {
         if is_tab_kind(&target.kind) {
             if target.same(&self.current_tab) && self.stack.is_empty() {
+                self.sync();
                 return;
             }
             self.as_mut().rust_mut().current_tab = target.clone();
@@ -131,22 +248,14 @@ impl qobject::NavController {
             }
             self.as_mut().rust_mut().stack.truncate(i + 1);
             self.as_mut().rust_mut().forward.clear();
-            self.as_mut().emit_op(serde_json::json!({ "action": "popTo", "depth": i + 1 }));
+            let top = self.stack.last().cloned();
+            self.as_mut()
+                .emit_op(serde_json::json!({ "action": "popTo", "depth": i + 1, "top": top }));
         } else {
             self.as_mut().rust_mut().stack.push(target.clone());
             self.as_mut().rust_mut().forward.clear();
             self.as_mut().emit_op(serde_json::json!({ "action": "push", "entry": target }));
         }
-        self.sync();
-    }
-
-    pub fn open_child(mut self: Pin<&mut Self>, entry: QString) {
-        let Ok(entry) = serde_json::from_str::<Entry>(&entry.to_string()) else {
-            return;
-        };
-        self.as_mut().rust_mut().stack.push(entry.clone());
-        self.as_mut().rust_mut().forward.clear();
-        self.as_mut().emit_op(serde_json::json!({ "action": "push", "entry": entry }));
         self.sync();
     }
 
@@ -164,7 +273,9 @@ impl qobject::NavController {
         }
         let popped = self.as_mut().rust_mut().stack.pop().unwrap();
         self.as_mut().rust_mut().forward.push(popped);
-        self.as_mut().emit_op(serde_json::json!({ "action": "pop" }));
+
+        let top = self.stack.last().cloned();
+        self.as_mut().emit_op(serde_json::json!({ "action": "pop", "top": top }));
         self.sync();
     }
 

@@ -1,7 +1,7 @@
 use futures_util::future::join_all;
 use libarc::ArcDaemonProxy;
 
-#[derive(serde::Serialize, Default, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
 pub struct DescBlock {
     pub text: String,
     pub is_list_item: bool,
@@ -230,6 +230,14 @@ pub fn html_to_blocks(html: &str) -> Vec<DescBlock> {
     blocks
 }
 
+pub fn blocks_worth_caching(blocks: &[DescBlock]) -> bool {
+    let mut apps = blocks.iter().filter(|b| b.is_app && !b.app_id.is_empty()).peekable();
+    if apps.peek().is_none() {
+        return true;
+    }
+    apps.any(|b| !b.app_name.is_empty())
+}
+
 pub async fn resolve_app_blocks(blocks: &mut [DescBlock], proxy: Option<&ArcDaemonProxy<'static>>) {
     let ids: Vec<String> = blocks
         .iter()
@@ -245,7 +253,14 @@ pub async fn resolve_app_blocks(blocks: &mut [DescBlock], proxy: Option<&ArcDaem
         let proxy = proxy.cloned();
         async move {
             let pkg = match proxy {
-                Some(p) => p.app_info(&id).await.ok().flatten(),
+                Some(p) => tokio::time::timeout(
+                    std::time::Duration::from_secs(15),
+                    p.app_info(&id),
+                )
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .flatten(),
                 None => None,
             };
             (id, pkg)
@@ -258,13 +273,30 @@ pub async fn resolve_app_blocks(blocks: &mut [DescBlock], proxy: Option<&ArcDaem
         .filter_map(|(id, pkg)| pkg.map(|p| (id, p)))
         .collect();
 
+    let needs_pwa = ids.iter().any(|id| !resolved.contains_key(id) && id.starts_with("pwa:"));
+    let pwas: std::collections::HashMap<String, crate::services::forge::PwaApp> = if needs_pwa {
+        crate::services::forge::fetch_pwas(&crate::services::forge::user_lang())
+            .await
+            .into_iter()
+            .map(|p| (p.appid.clone(), p))
+            .collect()
+    } else {
+        Default::default()
+    };
+
     for block in blocks.iter_mut() {
-        if block.is_app {
-            if let Some(pkg) = resolved.get(&block.app_id) {
-                block.app_name = pkg.name.clone();
-                block.app_summary = pkg.description.clone();
-                block.app_icon_url = crate::services::icons::resolve(&pkg.id, pkg.icon_url.as_deref());
-            }
+        if !block.is_app {
+            continue;
+        }
+        if let Some(pkg) = resolved.get(&block.app_id) {
+            block.app_name = pkg.name.clone();
+            block.app_summary = pkg.description.clone();
+            block.app_icon_url = crate::services::icons::resolve(&pkg.id, pkg.icon_url.as_deref());
+        } else if let Some(pwa) = pwas.get(&block.app_id) {
+            block.app_name = pwa.name.clone();
+            block.app_summary = pwa.summary.clone();
+            block.app_icon_url =
+                crate::services::icons::resolve(&pwa.appid, pwa.icon_url.as_deref());
         }
     }
 }

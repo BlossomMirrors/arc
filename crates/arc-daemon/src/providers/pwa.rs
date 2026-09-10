@@ -138,6 +138,26 @@ impl PwaProvider {
         icon_name
     }
 
+    pub async fn refresh_installed_icons(&self) -> usize {
+        let pwas = self.fetch_pwas().await;
+        let mut changed = 0;
+        for pwa in pwas.iter().filter(|p| self.is_installed(&p.appid)) {
+            let Some(url) = pwa.icon_url.as_deref() else { continue };
+            let Some((bytes, _)) = crate::media::fetch_raw(url).await else { continue };
+            let is_svg = url.contains(".svg");
+            let dest = self.icon_theme_path(&pwa.appid, if is_svg { "svg" } else { "png" });
+            if fs::read(&dest).is_ok_and(|current| current == bytes) {
+                continue;
+            }
+            let icon_name = format!("arc-pwa-{}", pwa.appid);
+            if libarc::icons::install_icon(&icon_name, &bytes, is_svg).is_some() {
+                info!("PWA icon updated: {}", pwa.appid);
+                changed += 1;
+            }
+        }
+        changed
+    }
+
     /// Return a file:// URI for the locally cached icon, if one has already
     /// been downloaded for this appid.
     fn local_icon_uri(&self, appid: &str) -> Option<String> {

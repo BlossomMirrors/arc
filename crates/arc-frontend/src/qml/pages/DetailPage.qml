@@ -6,6 +6,7 @@ import QtQuick.Effects
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.blossomos.arc
+import org.kde.ki18n
 
 Kirigami.ScrollablePage {
     id: root
@@ -140,63 +141,19 @@ Kirigami.ScrollablePage {
                     }
                 }
 
-                delegate: Item {
-                    id: shotDelegate
-
-                    property string modelData: ""
-                    property int index
-
+                delegate: ScreenshotCard {
                     width: height * 16 / 9
                     height: screenshotStrip.height
-
-                    readonly property string requestUrl: shotDelegate.modelData + (shotDelegate.modelData.indexOf("?") >= 0 ? "&" : "?") + "w=" + Math.round(shotDelegate.width * 2)
-
-                    SkeletonBlock {
-                        anchors.fill: parent
-                        visible: shotImage.status !== Image.Ready && shotImage.status !== Image.Error
+                    maskSource: sharedShotMask
+                    failedShots: root.failedShots
+                    onLoadFailed: url => {
+                        var failed = Object.assign({}, root.failedShots);
+                        failed[url] = true;
+                        root.failedShots = failed;
                     }
-
-                    Image {
-                        id: shotImage
-                        anchors.fill: parent
-                        source: root.failedShots[shotDelegate.requestUrl] ? "" : shotDelegate.requestUrl
-                        sourceSize.width: shotDelegate.width * 2
-                        sourceSize.height: shotDelegate.height * 2
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        opacity: status === Image.Ready ? 1 : 0
-
-                        Behavior on opacity {
-                            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
-                        }
-
-                        layer.enabled: true
-                        layer.effect: MultiEffect {
-                            maskEnabled: true
-                            maskSource: sharedShotMask
-                            maskThresholdMin: 0.5
-                            maskSpreadAtMin: 0.0
-                        }
-
-                        onStatusChanged: {
-                            if (status === Image.Error) {
-                                var failed = Object.assign({}, root.failedShots);
-                                failed[shotDelegate.requestUrl] = true;
-                                root.failedShots = failed;
-                            }
-                        }
-                    }
-
-                    HoverHandler {
-                        cursorShape: Qt.PointingHandCursor
-                    }
-
-                    TapHandler {
-                        enabled: shotImage.status !== Image.Error
-                        onTapped: {
-                            lightbox.currentIndex = shotDelegate.index;
-                            lightbox.open();
-                        }
+                    onActivated: shotIndex => {
+                        lightbox.currentIndex = shotIndex;
+                        lightbox.open();
                     }
                 }
             }
@@ -236,7 +193,7 @@ Kirigami.ScrollablePage {
                 spacing: Kirigami.Units.largeSpacing
 
                 Controls.Label {
-                    text: i18n("Website")
+                    text: KI18n.i18n("Website")
                     font.bold: true
                     opacity: 0.7
                 }
@@ -256,14 +213,14 @@ Kirigami.ScrollablePage {
 
     Kirigami.PromptDialog {
         id: removeDialog
-        title: i18n("Remove %1?", DetailController.name)
-        subtitle: i18n("The application will be uninstalled from your system.")
+        title: KI18n.i18n("Remove %1?", DetailController.name)
+        subtitle: KI18n.i18n("The application will be uninstalled from your system.")
         standardButtons: Kirigami.Dialog.Cancel
         showCloseButton: false
 
         customFooterActions: [
             Kirigami.Action {
-                text: i18n("Remove")
+                text: KI18n.i18n("Remove")
                 icon.name: "delete"
                 onTriggered: {
                     TransactionsModel.removePackage(DetailController.id, DetailController.name, DetailController.iconUrl);
@@ -275,7 +232,7 @@ Kirigami.ScrollablePage {
 
     Kirigami.OverlaySheet {
         id: extensionsSheet
-        title: i18n("Add-ons")
+        title: KI18n.i18n("Add-ons")
 
         Column {
             width: Kirigami.Units.gridUnit * 26

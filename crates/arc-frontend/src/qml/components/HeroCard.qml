@@ -36,7 +36,6 @@ Item {
                 text: root.heroTitle
                 font.bold: true
                 color: "white"
-                elide: Text.ElideRight
             }
 
             Controls.Label {
@@ -45,7 +44,6 @@ Item {
                 text: root.body
                 font.pointSize: Kirigami.Theme.smallFont.pointSize
                 color: Qt.rgba(1, 1, 1, 0.67)
-                elide: Text.ElideRight
             }
         }
     }

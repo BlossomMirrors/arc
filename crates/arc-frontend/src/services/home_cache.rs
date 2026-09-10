@@ -1,6 +1,6 @@
 use super::home::{Card, Category, HeroItem, HomeSection, LinkItem, Story};
 use libarc::cache::JsonCache;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SectionDto {
@@ -18,25 +18,19 @@ struct SectionDto {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Snapshot {
+    #[serde(default)]
+    lang: String,
     sections: Vec<SectionDto>,
     stories: Vec<Story>,
 }
 
 fn store() -> &'static JsonCache<Snapshot> {
     static STORE: OnceLock<JsonCache<Snapshot>> = OnceLock::new();
-    STORE.get_or_init(|| JsonCache::new("frontend", "home.json"))
-}
-
-// mirrors whatever the current sections resolved to, so StoryController can
-// look a story up without a refetch even before the next disk save happens
-static STORIES: OnceLock<Mutex<Vec<Story>>> = OnceLock::new();
-
-pub fn set_stories(stories: Vec<Story>) {
-    *STORIES.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap() = stories;
-}
-
-pub fn find_story(id: &str) -> Option<Story> {
-    STORIES.get()?.lock().unwrap().iter().find(|s| s.id == id).cloned()
+    STORE.get_or_init(|| {
+        JsonCache::new("frontend", "home.json")
+            .with_schema(1)
+            .with_ttl(std::time::Duration::from_secs(24 * 3600))
+    })
 }
 
 fn static_item_type(s: &str) -> &'static str {
@@ -48,14 +42,18 @@ fn static_item_type(s: &str) -> &'static str {
         "categories" => "categories",
         "app-row" => "app-row",
         "app-grid" => "app-grid",
+        "app-wide-grid" => "app-wide-grid",
         "carousel" => "carousel",
         "links" => "links",
         _ => "p",
     }
 }
 
-pub fn load() -> Option<(Vec<HomeSection>, Vec<Story>)> {
+pub fn load() -> Option<Vec<HomeSection>> {
     let snapshot = store().load()?;
+    if snapshot.lang != super::forge::user_lang() {
+        return None;
+    }
     let sections = snapshot
         .sections
         .into_iter()
@@ -75,8 +73,8 @@ pub fn load() -> Option<(Vec<HomeSection>, Vec<Story>)> {
             loading: false,
         })
         .collect();
-    set_stories(snapshot.stories.clone());
-    Some((sections, snapshot.stories))
+    super::stories::seed(&snapshot.stories);
+    Some(sections)
 }
 
 pub fn save(sections: &[HomeSection], stories: &[Story]) {
@@ -97,6 +95,7 @@ pub fn save(sections: &[HomeSection], stories: &[Story]) {
             })
             .collect(),
         stories: stories.to_vec(),
+        lang: super::forge::user_lang(),
     };
     store().store(&snapshot);
 }

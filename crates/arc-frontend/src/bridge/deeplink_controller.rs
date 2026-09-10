@@ -11,6 +11,7 @@ pub mod qobject {
         #[qml_singleton]
         #[qproperty(QString, kind)]
         #[qproperty(QString, pkg_id, cxx_name = "pkgId")]
+        #[qproperty(QString, list_slug, cxx_name = "listSlug")]
         #[qproperty(QString, ref_title, cxx_name = "refTitle")]
         #[qproperty(QString, ref_source, cxx_name = "refSource")]
         #[qproperty(QString, repo_title, cxx_name = "repoTitle")]
@@ -43,6 +44,7 @@ use std::pin::Pin;
 pub struct DeepLinkControllerRust {
     kind: QString,
     pkg_id: QString,
+    list_slug: QString,
     ref_title: QString,
     ref_source: QString,
     repo_title: QString,
@@ -72,6 +74,14 @@ impl qobject::DeepLinkController {
                         .queue(move |mut this| {
                             this.as_mut().set_pkg_id(QString::from(&pkg_id));
                             this.as_mut().set_kind(QString::from("detail"));
+                        })
+                        .ok();
+                }
+                LaunchIntent::List { slug } => {
+                    qt_thread
+                        .queue(move |mut this| {
+                            this.as_mut().set_list_slug(QString::from(&slug));
+                            this.as_mut().set_kind(QString::from("list"));
                         })
                         .ok();
                 }

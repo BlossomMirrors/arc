@@ -22,6 +22,8 @@ pub struct HeroItem {
     pub body: String,
     pub is_story: bool,
     pub story_index: i32,
+    #[serde(default)]
+    pub apps: Vec<Card>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -76,6 +78,8 @@ impl Default for HomeSection {
 const STORY_INDEX_STRIDE: i32 = 1000;
 
 const DAEMON_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
+const DAEMON_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 pub struct PendingSection {
     pub row_index: usize,
@@ -141,6 +145,19 @@ async fn resolve_ids_cached(
     proxy: Option<&ArcDaemonProxy<'static>>,
     pwa_map: &HashMap<String, forge::PwaApp>,
 ) -> Vec<AppEntry> {
+    resolve_id_slots(ids, meta_map, proxy, pwa_map)
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+async fn resolve_id_slots(
+    ids: &[String],
+    meta_map: &HashMap<String, forge::HomeAppMeta>,
+    proxy: Option<&ArcDaemonProxy<'static>>,
+    pwa_map: &HashMap<String, forge::PwaApp>,
+) -> Vec<Option<AppEntry>> {
     let mut result = Vec::with_capacity(ids.len());
     let mut missing: Vec<String> = Vec::new();
 
@@ -162,17 +179,17 @@ async fn resolve_ids_cached(
     let mut fb_iter = fallbacks.into_iter();
     for slot in result.iter_mut() {
         if slot.is_none() {
-            *slot = fb_iter.next();
+            *slot = fb_iter.next().flatten();
         }
     }
-    result.into_iter().flatten().collect()
+    result
 }
 
 async fn resolve_ids(
     ids: &[String],
     proxy: Option<&ArcDaemonProxy<'static>>,
     pwa_map: &HashMap<String, forge::PwaApp>,
-) -> Vec<AppEntry> {
+) -> Vec<Option<AppEntry>> {
     let futs: Vec<_> = ids
         .iter()
         .map(|id| {
@@ -181,12 +198,17 @@ async fn resolve_ids(
             let pwa = pwa_map.get(&id).cloned();
             async move {
                 let daemon = if let Some(p) = p {
-                    p.app_info(&id).await.ok().flatten().map(|pkg| AppEntry {
-                        id: pkg.id,
-                        name: pkg.name,
-                        summary: pkg.description,
-                        icon_url: pkg.icon_url,
-                    })
+                    tokio::time::timeout(DAEMON_CALL_TIMEOUT, p.app_info(&id))
+                        .await
+                        .ok()
+                        .and_then(|r| r.ok())
+                        .flatten()
+                        .map(|pkg| AppEntry {
+                            id: pkg.id,
+                            name: pkg.name,
+                            summary: pkg.description,
+                            icon_url: pkg.icon_url,
+                        })
                 } else {
                     None
                 };
@@ -202,7 +224,7 @@ async fn resolve_ids(
         })
         .collect();
 
-    join_all(futs).await.into_iter().flatten().collect()
+    join_all(futs).await
 }
 
 async fn entries_to_cards(entries: Vec<AppEntry>, installed: &HashSet<String>) -> Vec<Card> {
@@ -273,31 +295,31 @@ pub async fn plan_home(proxy: Option<ArcDaemonProxy<'static>>) -> (HomePlan, std
                 ..Default::default()
             },
             FpSection::Top => HomeSection {
-                item_type: "app-grid",
+                item_type: "app-wide-grid",
                 title: "Popular".into(),
                 loading: true,
                 ..Default::default()
             },
             FpSection::New => HomeSection {
-                item_type: "app-row",
+                item_type: "app-wide-grid",
                 title: "Recently Added".into(),
                 loading: true,
                 ..Default::default()
             },
             FpSection::Trending => HomeSection {
-                item_type: "app-row",
+                item_type: "app-wide-grid",
                 title: "Trending".into(),
                 loading: true,
                 ..Default::default()
             },
             FpSection::Charts { cards: as_cards } => HomeSection {
-                item_type: if *as_cards { "app-grid" } else { "app-row" },
+                item_type: if *as_cards { "app-row" } else { "app-wide-grid" },
                 title: "Charts".into(),
                 loading: true,
                 ..Default::default()
             },
             FpSection::Custom { title, .. } => HomeSection {
-                item_type: "app-row",
+                item_type: "app-wide-grid",
                 title: title.clone(),
                 loading: true,
                 ..Default::default()
@@ -340,7 +362,7 @@ pub async fn resolve_pending_section(
             let entries = resolve_ids_cached(&ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
             let cards = entries_to_cards(entries, &ctx.installed_ids).await;
             (
-                HomeSection { item_type: "app-grid", title: "Popular".into(), cards, ..Default::default() },
+                HomeSection { item_type: "app-wide-grid", title: "Popular".into(), cards, ..Default::default() },
                 vec![],
             )
         }
@@ -349,7 +371,7 @@ pub async fn resolve_pending_section(
             let entries = resolve_ids_cached(&ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
             let cards = entries_to_cards(entries, &ctx.installed_ids).await;
             (
-                HomeSection { item_type: "app-row", title: "Recently Added".into(), cards, ..Default::default() },
+                HomeSection { item_type: "app-wide-grid", title: "Recently Added".into(), cards, ..Default::default() },
                 vec![],
             )
         }
@@ -358,7 +380,7 @@ pub async fn resolve_pending_section(
             let entries = resolve_ids_cached(&ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
             let cards = entries_to_cards(entries, &ctx.installed_ids).await;
             (
-                HomeSection { item_type: "app-row", title: "Trending".into(), cards, ..Default::default() },
+                HomeSection { item_type: "app-wide-grid", title: "Trending".into(), cards, ..Default::default() },
                 vec![],
             )
         }
@@ -368,7 +390,7 @@ pub async fn resolve_pending_section(
             let cards = entries_to_cards(entries, &ctx.installed_ids).await;
             (
                 HomeSection {
-                    item_type: if as_cards { "app-grid" } else { "app-row" },
+                    item_type: if as_cards { "app-row" } else { "app-wide-grid" },
                     title: "Charts".into(),
                     cards,
                     ..Default::default()
@@ -379,7 +401,7 @@ pub async fn resolve_pending_section(
         FpSection::Custom { title, app_ids } => {
             let entries = resolve_ids_cached(&app_ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
             let cards = entries_to_cards(entries, &ctx.installed_ids).await;
-            (HomeSection { item_type: "app-row", title, cards, ..Default::default() }, vec![])
+            (HomeSection { item_type: "app-wide-grid", title, cards, ..Default::default() }, vec![])
         }
         FpSection::CarouselSection { breakpoint, items, app_cloud_overlay } => {
             build_carousel(
@@ -403,6 +425,73 @@ pub async fn resolve_pending_section(
     };
 
     (row_index, item, stories)
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct ListData {
+    pub slug: String,
+    pub description: String,
+    pub cards: Vec<Card>,
+}
+
+pub async fn load_list(slug: &str) -> ListData {
+    let Some(list) = forge::fetch_list(slug).await else {
+        return ListData { slug: slug.to_string(), ..Default::default() };
+    };
+
+    let proxy = crate::runtime::proxy().await;
+    let lang = forge::user_lang();
+
+    let (installed_ids, pwa_list, app_meta_map) = tokio::join!(
+        async {
+            match proxy.as_ref() {
+                Some(p) => tokio::time::timeout(DAEMON_STARTUP_TIMEOUT, p.installed_packages())
+                    .await
+                    .ok()
+                    .and_then(|r| r.ok())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|pkg| pkg.id)
+                    .collect::<HashSet<_>>(),
+                None => HashSet::new(),
+            }
+        },
+        forge::fetch_pwas(&lang),
+        forge::fetch_home_app_metadata(),
+    );
+
+    let pwa_map: HashMap<String, forge::PwaApp> =
+        pwa_list.into_iter().map(|a| (a.appid.clone(), a)).collect();
+
+    let ids: Vec<String> = list.apps.iter().map(|a| a.app_ref.clone()).collect();
+    let slots = resolve_id_slots(&ids, &app_meta_map, proxy.as_ref(), &pwa_map).await;
+
+    let cards = slots
+        .into_iter()
+        .zip(list.apps.iter())
+        .map(|(slot, forge_app)| {
+            let entry = slot.unwrap_or_else(|| AppEntry {
+                id: forge_app.app_ref.clone(),
+                name: forge_app.name.clone(),
+                summary: String::new(),
+                icon_url: forge_app.icon_url.clone(),
+            });
+            let icon_url = icons::resolve(&entry.id, entry.icon_url.as_deref());
+            Card {
+                installed: installed_ids.contains(&entry.id),
+                id: entry.id,
+                name: entry.name,
+                summary: entry.summary,
+                icon_url,
+            }
+        })
+        .collect();
+
+    ListData {
+        slug: slug.to_string(),
+        description: list.description.unwrap_or_default(),
+        cards,
+    }
 }
 
 fn build_categories() -> Vec<Category> {
@@ -463,14 +552,39 @@ async fn build_carousel(
         }
     }
 
-    let indexed = story_forge.into_iter().enumerate().collect::<Vec<_>>();
-    let (loaded_stories, app_entries) = tokio::join!(
-        load_stories(indexed, base_story_index, proxy, pwa_map, installed),
-        resolve_ids_cached(&app_id_list, app_meta_map, proxy, pwa_map),
-    );
-    let app_cards = entries_to_cards(app_entries, installed).await;
+    let story_app_ids: Vec<Vec<String>> =
+        story_forge.iter().map(|s| s.app_ids.clone()).collect();
 
-    let card_by_id: HashMap<&str, &Card> = app_cards.iter().map(|c| (c.id.as_str(), c)).collect();
+    let mut lookup_ids = app_id_list.clone();
+    for ids in &story_app_ids {
+        lookup_ids.extend(ids.iter().cloned());
+    }
+    let mut seen = HashSet::new();
+    lookup_ids.retain(|id| seen.insert(id.clone()));
+
+    let indexed = story_forge.into_iter().enumerate().collect::<Vec<_>>();
+    let (loaded_stories, app_slots) = tokio::join!(
+        load_stories(indexed, base_story_index, proxy, pwa_map, installed),
+        resolve_id_slots(&lookup_ids, app_meta_map, proxy, pwa_map),
+    );
+    let card_by_id: HashMap<String, Card> = lookup_ids
+        .iter()
+        .zip(app_slots)
+        .filter_map(|(requested, slot)| {
+            let entry = slot?;
+            let icon_url = icons::resolve(&entry.id, entry.icon_url.as_deref());
+            Some((
+                requested.clone(),
+                Card {
+                    installed: installed.contains(&entry.id),
+                    id: entry.id,
+                    name: entry.name,
+                    summary: entry.summary,
+                    icon_url,
+                },
+            ))
+        })
+        .collect();
     let pos_to_story_idx: HashMap<usize, usize> =
         story_positions.iter().enumerate().map(|(si, &pos)| (pos, si)).collect();
 
@@ -484,6 +598,14 @@ async fn build_carousel(
                 let story_idx = pos_to_story_idx[&pos];
                 let rs = loaded_stories.get(story_idx);
                 let global_story_index = base_story_index + story_idx as i32;
+                let apps = story_app_ids
+                    .get(story_idx)
+                    .map(|ids| {
+                        ids.iter()
+                            .filter_map(|id| card_by_id.get(id).cloned())
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 let hero_item = HeroItem {
                     id: rs.map(|r| r.id.clone()).unwrap_or_else(|| format!("story-{global_story_index}")),
                     banner_url: rs.map(|r| r.banner_url.clone()).unwrap_or_default(),
@@ -492,6 +614,7 @@ async fn build_carousel(
                     body: strip_html_tags(&s.body),
                     is_story: true,
                     story_index: global_story_index,
+                    apps,
                 };
                 if pos < hero_count {
                     hero_items.push(hero_item);
@@ -500,7 +623,7 @@ async fn build_carousel(
                 }
             }
             CarouselItem::App(id) => {
-                let card = card_by_id.get(id.as_str()).copied();
+                let card = card_by_id.get(id);
                 if pos < hero_count {
                     hero_items.push(HeroItem {
                         id: id.clone(),
@@ -510,6 +633,7 @@ async fn build_carousel(
                         body: card.map(|c| c.summary.clone()).unwrap_or_default(),
                         is_story: false,
                         story_index: -1,
+                        apps: vec![],
                     });
                 } else if let Some(c) = card {
                     editorial_app_cards.push(c.clone());

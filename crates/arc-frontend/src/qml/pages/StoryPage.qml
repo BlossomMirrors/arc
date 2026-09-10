@@ -15,11 +15,14 @@ Kirigami.ScrollablePage {
     rightPadding: 0
     topPadding: 0
 
-    required property string storyId
+    property string storyId: ""
+
+    function openStory(newStoryId) {
+        root.storyId = newStoryId;
+        StoryController.load(newStoryId);
+    }
 
     title: StoryController.title
-
-    Component.onCompleted: StoryController.load(storyId)
 
     ConveyorLoader {
         anchors.centerIn: parent
@@ -70,7 +73,7 @@ Kirigami.ScrollablePage {
             }
 
             Repeater {
-                model: JSON.parse(StoryController.blocksJson)
+                model: JSON.parse(StoryController.blocksJson.length > 0 ? StoryController.blocksJson : "[]")
 
                 delegate: Loader {
                     id: blockLoader
@@ -157,7 +160,7 @@ Kirigami.ScrollablePage {
                         Kirigami.AbstractCard {
                             visible: blockLoader.modelData.app_name.length > 0
                             showClickFeedback: true
-                            onClicked: applicationWindow().openApp(blockLoader.modelData.app_id)
+                            onClicked: NavController.openApp(blockLoader.modelData.app_id, "")
 
                             contentItem: RowLayout {
                                 spacing: Kirigami.Units.largeSpacing
@@ -172,10 +175,12 @@ Kirigami.ScrollablePage {
 
                                 ColumnLayout {
                                     Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
                                     spacing: Kirigami.Units.smallSpacing / 2
 
                                     Controls.Label {
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         text: blockLoader.modelData.app_name
                                         font.bold: true
                                         elide: Text.ElideRight
@@ -183,8 +188,11 @@ Kirigami.ScrollablePage {
 
                                     Controls.Label {
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         text: blockLoader.modelData.app_summary
                                         opacity: 0.7
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 2
                                         elide: Text.ElideRight
                                     }
                                 }

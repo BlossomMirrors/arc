@@ -24,14 +24,32 @@ pub fn http_client() -> &'static reqwest::Client {
 
 const MEDIA_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
 
+const ICON_TTL: Duration = Duration::from_secs(6 * 3600);
+
 static MEDIA: OnceLock<BlobCache> = OnceLock::new();
+static ICONS: OnceLock<BlobCache> = OnceLock::new();
 
 fn media_cache() -> &'static BlobCache {
     MEDIA.get_or_init(|| BlobCache::new("media", MEDIA_TTL))
 }
 
+fn icon_cache() -> &'static BlobCache {
+    ICONS.get_or_init(|| BlobCache::new("media-icons", ICON_TTL))
+}
+
+fn cache_for(kind: MediaKind) -> &'static BlobCache {
+    match kind {
+        MediaKind::Icon => icon_cache(),
+        MediaKind::Screenshot => media_cache(),
+    }
+}
+
 pub fn sweep() -> usize {
-    media_cache().sweep()
+    media_cache().sweep() + icon_cache().sweep()
+}
+
+pub fn clear_icons() {
+    icon_cache().clear();
 }
 
 fn is_svg(content_type: &str, url: &str) -> bool {
@@ -39,9 +57,13 @@ fn is_svg(content_type: &str, url: &str) -> bool {
 }
 
 pub async fn fetch_raw(url: &str) -> Option<(Vec<u8>, String)> {
+    fetch_raw_into(MediaKind::Icon, url).await
+}
+
+async fn fetch_raw_into(kind: MediaKind, url: &str) -> Option<(Vec<u8>, String)> {
     let key = format!("raw:{url}");
     let url_owned = url.to_string();
-    let blob = media_cache()
+    let blob = cache_for(kind)
         .get_or_fetch(&key, || async move {
             let resp = http_client().get(&url_owned).send().await.ok()?;
             if !resp.status().is_success() {
@@ -67,9 +89,9 @@ pub async fn fetch(kind: MediaKind, url: &str, width: Option<u32>) -> Option<(Ve
         (MediaKind::Screenshot, _) => format!("shot:{url}"),
     };
     let url_owned = url.to_string();
-    let blob = media_cache()
+    let blob = cache_for(kind)
         .get_or_fetch(&key, || async move {
-            let (bytes, content_type) = fetch_raw(&url_owned).await?;
+            let (bytes, content_type) = fetch_raw_into(kind, &url_owned).await?;
             let result = match kind {
                 MediaKind::Icon => {
                     let padded = if is_svg(&content_type, &url_owned) {

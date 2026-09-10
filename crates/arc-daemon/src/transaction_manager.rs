@@ -32,7 +32,19 @@ impl TransactionManager {
         pkg_id: String,
         provider: Provider,
     ) -> (Transaction, CancellationToken) {
-        let tx = Transaction::new(t_type, pkg_id, provider);
+        self.track(Transaction::new(t_type, pkg_id, provider)).await
+    }
+
+    pub async fn create_automatic(
+        &self,
+        t_type: TransactionType,
+        pkg_id: String,
+        provider: Provider,
+    ) -> (Transaction, CancellationToken) {
+        self.track(Transaction::new(t_type, pkg_id, provider).automatic()).await
+    }
+
+    async fn track(&self, tx: Transaction) -> (Transaction, CancellationToken) {
         let cancel_token = CancellationToken::new();
         let mut map = self.transactions.write().await;
         let mut tokens = self.cancellation_tokens.write().await;
@@ -61,6 +73,7 @@ impl TransactionManager {
             return;
         };
         tx.progress = 100;
+        tx.finished_at = libarc::unix_now();
         tx.status = if success {
             TransactionStatus::Success
         } else {

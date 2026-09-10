@@ -3,6 +3,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.blossomos.arc
+import org.kde.ki18n
 
 RowLayout {
     id: root
@@ -78,7 +79,7 @@ RowLayout {
 
             Pill {
                 visible: DetailController.license.length > 0
-                text: DetailController.license === "Proprietary" ? i18n("Proprietary") : DetailController.license
+                text: DetailController.license === "Proprietary" ? KI18n.i18n("Proprietary") : DetailController.license
                 accent: DetailController.license === "Proprietary"
                     ? Kirigami.Theme.negativeTextColor
                     : Kirigami.Theme.highlightColor
@@ -86,7 +87,7 @@ RowLayout {
 
             Pill {
                 visible: DetailController.contentRating.length > 0
-                text: DetailController.contentRating === "All ages" ? i18n("All ages") : DetailController.contentRating
+                text: DetailController.contentRating === "All ages" ? KI18n.i18n("All ages") : DetailController.contentRating
                 accent: DetailController.contentRating === "18+"
                     ? Kirigami.Theme.negativeTextColor
                     : DetailController.contentRating === "12+" || DetailController.contentRating === "7+"
@@ -104,8 +105,8 @@ RowLayout {
             visible: !root.liveBusy && DetailController.installed && root.hasExtensions
             icon.name: "list-add-symbolic"
             display: Controls.Button.IconOnly
-            text: i18n("Add-ons")
-            Controls.ToolTip.text: i18n("Add-ons")
+            text: KI18n.i18n("Add-ons")
+            Controls.ToolTip.text: KI18n.i18n("Add-ons")
             Controls.ToolTip.visible: hovered
             Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
             onClicked: root.addonsClicked()
@@ -117,7 +118,6 @@ RowLayout {
             iconUrl: DetailController.iconUrl
             installed: DetailController.installed
             busy: root.liveBusy
-            highlightStart: false
             onRemoveRequested: root.removeClicked()
         }
     }

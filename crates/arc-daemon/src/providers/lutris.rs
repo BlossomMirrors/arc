@@ -23,13 +23,14 @@ const CATALOG_CACHE_TTL: Duration = Duration::from_secs(3600);
 #[derive(Debug, Clone, Deserialize)]
 struct LutrisGame {
     #[serde(default, deserialize_with = "null_as_empty")]
+    slug: String,
+    #[serde(default, deserialize_with = "null_as_empty")]
     name: String,
     #[serde(default, deserialize_with = "null_as_empty")]
     description: String,
     #[serde(default, deserialize_with = "null_as_empty")]
     coverart: String,
     #[serde(default, deserialize_with = "null_as_empty")]
-    #[allow(dead_code)]
     banner: String,
     #[serde(default, deserialize_with = "null_as_empty")]
     icon_url: String,
@@ -325,13 +326,10 @@ impl LutrisProvider {
             installer_slug.replace('-', " ")
         };
 
-        let icon_url = if !game.icon_url.is_empty() {
-            Some(game.icon_url.clone())
-        } else if !game.coverart.is_empty() {
-            Some(game.coverart.clone())
-        } else {
-            None
-        };
+        let icon_url = [&game.icon_url, &game.coverart, &game.banner]
+            .into_iter()
+            .find(|s| !s.is_empty())
+            .cloned();
 
         Package {
             id: Self::pkg_id(installer_slug),
@@ -523,11 +521,15 @@ impl PackageProvider for LutrisProvider {
         })?;
 
         let entries = self.fetch_catalog().await?;
-        if let Some((_, game, screenshots)) = entries.iter().find(|(s, _, _)| s == slug) {
+        let found = entries
+            .iter()
+            .find(|(installer, game, _)| installer == slug || game.slug == slug);
+
+        if let Some((installer_slug, game, screenshots)) = found {
             let installed_slugs = self.installed_slugs().await;
-            let installed = installed_slugs.contains(slug);
+            let installed = installed_slugs.contains(installer_slug);
             Ok(Some(self.game_to_package(
-                slug,
+                installer_slug,
                 game,
                 screenshots,
                 installed,

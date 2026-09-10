@@ -403,7 +403,9 @@ impl AppImageProvider {
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default(),
         );
-        fs::write(self.info_file(stem), &info)
+        let info_path = self.info_file(stem);
+        let info = info + &preserved_info_lines(&info_path).await;
+        fs::write(&info_path, &info)
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
 
@@ -841,20 +843,15 @@ impl PackageProvider for AppImageProvider {
     async fn list_updates(&self) -> Result<Vec<Package>, ArcError> {
         let installed = self.read_installed().await?;
 
-        let mut with_info: Vec<(Package, PathBuf, String)> = Vec::new();
+        let mut with_info: Vec<(Package, PathBuf, String, Option<String>)> = Vec::new();
         let mut no_info: Vec<(Package, PathBuf)> = Vec::new();
 
         for pkg in installed {
             let stem = pkg.id.strip_prefix("appimage:").unwrap_or("").to_string();
 
-            let stored_update_info = fs::read_to_string(self.info_file(&stem))
-                .await
-                .ok()
-                .and_then(|c| {
-                    c.lines()
-                        .find_map(|l| l.strip_prefix("UPDATE_INFO=").map(|v| v.to_string()))
-                })
-                .unwrap_or_default();
+            let stored = fs::read_to_string(self.info_file(&stem)).await.unwrap_or_default();
+            let stored_update_info = info_value(&stored, "UPDATE_INFO").unwrap_or_default();
+            let stored_tag = info_value(&stored, "UPDATE_TAG");
 
             let appimage_path = self.resolve_appimage_path(&stem).await;
             if !appimage_path.exists() {
@@ -871,7 +868,7 @@ impl PackageProvider for AppImageProvider {
             };
 
             if !update_info.is_empty() {
-                with_info.push((pkg, appimage_path, update_info));
+                with_info.push((pkg, appimage_path, update_info, stored_tag));
             } else {
                 // No embedded update info, fall back to GitHub search based on filename
                 no_info.push((pkg, appimage_path));
@@ -880,18 +877,31 @@ impl PackageProvider for AppImageProvider {
 
         let http = &self.http;
 
-        let known_futures = with_info
-            .iter()
-            .map(|(pkg, appimage_path, update_info)| async move {
-                if let Some(gh) = parse_github_info(update_info) {
-                    match github_latest_release(http, &gh.owner, &gh.repo, &gh.asset_glob).await {
-                        Some((remote_tag, _)) => versions_differ(&pkg.version, &remote_tag),
-                        None => false,
+        let known_futures =
+            with_info
+                .iter()
+                .map(|(pkg, appimage_path, update_info, stored_tag)| async move {
+                    if let Some(gh) = parse_github_info(update_info) {
+                        match github_latest_release(http, &gh.owner, &gh.repo, &gh.asset_glob).await
+                        {
+                            Some((remote_tag, _)) => {
+                                let stem =
+                                    pkg.id.strip_prefix("appimage:").unwrap_or_default();
+                                let (_, stem_version) =
+                                    parse_stem_name_version(stem).unwrap_or_default();
+                                has_release_update(
+                                    stored_tag.as_deref(),
+                                    &stem_version,
+                                    &pkg.version,
+                                    &remote_tag,
+                                )
+                            }
+                            None => false,
+                        }
+                    } else {
+                        check_update_available(appimage_path).await
                     }
-                } else {
-                    check_update_available(appimage_path).await
-                }
-            });
+                });
 
         let guess_futures = no_info.iter().map(|(pkg, _)| {
             let stem = pkg.id.strip_prefix("appimage:").unwrap_or("").to_string();
@@ -908,7 +918,7 @@ impl PackageProvider for AppImageProvider {
         let updates = with_info
             .into_iter()
             .zip(known_results)
-            .filter_map(|((pkg, _, _), has_update)| if has_update { Some(pkg) } else { None })
+            .filter_map(|((pkg, _, _, _), has_update)| if has_update { Some(pkg) } else { None })
             .chain(
                 no_info
                     .into_iter()
@@ -949,7 +959,9 @@ impl PackageProvider for AppImageProvider {
                 .unwrap_or_default()
         };
 
-        let updated_via_github = if let Some(gh) = parse_github_info(&update_info) {
+        let mut installed_tag: Option<String> = None;
+
+        if let Some(gh) = parse_github_info(&update_info) {
             match github_latest_release(&self.http, &gh.owner, &gh.repo, &gh.asset_glob).await {
                 Some((tag, download_url)) => {
                     info!(
@@ -957,18 +969,13 @@ impl PackageProvider for AppImageProvider {
                         stem, tag, download_url
                     );
                     download_github_update(&self.http, &download_url, &appimage_path).await?;
-                    true
+                    installed_tag = Some(tag);
                 }
-                None => {
-                    warn!("GitHub release lookup failed for {}", stem);
-                    false
-                }
+                None => warn!("GitHub release lookup failed for {}", stem),
             }
-        } else {
-            false
-        };
+        }
 
-        if !updated_via_github {
+        if installed_tag.is_none() {
             // For AppImages with no embedded update info, try GitHub repo search
             if update_info.is_empty() {
                 let info_path = self.info_file(stem);
@@ -983,28 +990,36 @@ impl PackageProvider for AppImageProvider {
                             stem, tag, dl_url
                         );
                         download_github_update(&self.http, &dl_url, &appimage_path).await?;
-                        return self.process_appimage(&appimage_path, stem).await;
+                        installed_tag = Some(tag);
                     }
                 }
             }
-            // fall back to AppImageUpdate tool
-            let status = Command::new("AppImageUpdate")
-                .arg(&appimage_path)
-                .status()
-                .await
-                .map_err(|_| {
-                    ArcError::ProviderError(
-                        "AppImageUpdate not found. Install it to enable AppImage updates."
-                            .to_string(),
-                    )
-                })?;
-            if !status.success() {
-                return Err(ArcError::ProviderError("AppImageUpdate failed".to_string()));
+
+            if installed_tag.is_none() {
+                let status = Command::new("AppImageUpdate")
+                    .arg(&appimage_path)
+                    .status()
+                    .await
+                    .map_err(|_| {
+                        ArcError::ProviderError(
+                            "AppImageUpdate not found. Install it to enable AppImage updates."
+                                .to_string(),
+                        )
+                    })?;
+                if !status.success() {
+                    return Err(ArcError::ProviderError("AppImageUpdate failed".to_string()));
+                }
             }
         }
 
         // re-process metadata (version may have changed)
-        self.process_appimage(&appimage_path, stem).await
+        self.process_appimage(&appimage_path, stem).await?;
+
+        if let Some(tag) = installed_tag {
+            set_info_value(&self.info_file(stem), "UPDATE_TAG", &tag).await;
+        }
+
+        Ok(())
     }
 
     async fn run(&self, package_id: &str) -> Result<(), ArcError> {
@@ -1233,12 +1248,33 @@ fn versions_differ(local: &str, remote_tag: &str) -> bool {
     norm(local) != norm(remote_tag)
 }
 
+const RELEASE_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+type ReleaseCache =
+    std::collections::HashMap<String, (std::time::Instant, (String, String))>;
+
+fn release_cache() -> &'static std::sync::Mutex<ReleaseCache> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<ReleaseCache>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(ReleaseCache::new()))
+}
+
+fn cached_release(key: &str) -> Option<(String, String)> {
+    let cache = release_cache().lock().ok()?;
+    let (stored_at, value) = cache.get(key)?;
+    (stored_at.elapsed() < RELEASE_CACHE_TTL).then(|| value.clone())
+}
+
 async fn github_latest_release(
     http: &Client,
     owner: &str,
     repo: &str,
     asset_glob: &str,
 ) -> Option<(String, String)> {
+    let cache_key = format!("{owner}/{repo}/{asset_glob}");
+    if let Some(hit) = cached_release(&cache_key) {
+        return Some(hit);
+    }
     let url = format!(
         "https://api.github.com/repos/{}/{}/releases/latest",
         owner, repo
@@ -1260,7 +1296,11 @@ async fn github_latest_release(
         let name = asset.get("name")?.as_str()?;
         if glob_matches(&glob_lower, &name.to_lowercase()) {
             let dl = asset.get("browser_download_url")?.as_str()?.to_string();
-            return Some((tag, dl));
+            let found = (tag, dl);
+            if let Ok(mut cache) = release_cache().lock() {
+                cache.insert(cache_key, (std::time::Instant::now(), found.clone()));
+            }
+            return Some(found);
         }
     }
     None
@@ -1413,6 +1453,61 @@ async fn search_github_appimage_repo(http: &Client, name: &str) -> Option<(Strin
     None
 }
 
+const PRESERVED_INFO_KEYS: &[&str] = &["GITHUB_REPO=", "UPDATE_TAG="];
+
+async fn preserved_info_lines(path: &Path) -> String {
+    let Ok(content) = fs::read_to_string(path).await else {
+        return String::new();
+    };
+    content
+        .lines()
+        .filter(|l| PRESERVED_INFO_KEYS.iter().any(|k| l.starts_with(k)))
+        .map(|l| format!("{l}\n"))
+        .collect()
+}
+
+fn info_value(content: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    content
+        .lines()
+        .find_map(|l| l.strip_prefix(prefix.as_str()).map(|v| v.to_string()))
+        .filter(|v| !v.is_empty())
+}
+
+async fn read_info_value(path: &Path, key: &str) -> Option<String> {
+    info_value(&fs::read_to_string(path).await.ok()?, key)
+}
+
+async fn set_info_value(path: &Path, key: &str, value: &str) {
+    let prefix = format!("{key}=");
+    let mut lines: Vec<String> = fs::read_to_string(path)
+        .await
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.starts_with(prefix.as_str()))
+        .map(|l| l.to_string())
+        .collect();
+    lines.push(format!("{prefix}{value}"));
+    let _ = fs::write(path, lines.join("\n") + "\n").await;
+}
+
+fn has_release_update(
+    stored_tag: Option<&str>,
+    stem_version: &str,
+    pkg_version: &str,
+    remote_tag: &str,
+) -> bool {
+    if let Some(tag) = stored_tag {
+        return versions_differ(tag, remote_tag);
+    }
+
+    if !pkg_version.is_empty() && !versions_differ(pkg_version, remote_tag) {
+        return false;
+    }
+    let local = if stem_version.is_empty() { pkg_version } else { stem_version };
+    !local.is_empty() && versions_differ(local, remote_tag)
+}
+
 /// Returns `(owner, repo)` for an AppImage stem, reading a cached `GITHUB_REPO=`
 /// line from its `.info` file or falling back to a GitHub API search.
 async fn get_github_repo_for_stem(
@@ -1456,14 +1551,9 @@ async fn guess_github_update_available(
     info_path: &Path,
 ) -> bool {
     let (_, stem_version) = parse_stem_name_version(stem).unwrap_or_default();
-    // Prefer the version extracted from the filename, many AppImages set
-    // `Version=1.0` (XDG spec version) in the desktop entry, not the real app version.
-    let local_version = if !stem_version.is_empty() {
-        stem_version.as_str()
-    } else {
-        pkg_version
-    };
-    if local_version.is_empty() {
+    let stored_tag = read_info_value(info_path, "UPDATE_TAG").await;
+
+    if stored_tag.is_none() && stem_version.is_empty() && pkg_version.is_empty() {
         return false;
     }
     let (owner, repo) = match get_github_repo_for_stem(http, stem, info_path).await {
@@ -1471,7 +1561,9 @@ async fn guess_github_update_available(
         None => return false,
     };
     match github_latest_release(http, &owner, &repo, "*.appimage").await {
-        Some((tag, _)) => versions_differ(local_version, &tag),
+        Some((tag, _)) => {
+            has_release_update(stored_tag.as_deref(), &stem_version, pkg_version, &tag)
+        }
         None => false,
     }
 }

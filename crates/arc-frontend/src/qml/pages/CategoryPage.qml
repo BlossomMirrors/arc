@@ -1,5 +1,6 @@
 import QtQuick
 import org.blossomos.arc
+import org.kde.ki18n
 
 ItemList {
     id: root
@@ -9,8 +10,8 @@ ItemList {
     property string categoryColor: ""
     property string categoryIcon: ""
 
-    title: categoryLabel.length > 0 ? categoryLabel : i18n("Category")
-    emptyText: i18n("No apps found in this category")
+    title: categoryLabel.length > 0 ? categoryLabel : KI18n.i18n("Category")
+    emptyText: KI18n.i18n("No apps found in this category")
     headerColor: categoryColor
     headerIcon: categoryIcon
 
@@ -36,6 +37,13 @@ ItemList {
         interval: 2000
         repeat: true
         onTriggered: {
+            if (categoryListModel.loading) {
+                return;
+            }
+            if (root.rowCount > 0) {
+                stop();
+                return;
+            }
             attempts += 1;
             categoryListModel.searchCategory(root.categoryId);
             if (attempts >= 5) {

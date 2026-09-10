@@ -5,6 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.blossomos.arc
+import org.kde.ki18n
 
 RowLayout {
     id: root
@@ -18,11 +19,8 @@ RowLayout {
     // "install" | "update"
     property string mode: "install"
 
-    property bool tonal: false
     property bool allowRemove: true
     property bool fillWidth: false
-
-    property bool highlightStart: true
 
     signal removeRequested()
 
@@ -44,7 +42,7 @@ RowLayout {
         active: root.busy
         visible: active
         sourceComponent: Controls.Button {
-            text: i18n("Cancel")
+            text: KI18n.i18n("Cancel")
             onClicked: TransactionsModel.cancelForPackage(root.pkgId)
         }
     }
@@ -55,7 +53,7 @@ RowLayout {
         sourceComponent: Controls.Button {
             icon.name: "delete"
             display: Controls.Button.IconOnly
-            text: i18n("Remove")
+            text: KI18n.i18n("Remove")
             Controls.ToolTip.text: text
             Controls.ToolTip.visible: hovered
             Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
@@ -68,8 +66,8 @@ RowLayout {
         visible: active
         Layout.fillWidth: root.fillWidth
         sourceComponent: Controls.Button {
-            highlighted: root.highlightStart
-            text: i18n("Start")
+            highlighted: true
+            text: KI18n.i18n("Start")
             onClicked: TransactionsModel.launch(root.pkgId)
         }
     }
@@ -79,8 +77,8 @@ RowLayout {
         active: !root.busy && (root.showInstall || root.showUpdate)
         visible: active
         sourceComponent: Controls.Button {
-            highlighted: !root.tonal
-            text: root.showUpdate ? i18n("Update") : i18n("Install")
+            highlighted: true
+            text: root.showUpdate ? KI18n.i18n("Update") : KI18n.i18n("Install")
             onClicked: root.triggerInstall()
         }
     }

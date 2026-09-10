@@ -91,7 +91,6 @@ Kirigami.AbstractCard {
             installed: root.installed
             busy: root.busy
             mode: "install"
-            tonal: true
             fillWidth: true
             allowRemove: false
         }

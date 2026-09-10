@@ -155,10 +155,18 @@ fn details() -> &'static PersistentMap<CachedDetail> {
 }
 
 fn apply_cached(mut this: Pin<&mut qobject::DetailController>, cached: &CachedDetail) {
+    let pkg_id = this.id.to_string();
+    let icon_url = match cached.icon_url.strip_prefix("file://") {
+        Some(path) if !std::path::Path::new(path).exists() => {
+            crate::services::icons::resolve(&pkg_id, None)
+        }
+        _ => cached.icon_url.clone(),
+    };
+
     this.as_mut().set_name(QString::from(&cached.name));
     this.as_mut().set_summary(QString::from(&cached.summary));
     this.as_mut().set_description(QString::from(&cached.description));
-    this.as_mut().set_icon_url(QString::from(&cached.icon_url));
+    this.as_mut().set_icon_url(QString::from(&icon_url));
     this.as_mut().set_developer_name(QString::from(&cached.developer_name));
     this.as_mut().set_homepage_url(QString::from(&cached.homepage_url));
     this.as_mut().set_content_rating(QString::from(&cached.content_rating));

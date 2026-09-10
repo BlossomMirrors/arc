@@ -1,0 +1,341 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: arc-frontend\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: de\n"
+"Language-Team: German\n"
+"Plural-Forms: nplurals=2; plural=n != 1;\n"
+
+msgid "Proprietary"
+msgstr "Proprietär"
+
+msgid "All ages"
+msgstr "Ab 0"
+
+msgid "Add-ons"
+msgstr "Erweiterungen"
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "Remove"
+msgstr "Entfernen"
+
+msgid "Start"
+msgstr "Starten"
+
+msgid "Update"
+msgstr "Aktualisieren"
+
+msgid "Install"
+msgstr "Installieren"
+
+msgid "All sources"
+msgstr "Alle Quellen"
+
+msgid "Everything"
+msgstr "Alles"
+
+msgid "Installed"
+msgstr "Installiert"
+
+msgid "Not installed"
+msgstr "Nicht installiert"
+
+msgid "Relevance"
+msgstr "Relevanz"
+
+msgid "Name A-Z"
+msgstr "Name A-Z"
+
+msgid "%1 app"
+msgid_plural "%1 apps"
+msgstr[0] "%1 App"
+msgstr[1] "%1 Apps"
+
+msgid "Back (Alt+Left)"
+msgstr "Zurück (Alt+Links)"
+
+msgid "Forward (Alt+Right)"
+msgstr "Vor (Alt+Rechts)"
+
+msgid "Home"
+msgstr "Startseite"
+
+msgid "Downloads"
+msgstr "Downloads"
+
+msgid "Search apps..."
+msgstr "Apps suchen..."
+
+msgid "Settings"
+msgstr "Einstellungen"
+
+msgid "Arc Store"
+msgstr "Arc Store"
+
+msgid "Category"
+msgstr "Kategorie"
+
+msgid "No apps found in this category"
+msgstr "Keine Apps in dieser Kategorie gefunden"
+
+msgid "Website"
+msgstr "Webseite"
+
+msgid "Remove %1?"
+msgstr "%1 entfernen?"
+
+msgid "The application will be uninstalled from your system."
+msgstr "Die Anwendung wird vom System deinstalliert."
+
+msgid "Add Repository"
+msgstr "Paketquelle hinzufügen"
+
+msgid "License Agreement"
+msgstr "Lizenzvereinbarung"
+
+msgid "%1 requires you to accept its End User License Agreement before installing."
+msgstr "%1 erfordert vor der Installation die Zustimmung zum Endbenutzer-Lizenzvertrag."
+
+msgid "Read License Agreement"
+msgstr "Lizenzvereinbarung lesen"
+
+msgid "Accept & Install"
+msgstr "Zustimmen und installieren"
+
+msgid "Install File"
+msgstr "Datei installieren"
+
+msgid "A Flatpak version of this app is also available: %1"
+msgstr "Von dieser App ist auch eine Flatpak-Version verfügbar: %1"
+
+msgid "Install AppImage"
+msgstr "AppImage installieren"
+
+msgid "Install Flatpak Bundle"
+msgstr "Flatpak-Bundle installieren"
+
+msgid "Install via Distrobox"
+msgstr "Über Distrobox installieren"
+
+msgid "Install Flatpak Instead"
+msgstr "Stattdessen Flatpak installieren"
+
+msgid "Install App"
+msgstr "App installieren"
+
+msgid "This app comes from a third-party source outside your configured repositories."
+msgstr "Diese App stammt aus einer Drittanbieterquelle außerhalb der eingerichteten Paketquellen."
+
+msgid "%1 h %2 min remaining"
+msgstr "Noch %1 Std. %2 Min."
+
+msgid "%1 min remaining"
+msgstr "Noch %1 Min."
+
+msgid "%1 s remaining"
+msgstr "Noch %1 Sek."
+
+msgid "Removing"
+msgstr "Wird entfernt"
+
+msgid "Updating"
+msgstr "Wird aktualisiert"
+
+msgid "Installing"
+msgstr "Wird installiert"
+
+msgid "Everything is up to date"
+msgstr "Alles ist aktuell"
+
+msgid "No updates available. Installs, removals and updates show up here."
+msgstr "Keine Aktualisierungen verfügbar. Installationen, Entfernungen und Aktualisierungen erscheinen hier."
+
+msgid "Check for Updates"
+msgstr "Nach Aktualisierungen suchen"
+
+msgid "%1 of %2"
+msgstr "%1 von %2"
+
+msgid "Up Next"
+msgstr "Als Nächstes"
+
+msgid "Queued"
+msgstr "In Warteschlange"
+
+msgid "Available Updates"
+msgstr "Verfügbare Aktualisierungen"
+
+msgid "Check"
+msgstr "Prüfen"
+
+msgid "Update All"
+msgstr "Alle aktualisieren"
+
+msgid "Everything is up to date."
+msgstr "Alles ist aktuell."
+
+msgid "Completed"
+msgstr "Abgeschlossen"
+
+msgid "Clear"
+msgstr "Leeren"
+
+msgid "Removal failed"
+msgstr "Entfernen fehlgeschlagen"
+
+msgid "Update failed"
+msgstr "Aktualisierung fehlgeschlagen"
+
+msgid "Installation failed"
+msgstr "Installation fehlgeschlagen"
+
+msgid "Removed"
+msgstr "Entfernt"
+
+msgid "Updated in the background"
+msgstr "Im Hintergrund aktualisiert"
+
+msgid "Updated"
+msgstr "Aktualisiert"
+
+msgctxt "what happened to an app and when"
+msgid "%1 · %2"
+msgstr "%1 · %2"
+
+msgid "Categories"
+msgstr "Kategorien"
+
+msgid "Nothing installed yet"
+msgstr "Noch nichts installiert"
+
+msgid "Search"
+msgstr "Suche"
+
+msgid "Search for apps to install"
+msgstr "Nach Apps zum Installieren suchen"
+
+msgid "General"
+msgstr "Allgemein"
+
+msgid "Automatic updates"
+msgstr "Automatische Aktualisierungen"
+
+msgid "Update installed apps in the background"
+msgstr "Installierte Apps im Hintergrund aktualisieren"
+
+msgid "Security warnings"
+msgstr "Sicherheitshinweise"
+
+msgid "Warn before installing third-party software or adding repositories"
+msgstr "Vor der Installation von Drittanbietersoftware oder dem Hinzufügen von Paketquellen warnen"
+
+msgid "Concurrent downloads"
+msgstr "Gleichzeitige Downloads"
+
+msgid "Repositories"
+msgstr "Paketquellen"
+
+msgid "Loading..."
+msgstr "Wird geladen..."
+
+msgid "Protected system repository"
+msgstr "Geschützte System-Paketquelle"
+
+msgid "Remove repository"
+msgstr "Paketquelle entfernen"
+
+msgid "Add Repository..."
+msgstr "Paketquelle hinzufügen..."
+
+msgid "Danger Zone"
+msgstr "Gefahrenbereich"
+
+msgid "Force update"
+msgstr "Aktualisierung erzwingen"
+
+msgid "Runs flatpak update directly, bypassing the daemon"
+msgstr "Führt flatpak update direkt aus, am Daemon vorbei"
+
+msgid "Restart daemon"
+msgstr "Daemon neu starten"
+
+msgid "Kills the running arc-daemon and starts a fresh one"
+msgstr "Beendet den laufenden arc-daemon und startet ihn neu"
+
+msgid "Clear icon cache"
+msgstr "Symbol-Zwischenspeicher leeren"
+
+msgid "Reprocesses app icons the next time they're shown"
+msgstr "Verarbeitet App-Symbole beim nächsten Anzeigen neu"
+
+msgid "Name"
+msgstr "Name"
+
+msgid "URL"
+msgstr "URL"
+
+msgid "Apps installed from this repository keep working, but it will no longer offer updates or new installs."
+msgstr "Bereits installierte Apps aus dieser Paketquelle funktionieren weiter, es werden jedoch keine Aktualisierungen oder Neuinstallationen mehr angeboten."
+
+msgid "Force update now?"
+msgstr "Aktualisierung jetzt erzwingen?"
+
+msgid "Runs flatpak update directly, bypassing the daemon and its progress tracking."
+msgstr "Führt flatpak update direkt aus, am Daemon und seiner Fortschrittsanzeige vorbei."
+
+msgid "Restart the daemon?"
+msgstr "Daemon neu starten?"
+
+msgid "Cancels every running install, remove and update right now."
+msgstr "Bricht alle laufenden Installationen, Entfernungen und Aktualisierungen sofort ab."
+
+msgid "Restart"
+msgstr "Neu starten"
+
+msgid "Office"
+msgstr "Büro"
+
+msgid "Creative"
+msgstr "Kreativ"
+
+msgid "Chat"
+msgstr "Chat"
+
+msgid "Gaming"
+msgstr "Gaming"
+
+msgid "Browser"
+msgstr "Browser"
+
+msgid "Music"
+msgstr "Musik"
+
+msgid "Code"
+msgstr "Code"
+
+msgid "Select all"
+msgstr "Alle auswählen"
+
+msgid "Select none"
+msgstr "Auswahl aufheben"
+
+msgid "This list is empty"
+msgstr "Diese Liste ist leer"
+
+msgid "Install %1 app"
+msgid_plural "Install %1 apps"
+msgstr[0] "%1 App installieren"
+msgstr[1] "%1 Apps installieren"
+
+msgid "Could not load the front page"
+msgstr "Startseite konnte nicht geladen werden"
+
+msgid "Check your connection. This retries on its own."
+msgstr "Prüfe deine Verbindung. Es wird automatisch erneut versucht."
+
+msgid "Try again"
+msgstr "Erneut versuchen"

@@ -111,6 +111,7 @@ async fn run() -> Result<()> {
 
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+            appstream_db::refresh_remotes_if_due().await;
             spawn_blocking(appstream_db::AppStreamDb::refresh_if_stale)
                 .await
                 .ok();

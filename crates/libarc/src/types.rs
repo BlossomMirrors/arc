@@ -71,6 +71,13 @@ pub enum TransactionStatus {
     Failed(String),
 }
 
+pub fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 // we create this before the work starts so the frontend can track progress
 // and look up status by id at any point
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +88,12 @@ pub struct Transaction {
     pub progress: u8,
     pub package_id: String,
     pub provider: Provider,
+    #[serde(default)]
+    pub started_at: u64,
+    #[serde(default)]
+    pub finished_at: u64,
+    #[serde(default)]
+    pub automatic: bool,
 }
 
 impl Transaction {
@@ -92,6 +105,14 @@ impl Transaction {
             progress: 0,
             package_id,
             provider,
+            started_at: unix_now(),
+            finished_at: 0,
+            automatic: false,
         }
+    }
+
+    pub fn automatic(mut self) -> Self {
+        self.automatic = true;
+        self
     }
 }

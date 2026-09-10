@@ -1,14 +1,18 @@
 import QtQuick
 import org.blossomos.arc
 import org.kde.kirigami as Kirigami
+import org.kde.ki18n
 
 ItemList {
     id: root
 
-    title: i18n("Installed")
+    title: KI18n.i18n("Installed")
 
-    emptyText: i18n("Nothing installed yet")
+    emptyText: KI18n.i18n("Nothing installed yet")
     markInstalled: false
+    showSearch: true
+
+    onSearchEdited: query => installListModel.setSearchText(query)
 
     PackageListModel {
         id: installListModel

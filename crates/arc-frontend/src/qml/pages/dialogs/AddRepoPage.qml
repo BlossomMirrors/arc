@@ -3,11 +3,12 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.blossomos.arc
+import org.kde.ki18n
 
 DialogPage {
     id: root
 
-    title: i18n("Add Repository")
+    title: KI18n.i18n("Add Repository")
     dialogIcon: "folder-remote"
     dialogTitle: DeepLinkController.repoTitle
     dialogDescription: DeepLinkController.repoUrl
@@ -17,16 +18,16 @@ DialogPage {
         spacing: Kirigami.Units.smallSpacing
 
         Controls.Button {
-            text: i18n("Cancel")
-            onClicked: applicationWindow().goSettings()
+            text: KI18n.i18n("Cancel")
+            onClicked: NavController.goSettings()
         }
 
         Controls.Button {
-            text: i18n("Add Repository")
+            text: KI18n.i18n("Add Repository")
             highlighted: true
             onClicked: {
                 RemotesModel.addFlatpakrepo(DeepLinkController.repoContent);
-                applicationWindow().goSettings();
+                NavController.goSettings();
             }
         }
     }
