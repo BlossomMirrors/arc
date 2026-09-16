@@ -45,7 +45,7 @@ RowLayout {
         visible: active
         sourceComponent: Controls.Button {
             flat: root.flat
-            palette.buttonText: root.textColor
+            Kirigami.Theme.textColor: root.textColor
             icon.color: root.textColor
             text: KI18n.i18n("Cancel")
             onClicked: TransactionsModel.cancelForPackage(root.pkgId)
@@ -57,7 +57,7 @@ RowLayout {
         visible: active
         sourceComponent: Controls.Button {
             flat: root.flat
-            palette.buttonText: root.textColor
+            Kirigami.Theme.textColor: root.textColor
             icon.name: "delete"
             icon.color: root.textColor
             display: Controls.Button.IconOnly
@@ -76,7 +76,7 @@ RowLayout {
         sourceComponent: Controls.Button {
             flat: root.flat
             highlighted: !root.flat
-            palette.buttonText: root.textColor
+            Kirigami.Theme.textColor: root.textColor
             icon.color: root.textColor
             text: KI18n.i18n("Start")
             onClicked: TransactionsModel.launch(root.pkgId)
@@ -90,7 +90,7 @@ RowLayout {
         sourceComponent: Controls.Button {
             flat: root.flat
             highlighted: !root.flat
-            palette.buttonText: root.textColor
+            Kirigami.Theme.textColor: root.textColor
             icon.color: root.textColor
             text: root.showUpdate ? KI18n.i18n("Update") : KI18n.i18n("Install")
             onClicked: root.triggerInstall()
