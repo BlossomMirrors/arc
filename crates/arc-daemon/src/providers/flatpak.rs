@@ -167,7 +167,7 @@ fn run_install_transaction(
 fn run_update_transaction(
     inst: &libflatpak::Installation,
     full_ref: &str,
-    progress_tx: Option<&UnboundedSender<u8>>,
+    progress_tx: Option<&UnboundedSender<Progress>>,
     cancel: Option<&libflatpak::gio::Cancellable>,
 ) -> Result<(), ArcError> {
     let attempt = |disable_static_deltas: bool| -> Result<(), ArcError> {
@@ -179,11 +179,16 @@ fn run_update_transaction(
             .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
         if let Some(sender) = progress_tx {
             let sender = sender.clone();
-            tx.connect_new_operation(move |_, _op, progress| {
+            tx.connect_new_operation(move |_, op, progress| {
                 progress.set_update_frequency(1500);
+                let total = op.download_size();
                 let sender = sender.clone();
                 progress.connect_changed(move |p| {
-                    let _ = sender.send(p.progress().clamp(0, 100) as u8);
+                    let _ = sender.send(Progress {
+                        percent: p.progress().clamp(0, 100) as u8,
+                        bytes_done: p.bytes_transferred(),
+                        bytes_total: total,
+                    });
                 });
             });
         }
@@ -773,7 +778,7 @@ impl FlatpakProvider {
             // Runtime refs live in the system installation and need flatpak-system-helper
             // for privilege elevation. Delegate to subprocess so polkit handles it.
             if full_ref.starts_with("runtime/") {
-                let _ = progress_tx.send(10);
+                let _ = progress_tx.send(Progress::pct(10));
                 let mut status = std::process::Command::new("flatpak")
                     .args(["update", "-y", "--noninteractive", &full_ref])
                     .status()
@@ -790,7 +795,7 @@ impl FlatpakProvider {
                         .status()
                         .map_err(|e| ArcError::TransactionFailed(e.to_string()))?;
                 }
-                let _ = progress_tx.send(100);
+                let _ = progress_tx.send(Progress::pct(100));
                 return if status.success() {
                     Ok(())
                 } else {
