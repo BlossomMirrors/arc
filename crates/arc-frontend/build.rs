@@ -81,6 +81,7 @@ fn main() {
             "src/qml/components/ItemButtons.qml",
             "src/qml/components/ItemProgressBar.qml",
             "src/qml/components/DialogPage.qml",
+            "src/qml/components/ProjectLinksGrid.qml",
         ]),
     )
     .files([

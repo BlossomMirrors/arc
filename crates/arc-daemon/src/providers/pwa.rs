@@ -246,6 +246,7 @@ impl PwaProvider {
             "developer_name": pwa.developer_name,
             "screenshots": screenshots,
             "icon_url": icon_url,
+            "verified": pwa.verified,
         })
         .to_string()
     }

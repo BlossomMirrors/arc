@@ -348,3 +348,45 @@ msgstr "Diese App hat Daten auf deinem System hinterlassen."
 
 msgid "Delete Data"
 msgstr "Daten löschen"
+
+msgid "Read More"
+msgstr "Mehr anzeigen"
+
+msgid "Flathub Page"
+msgstr "Flathub-Seite"
+
+msgid "Project Website"
+msgstr "Projekt-Webseite"
+
+msgid "Bug Tracker"
+msgstr "Bugtracker"
+
+msgid "FAQ"
+msgstr "FAQ"
+
+msgid "Help"
+msgstr "Hilfe"
+
+msgid "Donate"
+msgstr "Spenden"
+
+msgid "Translate"
+msgstr "Übersetzen"
+
+msgid "Contact"
+msgstr "Kontakt"
+
+msgid "Source Code"
+msgstr "Quellcode"
+
+msgid "Contribute"
+msgstr "Mitmachen"
+
+msgid "Copy Link"
+msgstr "Link kopieren"
+
+msgid "Open Link"
+msgstr "Link öffnen"
+
+msgid "Verified developer"
+msgstr "Verifizierter Entwickler"

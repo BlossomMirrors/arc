@@ -15,12 +15,15 @@ pub mod qobject {
         #[qproperty(bool, loading)]
         #[qproperty(bool, refining)]
         #[qproperty(QString, id)]
+        #[qproperty(QString, remote)]
         #[qproperty(QString, name)]
         #[qproperty(QString, summary)]
         #[qproperty(QString, description)]
         #[qproperty(QString, icon_url, cxx_name = "iconUrl")]
         #[qproperty(QString, developer_name, cxx_name = "developerName")]
+        #[qproperty(bool, verified)]
         #[qproperty(QString, homepage_url, cxx_name = "homepageUrl")]
+        #[qproperty(QString, project_urls_json, cxx_name = "projectUrlsJson")]
         #[qproperty(QString, content_rating, cxx_name = "contentRating")]
         #[qproperty(QString, version)]
         #[qproperty(QString, license)]
@@ -74,12 +77,15 @@ pub struct DetailControllerRust {
     loading: bool,
     refining: bool,
     id: QString,
+    remote: QString,
     name: QString,
     summary: QString,
     description: QString,
     icon_url: QString,
     developer_name: QString,
+    verified: bool,
     homepage_url: QString,
+    project_urls_json: QString,
     content_rating: QString,
     version: QString,
     license: QString,
@@ -99,12 +105,15 @@ impl Default for DetailControllerRust {
             loading: true,
             refining: false,
             id: QString::default(),
+            remote: QString::default(),
             name: QString::default(),
             summary: QString::default(),
             description: QString::default(),
             icon_url: QString::default(),
             developer_name: QString::default(),
+            verified: false,
             homepage_url: QString::default(),
+            project_urls_json: QString::from("{}"),
             content_rating: QString::default(),
             version: QString::default(),
             license: QString::default(),
@@ -129,12 +138,15 @@ fn warm_client() -> &'static reqwest::Client {
 // repeat visits render this instantly then revalidate in the background
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 struct CachedDetail {
+    remote: String,
     name: String,
     summary: String,
     description: String,
     icon_url: String,
     developer_name: String,
+    verified: bool,
     homepage_url: String,
+    project_urls_json: String,
     content_rating: String,
     version: String,
     license: String,
@@ -163,12 +175,15 @@ fn apply_cached(mut this: Pin<&mut qobject::DetailController>, cached: &CachedDe
         _ => cached.icon_url.clone(),
     };
 
+    this.as_mut().set_remote(QString::from(&cached.remote));
     this.as_mut().set_name(QString::from(&cached.name));
     this.as_mut().set_summary(QString::from(&cached.summary));
     this.as_mut().set_description(QString::from(&cached.description));
     this.as_mut().set_icon_url(QString::from(&icon_url));
     this.as_mut().set_developer_name(QString::from(&cached.developer_name));
+    this.as_mut().set_verified(cached.verified);
     this.as_mut().set_homepage_url(QString::from(&cached.homepage_url));
+    this.as_mut().set_project_urls_json(QString::from(&cached.project_urls_json));
     this.as_mut().set_content_rating(QString::from(&cached.content_rating));
     this.as_mut().set_version(QString::from(&cached.version));
     this.as_mut().set_license(QString::from(&cached.license));
@@ -317,13 +332,16 @@ impl qobject::DetailController {
             apply_cached(self.as_mut(), &cached);
             self.as_mut().set_refining(false);
         } else {
+            self.as_mut().set_remote(QString::default());
             self.as_mut().set_name(name);
             self.as_mut().set_summary(summary);
             self.as_mut().set_icon_url(icon_url);
             self.as_mut().set_installed(installed);
             self.as_mut().set_description(QString::default());
             self.as_mut().set_developer_name(QString::default());
+            self.as_mut().set_verified(false);
             self.as_mut().set_homepage_url(QString::default());
+            self.as_mut().set_project_urls_json(QString::from("{}"));
             self.as_mut().set_content_rating(QString::default());
             self.as_mut().set_version(QString::default());
             self.as_mut().set_license(QString::default());
@@ -427,6 +445,7 @@ fn start_fetch(qt_thread: CxxQtThread<qobject::DetailController>, pkg_id: String
         let name = package.as_ref().map(|p| p.name.clone()).unwrap_or_default();
         let installed = package.as_ref().map(|p| p.installed).unwrap_or(false);
         let version = package.as_ref().map(|p| p.version.clone()).unwrap_or_default();
+        let remote = package.as_ref().and_then(|p| p.remote.clone()).unwrap_or_default();
         let summary = if meta.summary.is_empty() {
             package.as_ref().map(|p| p.description.clone()).unwrap_or_default()
         } else {
@@ -440,12 +459,15 @@ fn start_fetch(qt_thread: CxxQtThread<qobject::DetailController>, pkg_id: String
         };
 
         let mut cached = CachedDetail {
+            remote,
             name,
             summary,
             description: meta.description,
             icon_url,
             developer_name: meta.developer_name.unwrap_or_default(),
+            verified: meta.verified,
             homepage_url: meta.homepage_url.unwrap_or_default(),
+            project_urls_json: serde_json::to_string(&meta.project_urls).unwrap_or_else(|_| "{}".to_string()),
             content_rating: meta.content_rating,
             version,
             license: meta.license.unwrap_or_default(),

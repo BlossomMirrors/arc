@@ -15,10 +15,12 @@ Kirigami.ScrollablePage {
 
     property string pkgId: ""
     property var failedShots: ({})
+    property bool descriptionExpanded: false
 
     function openEntry(newPkgId, seed) {
         root.pkgId = newPkgId;
         root.failedShots = {};
+        root.descriptionExpanded = false;
         if (seed) {
             DetailController.loadWithSeed(newPkgId, seed.name ?? "", seed.summary ?? "", seed.iconUrl ?? "", seed.installed ?? false);
         } else {
@@ -140,6 +142,7 @@ Kirigami.ScrollablePage {
                 visible: DetailController.summary.length > 0
                 text: DetailController.summary
                 wrapMode: Text.WordWrap
+                font.pointSize: Kirigami.Theme.defaultFont.pointSize + 2
             }
 
             CardCarousel {
@@ -195,37 +198,36 @@ Kirigami.ScrollablePage {
             }
 
             Controls.Label {
+                id: descriptionLabel
                 Layout.fillWidth: true
                 visible: DetailController.description.length > 0
                 text: DetailController.description
                 textFormat: Text.StyledText
                 wrapMode: Text.WordWrap
+                maximumLineCount: root.descriptionExpanded ? -1 : 6
+                elide: root.descriptionExpanded ? Text.ElideNone : Text.ElideRight
                 onLinkActivated: link => Qt.openUrlExternally(link)
+            }
+
+            Controls.Button {
+                Layout.alignment: Qt.AlignHCenter
+                visible: !root.descriptionExpanded && descriptionLabel.truncated
+                flat: true
+                text: KI18n.i18n("Read More")
+                onClicked: root.descriptionExpanded = true
             }
 
             Kirigami.Separator {
                 Layout.fillWidth: true
-                visible: DetailController.homepageUrl.length > 0
+                visible: projectLinks.visible
             }
 
-            RowLayout {
+            ProjectLinksGrid {
+                id: projectLinks
                 Layout.fillWidth: true
-                visible: DetailController.homepageUrl.length > 0
-                spacing: Kirigami.Units.largeSpacing
-
-                Controls.Label {
-                    text: KI18n.i18n("Website")
-                    font.bold: true
-                    opacity: 0.7
-                }
-
-                Controls.Label {
-                    Layout.fillWidth: true
-                    text: "<a href=\"" + DetailController.homepageUrl + "\">" + DetailController.homepageUrl + "</a>"
-                    textFormat: Text.StyledText
-                    elide: Text.ElideRight
-                    onLinkActivated: link => Qt.openUrlExternally(link)
-                }
+                pkgId: DetailController.id
+                remote: DetailController.remote
+                links: JSON.parse(DetailController.projectUrlsJson || "{}")
             }
 
             Item { Layout.preferredHeight: Kirigami.Units.gridUnit * 2 }

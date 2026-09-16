@@ -53,6 +53,8 @@ pub struct AppMetadata {
     pub developer_name: Option<String>,
     pub license: Option<String>,
     pub eula_url: Option<String>,
+    pub project_urls: std::collections::HashMap<String, String>,
+    pub verified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

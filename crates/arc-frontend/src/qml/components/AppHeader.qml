@@ -56,11 +56,35 @@ RowLayout {
             elide: Text.ElideRight
         }
 
-        Controls.Label {
+        RowLayout {
+            id: developerRow
             Layout.fillWidth: true
-            text: DetailController.developerName
-            opacity: 0.65
-            elide: Text.ElideRight
+            spacing: Kirigami.Units.smallSpacing / 2
+
+            Controls.Label {
+                Layout.maximumWidth: developerRow.width
+                    - (verifiedBadge.visible ? verifiedBadge.width + developerRow.spacing : 0)
+                text: DetailController.developerName
+                opacity: 0.65
+                elide: Text.ElideRight
+            }
+
+            Kirigami.Icon {
+                id: verifiedBadge
+                visible: DetailController.verified
+                source: "checkmark-symbolic"
+                color: Kirigami.Theme.positiveTextColor
+                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                Layout.preferredHeight: Kirigami.Units.iconSizes.small
+
+                HoverHandler {
+                    id: verifiedHover
+                }
+
+                Controls.ToolTip.text: KI18n.i18n("Verified developer")
+                Controls.ToolTip.visible: verifiedHover.hovered
+                Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+            }
         }
 
         FontMetrics {

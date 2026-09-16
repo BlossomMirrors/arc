@@ -64,6 +64,7 @@ struct Snapshot {
     components: Vec<(Component, Option<String>)>,
     descriptions: HashMap<String, HashMap<String, String>>,
     verifications: HashMap<String, bool>,
+    project_urls: HashMap<String, HashMap<String, String>>,
 }
 
 // appstream is a big xml catalog of apps that distros ship alongside their packages
@@ -80,6 +81,7 @@ pub struct AppStreamDb {
     // Verified app IDs extracted from <custom><value key="flathub::verification::verified">
     // The appstream crate only parses <metadata> tags, not <custom>, so we do this ourselves.
     verifications: HashMap<String, bool>,
+    project_urls: HashMap<String, HashMap<String, String>>,
 }
 
 #[derive(serde::Serialize)]
@@ -98,6 +100,7 @@ pub struct AppStreamEntry {
     pub developer_name: Option<String>,
     pub verified: bool,
     pub categories: Vec<String>,
+    pub project_urls: HashMap<String, String>,
 }
 
 // Build a priority list of locale codes from the process environment.
@@ -183,6 +186,7 @@ fn slot() -> &'static RwLock<Arc<AppStreamDb>> {
             locales: detect_locales(),
             descriptions: HashMap::new(),
             verifications: HashMap::new(),
+            project_urls: HashMap::new(),
         }))
     })
 }
@@ -204,6 +208,7 @@ fn ensure_load_started() {
                 locales: detect_locales(),
                 descriptions: snapshot.descriptions,
                 verifications: snapshot.verifications,
+                project_urls: snapshot.project_urls,
             });
             FULLY_LOADED.store(true, Ordering::Relaxed);
             return;
@@ -262,7 +267,7 @@ impl AppStreamDb {
             .iter()
             .filter(|(c, _)| matches!(c.kind, ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication))
             .take(limit)
-            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications))
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications, &self.project_urls))
             .collect()
     }
 
@@ -276,7 +281,7 @@ impl AppStreamDb {
             .filter(|(c, _)| matches!(c.kind, ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication))
             .rev()
             .take(limit)
-            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications))
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications, &self.project_urls))
             .collect()
     }
 
@@ -297,7 +302,7 @@ impl AppStreamDb {
                 let summary_localized = c.summary.as_ref().and_then(|s| locales.iter().find_map(|l| s.get_for_locale(l))).map(|s| s.to_lowercase()).unwrap_or_default();
                 id.contains(&q) || name_default.contains(&q) || name_localized.contains(&q) || summary_default.contains(&q) || summary_localized.contains(&q)
             })
-            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications))
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications, &self.project_urls))
             .collect()
     }
 
@@ -310,7 +315,7 @@ impl AppStreamDb {
         self.components
             .iter()
             .find(|(c, _)| { let cid = c.id.to_string(); cid == id || cid == with_desktop })
-            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications))
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications, &self.project_urls))
     }
 
     // Fallback for installed apps absent from any AppStream catalog.
@@ -332,7 +337,7 @@ impl AppStreamDb {
             .iter()
             .filter(|(c, _)| matches!(c.kind, ComponentKind::DesktopApplication | ComponentKind::ConsoleApplication))
             .filter(|(c, _)| c.categories.iter().any(|cat| format!("{:?}", cat).to_lowercase() == category.to_lowercase()))
-            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications))
+            .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications, &self.project_urls))
             .collect()
     }
 
@@ -411,7 +416,9 @@ fn resolve_from_catalog_bytes(
     extract_descriptions(&block, &mut descriptions);
     let mut verifications = HashMap::new();
     extract_verifications(&block, &mut verifications);
-    Some(component_to_entry(&component, remote, locales, &descriptions, &verifications))
+    let mut project_urls = HashMap::new();
+    extract_project_urls(&block, &mut project_urls);
+    Some(component_to_entry(&component, remote, locales, &descriptions, &verifications, &project_urls))
 }
 
 fn extract_component_block(xml_bytes: &[u8], id: &str) -> Option<Vec<u8>> {
@@ -551,6 +558,10 @@ fn parse_metainfo_bytes(id: &str, bytes: &[u8], locales: &[String]) -> Option<Ap
         })
         .unwrap_or_default();
 
+    let mut project_url_map: HashMap<String, HashMap<String, String>> = HashMap::new();
+    extract_project_urls(bytes, &mut project_url_map);
+    let project_urls = project_url_map.remove(comp_id.as_str()).unwrap_or_default();
+
     Some(AppStreamEntry {
         id: id.to_string(),
         name,
@@ -566,6 +577,7 @@ fn parse_metainfo_bytes(id: &str, bytes: &[u8], locales: &[String]) -> Option<Ap
         developer_name,
         verified: false,
         categories: Vec::new(),
+        project_urls,
     })
 }
 
@@ -668,6 +680,56 @@ fn extract_descriptions(xml_bytes: &[u8], out: &mut HashMap<String, HashMap<Stri
     }
 }
 
+fn extract_project_urls(xml_bytes: &[u8], out: &mut HashMap<String, HashMap<String, String>>) {
+    let Ok(root) = xmltree::Element::parse(xml_bytes) else {
+        return;
+    };
+
+    let components: Vec<&xmltree::Element> =
+        if root.name == "components" || root.name == "collection" {
+            root.children
+                .iter()
+                .filter_map(|n| n.as_element())
+                .filter(|e| e.name == "component")
+                .collect()
+        } else if root.name == "component" {
+            vec![&root]
+        } else {
+            return;
+        };
+
+    for comp in components {
+        let id = comp
+            .children
+            .iter()
+            .filter_map(|n| n.as_element())
+            .find(|e| e.name == "id")
+            .and_then(|e| e.get_text())
+            .map(|t| t.trim().to_string());
+        let Some(id) = id else {
+            continue;
+        };
+
+        let url_map = out.entry(id).or_default();
+        for url_elem in comp
+            .children
+            .iter()
+            .filter_map(|n| n.as_element())
+            .filter(|e| e.name == "url")
+        {
+            let Some(kind) = url_elem.attributes.get("type") else {
+                continue;
+            };
+            let Some(text) = url_elem.get_text().map(|t| t.trim().to_string()) else {
+                continue;
+            };
+            if !text.is_empty() {
+                url_map.insert(kind.clone(), text);
+            }
+        }
+    }
+}
+
 fn read_gz_bytes(path: &Path) -> std::io::Result<Vec<u8>> {
     use flate2::read::GzDecoder;
     use std::io::Read;
@@ -733,6 +795,7 @@ fn component_to_entry(
     locales: &[String],
     descriptions: &HashMap<String, HashMap<String, String>>,
     verifications: &HashMap<String, bool>,
+    project_urls: &HashMap<String, HashMap<String, String>>,
 ) -> AppStreamEntry {
     // Prefer a remote 128×128 URL. local cached files may not be downloaded yet.
     // Fall back to the first available icon (cached → local → stock) otherwise.
@@ -861,6 +924,7 @@ fn component_to_entry(
         developer_name,
         verified,
         categories: c.categories.iter().map(|cat| format!("{:?}", cat).to_lowercase()).collect(),
+        project_urls: project_urls.get(&c.id.to_string()).cloned().unwrap_or_default(),
     }
 }
 
@@ -965,6 +1029,7 @@ fn load_one_catalog(
     out: &mut Vec<(Component, Option<String>)>,
     out_descriptions: &mut HashMap<String, HashMap<String, String>>,
     out_verifications: &mut HashMap<String, bool>,
+    out_project_urls: &mut HashMap<String, HashMap<String, String>>,
 ) {
     let is_gz = path.extension().and_then(|e| e.to_str()) == Some("gz");
     if is_gz {
@@ -974,6 +1039,7 @@ fn load_one_catalog(
         if let Ok(bytes) = read_gz_bytes(path) {
             extract_descriptions(&bytes, out_descriptions);
             extract_verifications(&bytes, out_verifications);
+            extract_project_urls(&bytes, out_project_urls);
         }
     } else {
         if let Ok(col) = Collection::from_path(path.to_path_buf()) {
@@ -982,6 +1048,7 @@ fn load_one_catalog(
         if let Ok(bytes) = fs::read(path) {
             extract_descriptions(&bytes, out_descriptions);
             extract_verifications(&bytes, out_verifications);
+            extract_project_urls(&bytes, out_project_urls);
         }
     }
 }
@@ -1032,19 +1099,21 @@ fn load_flatpak_progressive() -> AppStreamDb {
     let mut components = Vec::new();
     let mut descriptions: HashMap<String, HashMap<String, String>> = HashMap::new();
     let mut verifications: HashMap<String, bool> = HashMap::new();
+    let mut project_urls: HashMap<String, HashMap<String, String>> = HashMap::new();
 
     for (remote_name, path, _) in catalogs {
-        load_one_catalog(&path, &remote_name, &mut components, &mut descriptions, &mut verifications);
+        load_one_catalog(&path, &remote_name, &mut components, &mut descriptions, &mut verifications, &mut project_urls);
         *slot().write().unwrap() = Arc::new(AppStreamDb {
             components: dedupe_by_id_preferring_blossomos(components.clone()),
             locales: locales.clone(),
             descriptions: descriptions.clone(),
             verifications: verifications.clone(),
+            project_urls: project_urls.clone(),
         });
     }
 
     let components = dedupe_by_id_preferring_blossomos(components);
-    AppStreamDb { components, locales, descriptions, verifications }
+    AppStreamDb { components, locales, descriptions, verifications, project_urls }
 }
 
 static SNAPSHOT_STORE: OnceLock<JsonCache<Snapshot>> = OnceLock::new();
@@ -1154,6 +1223,7 @@ fn persist_snapshot(db: &AppStreamDb, key: &SnapshotKey) {
         components: db.components.clone(),
         descriptions: db.descriptions.clone(),
         verifications: db.verifications.clone(),
+        project_urls: db.project_urls.clone(),
     };
     let _ = snapshot_store().store_blocking(&snapshot);
 }
@@ -1178,6 +1248,7 @@ pub fn partial_entry_from_package(pkg: &Package) -> AppStreamEntry {
         developer_name: pkg.developer_name.clone(),
         verified: false,
         categories: pkg.categories.clone(),
+        project_urls: HashMap::new(),
     }
 }
 
@@ -1251,6 +1322,7 @@ mod tests {
             components: components.clone(),
             descriptions: HashMap::new(),
             verifications: HashMap::new(),
+            project_urls: HashMap::new(),
         };
         let bytes = serde_json::to_vec(&snapshot).unwrap();
         let restored: Snapshot = serde_json::from_slice(&bytes).unwrap();
@@ -1314,7 +1386,7 @@ mod tests {
             ForgeVerification { verified: true, developer_name: Some("Forge Dev".to_string()) },
         )]));
 
-        let entry = component_to_entry(foo, Some("blossomos".to_string()), &[], &HashMap::new(), &HashMap::new());
+        let entry = component_to_entry(foo, Some("blossomos".to_string()), &[], &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert!(entry.verified);
         assert_eq!(entry.developer_name.as_deref(), Some("Forge Dev"));
     }
@@ -1330,7 +1402,7 @@ mod tests {
             ForgeVerification { verified: true, developer_name: Some("Someone Else".to_string()) },
         )]));
 
-        let entry = component_to_entry(bar, Some("blossomos".to_string()), &[], &HashMap::new(), &HashMap::new());
+        let entry = component_to_entry(bar, Some("blossomos".to_string()), &[], &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert!(!entry.verified, "id {id} was not in the fetched map, so it should not be marked verified");
         assert_eq!(entry.developer_name, None, "test catalog components carry no <developer_name>");
     }
