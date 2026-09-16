@@ -7,13 +7,41 @@ pub struct ListDef {
 }
 
 pub const LISTS: &[ListDef] = &[
-    ListDef { slug: "office", icon_name: "arc-list-office-symbolic", color: "#ab4e1c" },
-    ListDef { slug: "creative", icon_name: "arc-list-creative-symbolic", color: "#8f45c9" },
-    ListDef { slug: "chat", icon_name: "arc-list-chat-symbolic", color: "#1a5fb4" },
-    ListDef { slug: "gaming", icon_name: "arc-list-gaming-symbolic", color: "#26a269" },
-    ListDef { slug: "browser", icon_name: "arc-list-browser-symbolic", color: "#f66151" },
-    ListDef { slug: "music", icon_name: "arc-list-music-symbolic", color: "#ff3d3d" },
-    ListDef { slug: "code", icon_name: "arc-list-code-symbolic", color: "#2d89f2" },
+    ListDef {
+        slug: "office",
+        icon_name: "applications-office",
+        color: "#ab4e1c",
+    },
+    ListDef {
+        slug: "creative",
+        icon_name: "applications-graphics",
+        color: "#8f45c9",
+    },
+    ListDef {
+        slug: "chat",
+        icon_name: "folder-image-people-symbolic",
+        color: "#1a5fb4",
+    },
+    ListDef {
+        slug: "gaming",
+        icon_name: "applications-games",
+        color: "#26a269",
+    },
+    ListDef {
+        slug: "browser",
+        icon_name: "applications-internet",
+        color: "#f66151",
+    },
+    ListDef {
+        slug: "music",
+        icon_name: "folder-music-symbolic",
+        color: "#ff3d3d",
+    },
+    ListDef {
+        slug: "code",
+        icon_name: "applications-development",
+        color: "#2d89f2",
+    },
 ];
 
 pub fn list_def(slug: &str) -> Option<&'static ListDef> {
@@ -641,7 +669,10 @@ pub fn extract_app_ids(xml: &str) -> Vec<String> {
             pos = start + 4;
             continue;
         }
-        let end = lower[start..].find('>').map(|e| start + e).unwrap_or(lower.len());
+        let end = lower[start..]
+            .find('>')
+            .map(|e| start + e)
+            .unwrap_or(lower.len());
         if let Some(idp) = lower[start..end].find("id=\"") {
             let value_start = start + idp + 4;
             if let Some(rel_end) = xml[value_start..end].find('"') {

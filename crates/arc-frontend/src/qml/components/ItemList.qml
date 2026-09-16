@@ -115,6 +115,7 @@ Kirigami.ScrollablePage {
         model: root.packageListModel
 
         spacing: Kirigami.Units.largeSpacing
+        topMargin: Kirigami.Units.largeSpacing
         reuseItems: true
 
         headerPositioning: ListView.InlineHeader
