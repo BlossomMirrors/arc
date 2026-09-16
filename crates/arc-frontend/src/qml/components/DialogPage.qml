@@ -15,6 +15,8 @@ Kirigami.Page {
     default property alias content: contentColumn.data
 
     ColumnLayout {
+        id: contentColumn
+
         anchors.centerIn: parent
         width: Math.min(parent.width - Kirigami.Units.gridUnit * 4, Kirigami.Units.gridUnit * 30)
         spacing: Kirigami.Units.largeSpacing
@@ -41,12 +43,6 @@ Kirigami.Page {
             Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
             opacity: 0.7
-        }
-
-        ColumnLayout {
-            id: contentColumn
-            Layout.fillWidth: true
-            spacing: Kirigami.Units.largeSpacing
         }
     }
 }

@@ -13,21 +13,27 @@ DialogPage {
     dialogTitle: DeepLinkController.repoTitle
     dialogDescription: DeepLinkController.repoUrl
 
-    RowLayout {
-        Layout.alignment: Qt.AlignHCenter
-        spacing: Kirigami.Units.smallSpacing
+    Item {
+        Layout.fillWidth: true
+        Layout.preferredHeight: buttonRow.implicitHeight
 
-        Controls.Button {
-            text: KI18n.i18n("Cancel")
-            onClicked: NavController.goSettings()
-        }
+        RowLayout {
+            id: buttonRow
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: Kirigami.Units.smallSpacing
 
-        Controls.Button {
-            text: KI18n.i18n("Add Repository")
-            highlighted: true
-            onClicked: {
-                RemotesModel.addFlatpakrepo(DeepLinkController.repoContent);
-                NavController.goSettings();
+            Controls.Button {
+                text: KI18n.i18n("Cancel")
+                onClicked: NavController.goSettings()
+            }
+
+            Controls.Button {
+                text: KI18n.i18n("Add Repository")
+                highlighted: true
+                onClicked: {
+                    RemotesModel.addFlatpakrepo(DeepLinkController.repoContent);
+                    NavController.goSettings();
+                }
             }
         }
     }

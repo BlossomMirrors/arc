@@ -60,6 +60,8 @@ pub trait ArcDaemon {
     async fn add_flatpakrepo(&self, content: &str) -> zbus::Result<bool>;
     async fn install_flatpak_bundle(&self, path: &str, notify: bool) -> zbus::Result<String>;
     async fn set_concurrent_downloads(&self, count: u32) -> zbus::Result<()>;
+    async fn list_leftover_data(&self) -> zbus::Result<String>;
+    async fn delete_leftover_data(&self, ids: Vec<String>) -> zbus::Result<bool>;
 
     #[zbus(signal)]
     fn transaction_started(&self, transaction_id: String, package_id: String) -> zbus::Result<()>;

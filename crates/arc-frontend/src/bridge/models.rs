@@ -246,6 +246,25 @@ pub mod qobject {
             icon_url: QString,
         );
 
+        #[qsignal]
+        #[cxx_name = "removeConfirmationNeeded"]
+        fn remove_confirmation_needed(
+            self: Pin<&mut TransactionsModel>,
+            pkg_id: QString,
+            name: QString,
+            icon_url: QString,
+        );
+
+        #[qinvokable]
+        #[cxx_name = "confirmRemove"]
+        fn confirm_remove(
+            self: Pin<&mut TransactionsModel>,
+            pkg_id: QString,
+            name: QString,
+            icon_url: QString,
+            delete_data: bool,
+        );
+
         #[qinvokable]
         fn cancel(self: Pin<&mut TransactionsModel>, tx_id: QString);
 
@@ -1312,8 +1331,26 @@ impl qobject::TransactionsModel {
         let pkg_id = pkg_id.to_string();
         let name = name.to_string();
         let name = if name.is_empty() { pkg_id.clone() } else { name };
+        self.as_mut().remove_confirmation_needed(
+            QString::from(&pkg_id),
+            QString::from(&name),
+            icon_url,
+        );
+    }
+
+    pub fn confirm_remove(
+        mut self: Pin<&mut Self>,
+        pkg_id: QString,
+        name: QString,
+        icon_url: QString,
+        delete_data: bool,
+    ) {
+        let pkg_id = pkg_id.to_string();
+        let name = name.to_string();
+        let name = if name.is_empty() { pkg_id.clone() } else { name };
+        let tx_type = if delete_data { "remove_with_data" } else { "remove" };
         self.as_mut()
-            .start_transaction(pkg_id, name, icon_url.to_string(), "remove");
+            .start_transaction(pkg_id, name, icon_url.to_string(), tx_type);
     }
 
     pub fn cancel(self: Pin<&mut Self>, tx_id: QString) {
@@ -1408,6 +1445,7 @@ impl qobject::TransactionsModel {
             let result = match tx_type {
                 "install" => proxy.install_package(&pkg_id, true).await,
                 "remove" => proxy.remove_package(&pkg_id, true).await,
+                "remove_with_data" => proxy.remove_package_with_data(&pkg_id, true, true).await,
                 "update" => proxy.update_package(&pkg_id, true).await,
                 "flatpakref" => proxy.install_flatpakref(&pkg_id, true).await,
                 "bundle" => proxy.install_flatpak_bundle(&pkg_id, true).await,

@@ -26,7 +26,10 @@ Kirigami.ScrollablePage {
         value: 0
     }
 
-    Component.onCompleted: HomeFeedModel.load()
+    Component.onCompleted: {
+        HomeFeedModel.load();
+        LeftoverDataController.check();
+    }
 
     readonly property bool feedEmpty: !HomeFeedModel.loading && sectionsRepeater.count === 0
 
@@ -87,6 +90,30 @@ Kirigami.ScrollablePage {
 
         Item {
             Layout.preferredHeight: badgeBar.height
+        }
+
+        Kirigami.InlineMessage {
+            Layout.fillWidth: true
+            Layout.leftMargin: root.sideInset
+            Layout.rightMargin: root.sideInset
+            Layout.topMargin: Kirigami.Units.largeSpacing
+            visible: LeftoverDataController.hasData
+            type: Kirigami.MessageType.Information
+            text: KI18n.i18n("Some removed apps left data behind on your system.")
+            showCloseButton: false
+
+            actions: [
+                Kirigami.Action {
+                    text: KI18n.i18n("Delete Data")
+                    icon.name: "delete"
+                    enabled: !LeftoverDataController.busy
+                    onTriggered: LeftoverDataController.cleanup()
+                },
+                Kirigami.Action {
+                    text: KI18n.i18n("Dismiss")
+                    onTriggered: LeftoverDataController.dismiss()
+                }
+            ]
         }
 
         ColumnLayout {

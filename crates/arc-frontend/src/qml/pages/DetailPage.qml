@@ -100,7 +100,7 @@ Kirigami.ScrollablePage {
                 Layout.fillWidth: true
                 hasExtensions: root.extensions.length > 0
 
-                onRemoveClicked: removeDialog.open()
+                onRemoveClicked: TransactionsModel.removePackage(DetailController.id, DetailController.name, DetailController.iconUrl)
                 onAddonsClicked: extensionsSheet.open()
             }
 
@@ -209,25 +209,6 @@ Kirigami.ScrollablePage {
 
             Item { Layout.preferredHeight: Kirigami.Units.gridUnit * 2 }
         }
-    }
-
-    Kirigami.PromptDialog {
-        id: removeDialog
-        title: KI18n.i18n("Remove %1?", DetailController.name)
-        subtitle: KI18n.i18n("The application will be uninstalled from your system.")
-        standardButtons: Kirigami.Dialog.Cancel
-        showCloseButton: false
-
-        customFooterActions: [
-            Kirigami.Action {
-                text: KI18n.i18n("Remove")
-                icon.name: "delete"
-                onTriggered: {
-                    TransactionsModel.removePackage(DetailController.id, DetailController.name, DetailController.iconUrl);
-                    removeDialog.close();
-                }
-            }
-        ]
     }
 
     Kirigami.OverlaySheet {

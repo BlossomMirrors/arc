@@ -863,6 +863,87 @@ impl ArcDaemonInterface {
         }
     }
 
+    async fn list_leftover_data(&self) -> String {
+        info!("ListLeftoverData");
+
+        let installed: std::collections::HashSet<String> = self
+            .provider
+            .list_installed()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+
+        #[derive(serde::Serialize)]
+        struct LeftoverDataEntry {
+            id: String,
+            name: String,
+        }
+
+        let mut entries = Vec::new();
+
+        let Some(home) = env::var_os("HOME") else {
+            return "[]".to_string();
+        };
+        let home = std::path::PathBuf::from(home);
+
+        if let Ok(dirs) = fs::read_dir(home.join(".var/app")) {
+            for entry in dirs.flatten() {
+                if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    continue;
+                }
+                let id = entry.file_name().to_string_lossy().to_string();
+                if installed.contains(&id) {
+                    continue;
+                }
+                let name = crate::appstream_db::AppStreamDb::try_get()
+                    .find_by_id(&id)
+                    .map(|e| e.name)
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| id.clone());
+                entries.push(LeftoverDataEntry { id, name });
+            }
+        }
+
+        if let Ok(dirs) = fs::read_dir(home.join(".local/share/blossomos-webapps")) {
+            for entry in dirs.flatten() {
+                if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    continue;
+                }
+                let appid = entry.file_name().to_string_lossy().to_string();
+                let id = format!("pwa:{appid}");
+                if installed.contains(&id) {
+                    continue;
+                }
+                entries.push(LeftoverDataEntry { id, name: appid });
+            }
+        }
+
+        serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    async fn delete_leftover_data(&self, ids: Vec<String>) -> bool {
+        info!("DeleteLeftoverData: {:?}", ids);
+
+        let Some(home) = env::var_os("HOME") else {
+            return false;
+        };
+        let home = std::path::PathBuf::from(home);
+
+        let mut ok = true;
+        for id in ids {
+            let dir = match id.strip_prefix("pwa:") {
+                Some(appid) => home.join(".local/share/blossomos-webapps").join(appid),
+                None => home.join(".var/app").join(&id),
+            };
+            if dir.exists() && fs::remove_dir_all(&dir).is_err() {
+                ok = false;
+            }
+        }
+        ok
+    }
+
     async fn refresh_catalog(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
         info!("RefreshCatalog");
 

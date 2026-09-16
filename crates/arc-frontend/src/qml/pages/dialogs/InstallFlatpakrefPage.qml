@@ -13,21 +13,27 @@ DialogPage {
     dialogTitle: DeepLinkController.refTitle
     dialogDescription: KI18n.i18n("This app comes from a third-party source outside your configured repositories.")
 
-    RowLayout {
-        Layout.alignment: Qt.AlignHCenter
-        spacing: Kirigami.Units.smallSpacing
+    Item {
+        Layout.fillWidth: true
+        Layout.preferredHeight: buttonRow.implicitHeight
 
-        Controls.Button {
-            text: KI18n.i18n("Cancel")
-            onClicked: NavController.goHome()
-        }
+        RowLayout {
+            id: buttonRow
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: Kirigami.Units.smallSpacing
 
-        Controls.Button {
-            text: KI18n.i18n("Install")
-            highlighted: true
-            onClicked: {
-                TransactionsModel.installFlatpakref(DeepLinkController.refSource, DeepLinkController.refTitle);
-                NavController.goDownloads();
+            Controls.Button {
+                text: KI18n.i18n("Cancel")
+                onClicked: NavController.goHome()
+            }
+
+            Controls.Button {
+                text: KI18n.i18n("Install")
+                highlighted: true
+                onClicked: {
+                    TransactionsModel.installFlatpakref(DeepLinkController.refSource, DeepLinkController.refTitle);
+                    NavController.goDownloads();
+                }
             }
         }
     }

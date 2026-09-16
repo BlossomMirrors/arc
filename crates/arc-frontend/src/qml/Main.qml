@@ -62,7 +62,9 @@ Kirigami.ApplicationWindow {
             // so only the active tab may trigger a load or their requests race
             // and clobber each other's results.
             onCurrentIndexChanged: {
-                if (currentIndex === root.tabIndex.installed) {
+                if (currentIndex === root.tabIndex.home) {
+                    LeftoverDataController.check();
+                } else if (currentIndex === root.tabIndex.installed) {
                     installedPageItem.load();
                 } else if (currentIndex === root.tabIndex.downloads) {
                     downloadsPageItem.load();
@@ -141,6 +143,26 @@ Kirigami.ApplicationWindow {
                 easing.type: Easing.OutCubic
             }
         }
+    }
+
+    property bool eulaVisible: false
+
+    EulaPage {
+        id: eulaPageItem
+        y: 0
+        width: parent.width
+        height: parent.height
+        x: root.eulaVisible ? 0 : width
+        visible: x < width
+
+        Behavior on x {
+            NumberAnimation {
+                duration: 220
+                easing.type: Easing.OutCubic
+            }
+        }
+
+        onCloseRequested: root.eulaVisible = false
     }
 
     TapHandler {
@@ -441,21 +463,56 @@ Kirigami.ApplicationWindow {
         InstallFilePage {}
     }
 
-    Component {
-        id: eulaPageComponent
-        EulaPage {}
+    Connections {
+        target: TransactionsModel
+        function onEulaRequired(pkgId, name, iconUrl, eulaUrl) {
+            eulaPageItem.open(pkgId, name, iconUrl, eulaUrl);
+            root.eulaVisible = true;
+        }
+    }
+
+    Kirigami.PromptDialog {
+        id: removeConfirmDialog
+
+        property string pkgId: ""
+        property string appName: ""
+        property string iconUrl: ""
+
+        title: KI18n.i18n("Remove %1?", removeConfirmDialog.appName)
+        subtitle: KI18n.i18n("The application will be uninstalled from your system.")
+        standardButtons: Kirigami.Dialog.Cancel
+        showCloseButton: false
+
+        Controls.CheckBox {
+            id: deleteDataCheckBox
+            text: KI18n.i18n("Also delete app data")
+        }
+
+        customFooterActions: [
+            Kirigami.Action {
+                text: KI18n.i18n("Remove")
+                icon.name: "delete"
+                onTriggered: {
+                    TransactionsModel.confirmRemove(
+                        removeConfirmDialog.pkgId,
+                        removeConfirmDialog.appName,
+                        removeConfirmDialog.iconUrl,
+                        deleteDataCheckBox.checked);
+                    removeConfirmDialog.close();
+                }
+            }
+        ]
+
+        onOpened: deleteDataCheckBox.checked = false
     }
 
     Connections {
         target: TransactionsModel
-        function onEulaRequired(pkgId, name, iconUrl, eulaUrl) {
-            const page = root.pageStack.push(eulaPageComponent, {
-                pkgId: pkgId,
-                appName: name,
-                iconUrl: iconUrl,
-                eulaUrl: eulaUrl
-            });
-            page.closeRequested.connect(() => root.pageStack.pop());
+        function onRemoveConfirmationNeeded(pkgId, name, iconUrl) {
+            removeConfirmDialog.pkgId = pkgId;
+            removeConfirmDialog.appName = name;
+            removeConfirmDialog.iconUrl = iconUrl;
+            removeConfirmDialog.open();
         }
     }
 

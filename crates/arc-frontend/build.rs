@@ -87,6 +87,7 @@ fn main() {
         "src/bridge/models.rs",
         "src/bridge/detail_controller.rs",
         "src/bridge/home_model.rs",
+        "src/bridge/leftover_data_controller.rs",
         "src/bridge/list_controller.rs",
         "src/bridge/settings_controller.rs",
         "src/bridge/deeplink_controller.rs",
