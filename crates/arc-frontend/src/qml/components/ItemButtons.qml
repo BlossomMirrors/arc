@@ -21,6 +21,8 @@ RowLayout {
 
     property bool allowRemove: true
     property bool fillWidth: false
+    property bool flat: false
+    property color textColor: Kirigami.Theme.textColor
 
     signal removeRequested()
 
@@ -42,6 +44,9 @@ RowLayout {
         active: root.busy
         visible: active
         sourceComponent: Controls.Button {
+            flat: root.flat
+            palette.buttonText: root.textColor
+            icon.color: root.textColor
             text: KI18n.i18n("Cancel")
             onClicked: TransactionsModel.cancelForPackage(root.pkgId)
         }
@@ -51,7 +56,10 @@ RowLayout {
         active: !root.busy && root.showRemove
         visible: active
         sourceComponent: Controls.Button {
+            flat: root.flat
+            palette.buttonText: root.textColor
             icon.name: "delete"
+            icon.color: root.textColor
             display: Controls.Button.IconOnly
             text: KI18n.i18n("Remove")
             Controls.ToolTip.text: text
@@ -66,7 +74,10 @@ RowLayout {
         visible: active
         Layout.fillWidth: root.fillWidth
         sourceComponent: Controls.Button {
-            highlighted: true
+            flat: root.flat
+            highlighted: !root.flat
+            palette.buttonText: root.textColor
+            icon.color: root.textColor
             text: KI18n.i18n("Start")
             onClicked: TransactionsModel.launch(root.pkgId)
         }
@@ -77,7 +88,10 @@ RowLayout {
         active: !root.busy && (root.showInstall || root.showUpdate)
         visible: active
         sourceComponent: Controls.Button {
-            highlighted: true
+            flat: root.flat
+            highlighted: !root.flat
+            palette.buttonText: root.textColor
+            icon.color: root.textColor
             text: root.showUpdate ? KI18n.i18n("Update") : KI18n.i18n("Install")
             onClicked: root.triggerInstall()
         }

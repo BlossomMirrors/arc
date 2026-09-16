@@ -24,6 +24,8 @@ Kirigami.AbstractCard {
     showClickFeedback: true
     onClicked: root.activated()
 
+    bottomPadding: Kirigami.Units.largeSpacing
+
     HoverHandler {
         id: hoverHandler
     }

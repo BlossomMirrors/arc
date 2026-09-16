@@ -104,6 +104,11 @@ Item {
             width: view.width
             height: view.height
 
+            property real bannerLuminance: -1
+            readonly property bool darkBanner: slide.bannerLuminance < 140
+            readonly property color fgColor: slide.darkBanner ? "white" : "black"
+            readonly property color fgColorMuted: slide.darkBanner ? Qt.rgba(1, 1, 1, 0.85) : Qt.rgba(0, 0, 0, 0.75)
+
             Image {
                 id: bannerImage
                 anchors.fill: parent
@@ -111,6 +116,39 @@ Item {
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
                 visible: slide.modelData.is_story && slide.modelData.banner_url.length > 0
+            }
+
+            Timer {
+                interval: 400
+                repeat: true
+                running: slide.modelData.is_story && slide.bannerLuminance < 0
+                triggeredOnStart: true
+                onTriggered: brightnessSampler.requestPaint()
+            }
+
+            Canvas {
+                id: brightnessSampler
+                width: 8
+                height: 8
+                opacity: 0
+                z: -1
+
+                onPaint: {
+                    var ctx = getContext("2d");
+                    ctx.clearRect(0, 0, width, height);
+                    ctx.drawImage(bannerImage, 0, 0, width, height);
+                    var data = ctx.getImageData(0, 0, width, height).data;
+                    var alphaSum = 0;
+                    var total = 0;
+                    for (var i = 0; i < data.length; i += 4) {
+                        alphaSum += data[i + 3];
+                        total += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                    }
+                    if (alphaSum === 0) {
+                        return;
+                    }
+                    slide.bannerLuminance = total / (data.length / 4);
+                }
             }
 
             readonly property Image banner: bannerImage
@@ -154,7 +192,7 @@ Item {
                     Layout.fillWidth: true
                     level: 1
                     text: slide.modelData.title
-                    color: "white"
+                    color: slide.fgColor
                     maximumLineCount: 2
                     wrapMode: Text.WordWrap
                 }
@@ -163,7 +201,7 @@ Item {
                     Layout.fillWidth: true
                     visible: slide.modelData.body.length > 0
                     text: slide.modelData.body
-                    color: Qt.rgba(1, 1, 1, 0.85)
+                    color: slide.fgColorMuted
                     maximumLineCount: 2
                     wrapMode: Text.WordWrap
                 }
@@ -172,7 +210,7 @@ Item {
                     Layout.topMargin: Kirigami.Units.smallSpacing
                     Layout.preferredWidth: parent.width * 0.75
                     Layout.preferredHeight: 1
-                    color: Qt.rgba(1, 1, 1, 0.35)
+                    color: slide.darkBanner ? Qt.rgba(1, 1, 1, 0.35) : Qt.rgba(0, 0, 0, 0.25)
                     visible: slide.apps.length > 0
                 }
 
@@ -267,7 +305,9 @@ Item {
                             Rectangle {
                                 anchors.fill: parent
                                 radius: Kirigami.Units.cornerRadius
-                                color: Qt.rgba(1, 1, 1, rowHover.hovered ? 0.18 : 0.08)
+                                color: slide.darkBanner
+                                    ? Qt.rgba(1, 1, 1, rowHover.hovered ? 0.18 : 0.08)
+                                    : Qt.rgba(0, 0, 0, rowHover.hovered ? 0.14 : 0.06)
 
                                 Behavior on color {
                                     ColorAnimation { duration: Kirigami.Units.shortDuration }
@@ -306,7 +346,7 @@ Item {
                                         Layout.fillWidth: true
                                         Layout.minimumWidth: 0
                                         text: appRow.modelData.name
-                                        color: "white"
+                                        color: slide.fgColor
                                         font.bold: true
                                         maximumLineCount: 1
                                         elide: Text.ElideRight
@@ -317,7 +357,7 @@ Item {
                                         Layout.minimumWidth: 0
                                         visible: appRow.modelData.summary.length > 0
                                         text: appRow.modelData.summary
-                                        color: Qt.rgba(1, 1, 1, 0.85)
+                                        color: slide.fgColorMuted
                                         font.pointSize: Kirigami.Theme.smallFont.pointSize
                                         maximumLineCount: 1
                                         elide: Text.ElideRight
@@ -334,6 +374,8 @@ Item {
                                     installed: appRow.modelData.installed
                                     mode: "install"
                                     allowRemove: false
+                                    flat: true
+                                    textColor: slide.fgColor
                                 }
                             }
                         }

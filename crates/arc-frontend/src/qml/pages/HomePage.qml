@@ -230,7 +230,7 @@ Kirigami.ScrollablePage {
 
                             CardCarousel {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: Kirigami.Units.gridUnit * 10
+                                Layout.preferredHeight: Kirigami.Units.gridUnit * 11
                                 visible: !rowLoader.loading
                                 model: JSON.parse(rowLoader.cardsJson)
                                 cardWidth: Kirigami.Units.gridUnit * 10
@@ -239,7 +239,7 @@ Kirigami.ScrollablePage {
                                     property var modelData: ({})
                                     property int index
                                     width: Kirigami.Units.gridUnit * 10
-                                    height: Kirigami.Units.gridUnit * 10
+                                    height: Kirigami.Units.gridUnit * 11
                                     pkgId: modelData.id
                                     appName: modelData.name
                                     summary: modelData.summary
@@ -287,7 +287,7 @@ Kirigami.ScrollablePage {
                                     delegate: AppCard {
                                         required property var modelData
                                         Layout.fillWidth: true
-                                        Layout.preferredHeight: Kirigami.Units.gridUnit * 10
+                                        Layout.preferredHeight: Kirigami.Units.gridUnit * 11
                                         pkgId: modelData.id
                                         appName: modelData.name
                                         summary: modelData.summary
