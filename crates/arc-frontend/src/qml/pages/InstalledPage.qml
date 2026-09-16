@@ -9,7 +9,6 @@ ItemList {
     title: KI18n.i18n("Installed")
 
     emptyText: KI18n.i18n("Nothing installed yet")
-    markInstalled: false
     showSearch: true
 
     onSearchEdited: query => installListModel.setSearchText(query)

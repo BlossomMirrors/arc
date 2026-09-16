@@ -16,13 +16,10 @@ Kirigami.ScrollablePage {
     property bool showSearch: false
     property string searchQuery: ""
 
-    property bool markInstalled: true
     property string headerColor: ""
     property string headerIcon: ""
 
-    readonly property alias rowCount: listView.count
-
-    readonly property real maxContentWidth: Kirigami.Units.gridUnit * 70
+    readonly property alias rowCount: repeater.count
 
     signal searchEdited(string query)
 
@@ -38,42 +35,6 @@ Kirigami.ScrollablePage {
     }
 
     Kirigami.ColumnView.fillWidth: true
-
-    component MetaPill: Rectangle {
-        id: pill
-
-        property alias text: pillLabel.text
-        property string pillIcon: ""
-        property color textColor: Kirigami.Theme.textColor
-
-        radius: height / 2
-        color: Kirigami.Theme.alternateBackgroundColor
-        implicitHeight: pillRow.implicitHeight + Kirigami.Units.smallSpacing
-        implicitWidth: pillRow.implicitWidth + Kirigami.Units.largeSpacing
-
-        Row {
-            id: pillRow
-            anchors.centerIn: parent
-            spacing: Kirigami.Units.smallSpacing / 2
-
-            Kirigami.Icon {
-                source: pill.pillIcon
-                visible: pill.pillIcon.length > 0
-                width: Kirigami.Units.iconSizes.small
-                height: Kirigami.Units.iconSizes.small
-                anchors.verticalCenter: parent.verticalCenter
-                color: pill.textColor
-            }
-
-            Controls.Label {
-                id: pillLabel
-                anchors.verticalCenter: parent.verticalCenter
-                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                color: pill.textColor
-                opacity: 0.85
-            }
-        }
-    }
 
     header: Controls.ToolBar {
         id: filterBar
@@ -118,7 +79,7 @@ Kirigami.ScrollablePage {
 
             Controls.Label {
                 visible: !root.packageListModel.loading
-                text: KI18n.i18np("%1 app", "%1 apps", listView.count)
+                text: KI18n.i18np("%1 app", "%1 apps", repeater.count)
                 opacity: 0.7
             }
 
@@ -147,28 +108,24 @@ Kirigami.ScrollablePage {
         }
     }
 
-    Kirigami.CardsListView {
-        id: listView
-        model: root.packageListModel
+    LoadingOverlay {
+        visible: root.packageListModel.loading
+    }
 
-        reuseItems: true
+    Kirigami.PlaceholderMessage {
+        anchors.centerIn: parent
+        width: parent.width - Kirigami.Units.gridUnit * 4
+        visible: !root.packageListModel.loading && repeater.count === 0
+        text: root.emptyText
+    }
 
-        headerPositioning: ListView.InlineHeader
+    ColumnLayout {
+        width: root.width
+        spacing: 0
 
-        LoadingOverlay {
-            visible: root.packageListModel.loading
-        }
-
-        Kirigami.PlaceholderMessage {
-            anchors.centerIn: parent
-            width: parent.width - Kirigami.Units.gridUnit * 4
-            visible: !root.packageListModel.loading && listView.count === 0
-            text: root.emptyText
-        }
-
-        header: Item {
-            width: listView.width
-            height: root.headerColor.length > 0 ? Kirigami.Units.gridUnit * 7 : 0
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: root.headerColor.length > 0 ? Kirigami.Units.gridUnit * 7 : 0
             visible: root.headerColor.length > 0
 
             Rectangle {
@@ -201,63 +158,58 @@ Kirigami.ScrollablePage {
             }
         }
 
-        delegate: Kirigami.AbstractCard {
-            id: delegate
+        ColumnLayout {
+            Layout.alignment: Qt.AlignHCenter
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 44
+            spacing: Kirigami.Units.largeSpacing
 
-            width: Math.min(listView.width - Kirigami.Units.largeSpacing * 2,
-                root.maxContentWidth)
-            x: Math.round((listView.width - width) / 2)
+            Repeater {
+                id: repeater
+                model: root.packageListModel
 
-            required property int index
-            required property string pkgId
-            required property string name
-            required property string version
-            required property string description
-            required property string provider
-            required property string iconUrl
-            required property bool installed
-            required property bool busy
-            required property real progress
+                delegate: Kirigami.AbstractCard {
+                    id: delegate
 
-            showClickFeedback: true
-            onClicked: NavController.openApp(delegate.pkgId, JSON.stringify({
-                name: delegate.name,
-                summary: delegate.description,
-                iconUrl: delegate.iconUrl,
-                installed: delegate.installed
-            }))
+                    required property int index
+                    required property string pkgId
+                    required property string name
+                    required property string version
+                    required property string iconUrl
+                    required property bool installed
+                    required property bool busy
 
-            HoverHandler {
-                id: rowHover
-            }
-
-            Timer {
-                interval: 200
-                running: rowHover.hovered
-                onTriggered: DetailController.prefetch(delegate.pkgId, Math.round(Kirigami.Units.gridUnit * 14 * 16 / 9 * 2))
-            }
-
-            contentItem: ColumnLayout {
-                spacing: Kirigami.Units.largeSpacing
-
-                RowLayout {
                     Layout.fillWidth: true
-                    spacing: Kirigami.Units.largeSpacing
 
-                    AppIcon {
-                        source: delegate.iconUrl
-                        Layout.preferredWidth: Kirigami.Units.iconSizes.huge
-                        Layout.preferredHeight: Kirigami.Units.iconSizes.huge
-                        Layout.alignment: Qt.AlignTop
+                    showClickFeedback: true
+                    onClicked: NavController.openApp(delegate.pkgId, JSON.stringify({
+                        name: delegate.name,
+                        iconUrl: delegate.iconUrl,
+                        installed: delegate.installed
+                    }))
+
+                    HoverHandler {
+                        id: rowHover
                     }
 
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: Kirigami.Units.smallSpacing / 2
+                    Timer {
+                        interval: 200
+                        running: rowHover.hovered
+                        onTriggered: DetailController.prefetch(delegate.pkgId, Math.round(Kirigami.Units.gridUnit * 14 * 16 / 9 * 2))
+                    }
 
-                        RowLayout {
+                    contentItem: RowLayout {
+                        spacing: Kirigami.Units.largeSpacing
+
+                        AppIcon {
+                            source: delegate.iconUrl
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.large
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.large
+                        }
+
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: Kirigami.Units.smallSpacing
+                            spacing: Kirigami.Units.smallSpacing / 2
 
                             Kirigami.Heading {
                                 Layout.fillWidth: true
@@ -267,68 +219,29 @@ Kirigami.ScrollablePage {
                             }
 
                             Controls.Label {
+                                Layout.fillWidth: true
                                 visible: delegate.version.length > 0
                                 text: delegate.version
+                                opacity: 0.7
                                 elide: Text.ElideRight
-                                opacity: 0.6
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
                             }
                         }
 
-                        Controls.Label {
-                            id: descriptionLabel
-
-                            Layout.fillWidth: true
-                            Layout.minimumWidth: 0
-                            Layout.preferredHeight: descriptionMetrics.height * 2
-                            text: delegate.description
-                            wrapMode: Text.WordWrap
-                            elide: Text.ElideRight
-                            maximumLineCount: 2
-                            verticalAlignment: Text.AlignTop
-                            opacity: 0.7
-
-                            FontMetrics {
-                                id: descriptionMetrics
-                                font: descriptionLabel.font
-                            }
-                        }
-
-                        Row {
-                            Layout.topMargin: Kirigami.Units.smallSpacing
-                            spacing: Kirigami.Units.smallSpacing
-
-                            MetaPill {
-                                text: delegate.provider
-                            }
-
-                            MetaPill {
-                                visible: root.markInstalled && delegate.installed
-                                pillIcon: "checkmark-symbolic"
-                                text: KI18n.i18n("Installed")
-                                textColor: Kirigami.Theme.positiveTextColor
-                            }
+                        ItemButtons {
+                            Layout.alignment: Qt.AlignVCenter
+                            pkgId: delegate.pkgId
+                            name: delegate.name
+                            iconUrl: delegate.iconUrl
+                            installed: delegate.installed
+                            busy: delegate.busy
+                            mode: "install"
+                            onRemoveRequested: TransactionsModel.removePackage(delegate.pkgId, delegate.name, delegate.iconUrl)
                         }
                     }
-
-                    ItemButtons {
-                        Layout.alignment: Qt.AlignVCenter
-                        pkgId: delegate.pkgId
-                        name: delegate.name
-                        iconUrl: delegate.iconUrl
-                        installed: delegate.installed
-                        busy: delegate.busy
-                        mode: "install"
-                        onRemoveRequested: TransactionsModel.removePackage(delegate.pkgId, delegate.name, delegate.iconUrl)
-                    }
-                }
-
-                ItemProgressBar {
-                    Layout.fillWidth: true
-                    visible: delegate.busy
-                    progress: delegate.progress
                 }
             }
+
+            Item { Layout.preferredHeight: Kirigami.Units.gridUnit * 2 }
         }
     }
 }
