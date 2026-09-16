@@ -786,6 +786,9 @@ impl FlatpakProvider {
         for inst in all_installations() {
             for remote in inst.list_remotes(cancel).unwrap_or_default() {
                 let name = remote.name().map(|s| s.to_string()).unwrap_or_default();
+                if name.ends_with("-origin") && remote.is_noenumerate() {
+                    continue;
+                }
                 let url = remote.url().map(|s| s.to_string()).unwrap_or_default();
                 if seen.insert(name.clone()) {
                     let protected = Self::PROTECTED_REMOTES.contains(&name.as_str());
