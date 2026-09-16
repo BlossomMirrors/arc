@@ -35,26 +35,6 @@ Controls.ToolBar {
         onActivated: root.searchFocusRequested("")
     }
 
-    component CountBadge: Rectangle {
-        property int count: 0
-        property color accent: Kirigami.Theme.highlightColor
-
-        visible: count > 0
-        width: Math.max(height, badgeLabel.implicitWidth + 8)
-        height: badgeLabel.implicitHeight + 2
-        radius: height / 2
-        color: accent
-
-        Controls.Label {
-            id: badgeLabel
-            anchors.centerIn: parent
-            text: parent.count > 99 ? "99+" : parent.count
-            font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
-            font.bold: true
-            color: "white"
-        }
-    }
-
     contentItem: Item {
         implicitHeight: Math.max(navButtons.implicitHeight, viewTabs.implicitHeight, rightGroup.implicitHeight)
 
@@ -125,14 +105,18 @@ Controls.ToolBar {
                 icon.name: "download-symbolic"
                 onClicked: root.downloadsRequested()
 
-                CountBadge {
+                Kirigami.Badge {
                     anchors.right: parent.right
                     anchors.top: parent.top
                     anchors.margins: 2
-                    count: TransactionsModel.activeCount + TransactionsModel.updatesCount
-                    accent: TransactionsModel.activeCount > 0
-                        ? Kirigami.Theme.highlightColor
-                        : Kirigami.Theme.negativeTextColor
+                    padding: 2
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
+                    visible: (TransactionsModel.activeCount + TransactionsModel.updatesCount) > 0
+                    text: (TransactionsModel.activeCount + TransactionsModel.updatesCount) > 99
+                        ? "99+" : (TransactionsModel.activeCount + TransactionsModel.updatesCount)
+                    type: TransactionsModel.activeCount > 0
+                        ? Kirigami.Badge.Type.Information
+                        : Kirigami.Badge.Type.Error
                 }
             }
         }
