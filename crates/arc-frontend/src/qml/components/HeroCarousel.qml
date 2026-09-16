@@ -250,6 +250,12 @@ Item {
                         spacing: Kirigami.Units.smallSpacing
                         boundsBehavior: Flickable.StopAtBounds
 
+                        Controls.ScrollBar.vertical: Controls.ScrollBar {
+                            Kirigami.Theme.inherit: false
+                            Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+                            policy: Controls.ScrollBar.AsNeeded
+                        }
+
                         delegate: Item {
                             id: appRow
 
@@ -279,8 +285,8 @@ Item {
 
                             RowLayout {
                                 anchors.fill: parent
-                                anchors.leftMargin: Kirigami.Units.smallSpacing
-                                anchors.rightMargin: Kirigami.Units.smallSpacing
+                                anchors.leftMargin: Kirigami.Units.largeSpacing * 2
+                                anchors.rightMargin: Kirigami.Units.largeSpacing * 2
                                 spacing: Kirigami.Units.smallSpacing
 
                                 AppIcon {
@@ -301,8 +307,6 @@ Item {
                                         Layout.minimumWidth: 0
                                         text: appRow.modelData.name
                                         color: "white"
-                                        style: Text.Outline
-                                        styleColor: Qt.rgba(0, 0, 0, 0.6)
                                         font.bold: true
                                         maximumLineCount: 1
                                         elide: Text.ElideRight
@@ -314,8 +318,6 @@ Item {
                                         visible: appRow.modelData.summary.length > 0
                                         text: appRow.modelData.summary
                                         color: Qt.rgba(1, 1, 1, 0.85)
-                                        style: Text.Outline
-                                        styleColor: Qt.rgba(0, 0, 0, 0.6)
                                         font.pointSize: Kirigami.Theme.smallFont.pointSize
                                         maximumLineCount: 1
                                         elide: Text.ElideRight
