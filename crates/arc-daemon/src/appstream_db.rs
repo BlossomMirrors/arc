@@ -23,6 +23,26 @@ static LOAD_KICKED_OFF: AtomicBool = AtomicBool::new(false);
 static SNAPSHOT_STALE: AtomicBool = AtomicBool::new(false);
 static CURRENT_KEY: Mutex<Option<SnapshotKey>> = Mutex::new(None);
 
+#[derive(Clone, Default)]
+pub struct ForgeVerification {
+    pub verified: bool,
+    pub developer_name: Option<String>,
+}
+
+static BLOSSOMOS_VERIFICATION: OnceLock<RwLock<HashMap<String, ForgeVerification>>> = OnceLock::new();
+
+fn blossomos_verification_slot() -> &'static RwLock<HashMap<String, ForgeVerification>> {
+    BLOSSOMOS_VERIFICATION.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+pub fn set_blossomos_verification(data: HashMap<String, ForgeVerification>) {
+    *blossomos_verification_slot().write().unwrap() = data;
+}
+
+fn blossomos_verification_for(id: &str) -> Option<ForgeVerification> {
+    blossomos_verification_slot().read().unwrap().get(id).cloned()
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone)]
 struct SourceStamp {
     path: PathBuf,
@@ -315,6 +335,16 @@ impl AppStreamDb {
             .map(|(c, remote)| component_to_entry(c, remote.clone(), locales, &self.descriptions, &self.verifications))
             .collect()
     }
+
+    pub fn blossomos_app_ids(&self) -> Vec<String> {
+        self.components
+            .iter()
+            .filter(|(_, remote)| remote.as_deref() == Some("blossomos"))
+            .map(|(c, _)| canonical_component_id(c))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect()
+    }
 }
 
 // standalone lookup for a single installed app's own exported metainfo file
@@ -338,7 +368,7 @@ pub fn resolve_now(id: &str) -> Option<AppStreamEntry> {
         let path = PathBuf::from(home).join(".local/share/flatpak/appstream");
         collect_catalog_paths(&path, &mut catalogs);
     }
-    catalogs.sort_by_key(|(_, _, size)| *size);
+    catalogs.sort_by_key(|(remote_name, _, size)| (remote_name != "blossomos", *size));
 
     for (remote_name, path, _) in catalogs {
         let Some(bytes) = cached_raw_bytes(&path) else { continue };
@@ -690,6 +720,13 @@ fn attr_severity(attr: &ContentAttribute) -> u8 {
     }
 }
 
+fn canonical_component_id(c: &Component) -> String {
+    c.bundles.iter().find_map(|b| match b {
+        Bundle::Flatpak { reference, .. } => reference.split('/').nth(1).map(|s| s.to_string()),
+        _ => None,
+    }).unwrap_or_else(|| c.id.to_string())
+}
+
 fn component_to_entry(
     c: &Component,
     remote: Option<String>,
@@ -780,17 +817,27 @@ fn component_to_entry(
         }
     };
 
-    // Use the Flatpak bundle reference as the canonical app ID when available.
-    // AppStream catalogs often store a legacy ".desktop" suffix in the component ID
-    // (e.g. "io.github.flattool.Warehouse.desktop") while the actual Flatpak app ID
-    // omits it ("io.github.flattool.Warehouse"). The bundle ref is authoritative.
-    let canonical_id = c.bundles.iter().find_map(|b| match b {
-        Bundle::Flatpak { reference, .. } => reference.split('/').nth(1).map(|s| s.to_string()),
-        _ => None,
-    }).unwrap_or_else(|| c.id.to_string());
+    let canonical_id = canonical_component_id(c);
 
-    let verified = remote.as_deref() == Some("blossomos")
+    let blossomos_info = if remote.as_deref() == Some("blossomos") {
+        blossomos_verification_for(&canonical_id)
+    } else {
+        None
+    };
+
+    let verified = blossomos_info.as_ref().map(|v| v.verified).unwrap_or(false)
         || verifications.get(c.id.to_string().as_str()).copied().unwrap_or(false);
+
+    let developer_name = blossomos_info
+        .as_ref()
+        .and_then(|v| v.developer_name.clone())
+        .filter(|n| !n.is_empty())
+        .or_else(|| {
+            c.developer_name
+                .as_ref()
+                .and_then(|d| localize_ts(d, locales))
+                .map(|s| s.to_string())
+        });
 
     AppStreamEntry {
         id: canonical_id,
@@ -811,11 +858,7 @@ fn component_to_entry(
         eula_url,
         homepage_url,
         content_rating,
-        developer_name: c
-            .developer_name
-            .as_ref()
-            .and_then(|d| localize_ts(d, locales))
-            .map(|s| s.to_string()),
+        developer_name,
         verified,
         categories: c.categories.iter().map(|cat| format!("{:?}", cat).to_lowercase()).collect(),
     }
@@ -943,6 +986,36 @@ fn load_one_catalog(
     }
 }
 
+fn normalize_component_id(id: &str) -> &str {
+    id.strip_suffix(".desktop").unwrap_or(id)
+}
+
+fn dedupe_by_id_preferring_blossomos(
+    components: Vec<(Component, Option<String>)>,
+) -> Vec<(Component, Option<String>)> {
+    let mut has_blossomos: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (c, remote) in &components {
+        if remote.as_deref() == Some("blossomos") {
+            has_blossomos.insert(normalize_component_id(&c.id.to_string()).to_string());
+        }
+    }
+
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(components.len());
+    for (c, remote) in components {
+        let id = normalize_component_id(&c.id.to_string()).to_string();
+        let is_blossomos = remote.as_deref() == Some("blossomos");
+        if has_blossomos.contains(&id) && !is_blossomos {
+            continue;
+        }
+        if !seen.insert(id) {
+            continue;
+        }
+        out.push((c, remote));
+    }
+    out
+}
+
 // parses smallest catalogs first and publishes to the shared slot after each
 // one so callers see growing real results instead of nothing until the
 // (possibly huge) last remote is done
@@ -963,13 +1036,14 @@ fn load_flatpak_progressive() -> AppStreamDb {
     for (remote_name, path, _) in catalogs {
         load_one_catalog(&path, &remote_name, &mut components, &mut descriptions, &mut verifications);
         *slot().write().unwrap() = Arc::new(AppStreamDb {
-            components: components.clone(),
+            components: dedupe_by_id_preferring_blossomos(components.clone()),
             locales: locales.clone(),
             descriptions: descriptions.clone(),
             verifications: verifications.clone(),
         });
     }
 
+    let components = dedupe_by_id_preferring_blossomos(components);
     AppStreamDb { components, locales, descriptions, verifications }
 }
 
@@ -1211,5 +1285,67 @@ mod tests {
         assert_eq!(entry.name, "Foo");
         assert_eq!(entry.summary, "A test app");
         assert_eq!(entry.categories, vec!["utility".to_string()]);
+    }
+
+    #[test]
+    fn dedupe_prefers_blossomos_over_other_remotes() {
+        let mut components = parse_catalog();
+        let mut blossomos_foo = components[0].clone();
+        blossomos_foo.1 = Some("blossomos".to_string());
+        components.push(blossomos_foo);
+
+        let deduped = dedupe_by_id_preferring_blossomos(components);
+
+        assert_eq!(deduped.len(), 2, "one Foo (blossomos) and one Bar (testremote)");
+        let foo = deduped.iter().find(|(c, _)| c.id.to_string() == "org.example.Foo").unwrap();
+        assert_eq!(foo.1.as_deref(), Some("blossomos"));
+        let bar = deduped.iter().find(|(c, _)| c.id.to_string() == "org.example.Bar").unwrap();
+        assert_eq!(bar.1.as_deref(), Some("testremote"));
+    }
+
+    #[test]
+    fn component_to_entry_uses_forge_verification_for_blossomos() {
+        let components = parse_catalog();
+        let (foo, _) = &components[0];
+        let id = canonical_component_id(foo);
+
+        set_blossomos_verification(HashMap::from([(
+            id.clone(),
+            ForgeVerification { verified: true, developer_name: Some("Forge Dev".to_string()) },
+        )]));
+
+        let entry = component_to_entry(foo, Some("blossomos".to_string()), &[], &HashMap::new(), &HashMap::new());
+        assert!(entry.verified);
+        assert_eq!(entry.developer_name.as_deref(), Some("Forge Dev"));
+    }
+
+    #[test]
+    fn component_to_entry_falls_back_when_forge_has_no_entry() {
+        let components = parse_catalog();
+        let (bar, _) = &components[1];
+        let id = canonical_component_id(bar);
+
+        set_blossomos_verification(HashMap::from([(
+            "some.other.App".to_string(),
+            ForgeVerification { verified: true, developer_name: Some("Someone Else".to_string()) },
+        )]));
+
+        let entry = component_to_entry(bar, Some("blossomos".to_string()), &[], &HashMap::new(), &HashMap::new());
+        assert!(!entry.verified, "id {id} was not in the fetched map, so it should not be marked verified");
+        assert_eq!(entry.developer_name, None, "test catalog components carry no <developer_name>");
+    }
+
+    #[test]
+    fn dedupe_keeps_first_seen_when_no_blossomos_copy_exists() {
+        let mut components = parse_catalog();
+        let mut second_foo = components[0].clone();
+        second_foo.1 = Some("othermote".to_string());
+        components.push(second_foo);
+
+        let deduped = dedupe_by_id_preferring_blossomos(components);
+
+        assert_eq!(deduped.len(), 2);
+        let foo = deduped.iter().find(|(c, _)| c.id.to_string() == "org.example.Foo").unwrap();
+        assert_eq!(foo.1.as_deref(), Some("testremote"));
     }
 }

@@ -87,6 +87,48 @@ async fn ensure_fresh() {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct VerifiedResponse {
+    verified: bool,
+    developer_name: Option<String>,
+}
+
+async fn fetch_blossomos_verification(
+    client: &reqwest::Client,
+    app_ids: &[String],
+) -> HashMap<String, crate::appstream_db::ForgeVerification> {
+    use futures_util::stream::{self, StreamExt};
+
+    stream::iter(app_ids.iter().cloned())
+        .map(|id| {
+            let client = client.clone();
+            async move {
+                let url = format!("{}/api/verified/{}", FORGE_BASE, id);
+                let resp = client
+                    .get(&url)
+                    .timeout(std::time::Duration::from_secs(10))
+                    .send()
+                    .await
+                    .ok()?;
+                if !resp.status().is_success() {
+                    return None;
+                }
+                let parsed: VerifiedResponse = resp.json().await.ok()?;
+                Some((
+                    id,
+                    crate::appstream_db::ForgeVerification {
+                        verified: parsed.verified,
+                        developer_name: parsed.developer_name,
+                    },
+                ))
+            }
+        })
+        .buffer_unordered(8)
+        .filter_map(|r| async move { r })
+        .collect()
+        .await
+}
+
 async fn fetch_text(client: &reqwest::Client, url: &str) -> Option<String> {
     match client
         .get(url)
@@ -170,9 +212,9 @@ pub async fn refresh() {
     let app_ids = collect_home_app_ids(top_str, new_str, trend_str, chart_str);
 
     // Resolve metadata from AppStreamDb. Runs in a blocking thread since the
-    // db scan is CPU-bound, and returns (metadata_json, original_icon_urls)
+    // db scan is CPU-bound, and returns (metadata_json, original_icon_urls, blossomos_ids)
     let app_ids_for_db = app_ids.clone();
-    let (app_metadata_json, original_icon_urls) = spawn_blocking(move || {
+    let (app_metadata_json, original_icon_urls, blossomos_ids) = spawn_blocking(move || {
         let db = crate::appstream_db::AppStreamDb::get();
         let mut original_urls: HashMap<String, String> = HashMap::new();
         let entries: Vec<serde_json::Value> = app_ids_for_db
@@ -197,10 +239,18 @@ pub async fn refresh() {
         (
             serde_json::to_string(&entries).unwrap_or_default(),
             original_urls,
+            db.blossomos_app_ids(),
         )
     })
     .await
     .unwrap_or_default();
+
+    if !blossomos_ids.is_empty() {
+        let verification = fetch_blossomos_verification(client, &blossomos_ids).await;
+        let count = verification.len();
+        crate::appstream_db::set_blossomos_verification(verification);
+        info!("Blossomos verification refreshed ({}/{} apps)", count, blossomos_ids.len());
+    }
 
     {
         let mut w = lock().write().await;
