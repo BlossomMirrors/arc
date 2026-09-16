@@ -164,6 +164,36 @@ fn run_install_transaction(
         .map_err(|e| ArcError::TransactionFailed(e.to_string()))
 }
 
+fn run_update_transaction(
+    inst: &libflatpak::Installation,
+    full_ref: &str,
+    progress_tx: Option<&UnboundedSender<u8>>,
+    cancel: Option<&libflatpak::gio::Cancellable>,
+) -> Result<(), ArcError> {
+    let attempt = |disable_static_deltas: bool| -> Result<(), ArcError> {
+        let tx = libflatpak::Transaction::for_installation(inst, cancel)
+            .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+        tx.set_no_interaction(true);
+        tx.set_disable_static_deltas(disable_static_deltas);
+        tx.add_update(full_ref, &[], None)
+            .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
+        if let Some(sender) = progress_tx {
+            let sender = sender.clone();
+            tx.connect_new_operation(move |_, _op, progress| {
+                progress.set_update_frequency(1500);
+                let sender = sender.clone();
+                progress.connect_changed(move |p| {
+                    let _ = sender.send(p.progress().clamp(0, 100) as u8);
+                });
+            });
+        }
+        tx.run(cancel)
+            .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))
+    };
+
+    attempt(false).or_else(|_| attempt(true))
+}
+
 fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
     let id = r.name().map(|s| s.to_string()).unwrap_or_default();
     let is_runtime = r.kind() == libflatpak::RefKind::Runtime;
@@ -743,12 +773,24 @@ impl FlatpakProvider {
             // Runtime refs live in the system installation and need flatpak-system-helper
             // for privilege elevation. Delegate to subprocess so polkit handles it.
             if full_ref.starts_with("runtime/") {
-                let _ = progress_tx.send(Progress::pct(10));
-                let status = std::process::Command::new("flatpak")
+                let _ = progress_tx.send(10);
+                let mut status = std::process::Command::new("flatpak")
                     .args(["update", "-y", "--noninteractive", &full_ref])
                     .status()
                     .map_err(|e| ArcError::TransactionFailed(e.to_string()))?;
-                let _ = progress_tx.send(Progress::pct(100));
+                if !status.success() {
+                    status = std::process::Command::new("flatpak")
+                        .args([
+                            "update",
+                            "-y",
+                            "--noninteractive",
+                            "--no-static-deltas",
+                            &full_ref,
+                        ])
+                        .status()
+                        .map_err(|e| ArcError::TransactionFailed(e.to_string()))?;
+                }
+                let _ = progress_tx.send(100);
                 return if status.success() {
                     Ok(())
                 } else {
@@ -759,25 +801,7 @@ impl FlatpakProvider {
                 };
             }
 
-            let tx = libflatpak::Transaction::for_installation(&inst, cancel)
-                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
-            tx.set_no_interaction(true);
-            tx.add_update(&full_ref, &[], None)
-                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
-            tx.connect_new_operation(move |_, op, progress| {
-                progress.set_update_frequency(500);
-                let total = op.download_size();
-                let sender = progress_tx.clone();
-                progress.connect_changed(move |p| {
-                    let _ = sender.send(Progress {
-                        percent: p.progress().clamp(0, 100) as u8,
-                        bytes_done: p.bytes_transferred(),
-                        bytes_total: total,
-                    });
-                });
-            });
-            tx.run(cancel)
-                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))
+            run_update_transaction(&inst, &full_ref, Some(&progress_tx), cancel)
         })
         .await
         .map_err(|e| ArcError::TransactionFailed(e.to_string()))?
@@ -792,6 +816,9 @@ impl FlatpakProvider {
         for inst in all_installations() {
             for remote in inst.list_remotes(cancel).unwrap_or_default() {
                 let name = remote.name().map(|s| s.to_string()).unwrap_or_default();
+                if name.ends_with("-origin") && remote.is_noenumerate() {
+                    continue;
+                }
                 let url = remote.url().map(|s| s.to_string()).unwrap_or_default();
                 if seen.insert(name.clone()) {
                     let protected = Self::PROTECTED_REMOTES.contains(&name.as_str());
@@ -942,7 +969,6 @@ impl PackageProvider for FlatpakProvider {
     async fn search(&self, query: &str) -> Result<Vec<Package>, ArcError> {
         let query = query.to_string();
         spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
-
             Ok(AppStreamDb::try_get()
                 .search_apps(&query)
                 .into_iter()
@@ -1172,14 +1198,9 @@ impl PackageProvider for FlatpakProvider {
             let (inst, installed) = installation_with_updatable_ref(&package_id)?;
             let full_ref = installed
                 .format_ref()
-                .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?;
-            let tx = libflatpak::Transaction::for_installation(&inst, cancel)
-                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
-            tx.set_no_interaction(true);
-            tx.add_update(&full_ref, &[], None)
-                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))?;
-            tx.run(cancel)
-                .map_err(|e: glib::Error| ArcError::TransactionFailed(e.to_string()))
+                .ok_or_else(|| ArcError::TransactionFailed("could not format ref".into()))?
+                .to_string();
+            run_update_transaction(&inst, &full_ref, None, cancel)
         })
         .await
         .map_err(|e| ArcError::TransactionFailed(e.to_string()))?
