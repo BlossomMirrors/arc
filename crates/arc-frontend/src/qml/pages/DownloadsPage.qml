@@ -273,11 +273,38 @@ Kirigami.ScrollablePage {
                 }
 
                 Controls.Button {
+                    id: updateAllButton
+
                     visible: updatesRepeater.count > 0
-                    icon.name: "update-none-symbolic"
-                    text: KI18n.i18n("Update All")
+                    enabled: !TransactionsModel.updatingAll
                     highlighted: true
+                    leftPadding: Kirigami.Units.largeSpacing
+                    rightPadding: Kirigami.Units.largeSpacing
                     onClicked: TransactionsModel.updateAll()
+
+                    contentItem: RowLayout {
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Controls.BusyIndicator {
+                            visible: TransactionsModel.updatingAll
+                            running: visible
+                            implicitWidth: Kirigami.Units.iconSizes.small
+                            implicitHeight: Kirigami.Units.iconSizes.small
+                        }
+
+                        Kirigami.Icon {
+                            visible: !TransactionsModel.updatingAll
+                            source: "update-none-symbolic"
+                            implicitWidth: Kirigami.Units.iconSizes.small
+                            implicitHeight: Kirigami.Units.iconSizes.small
+                            color: updateAllButton.palette.buttonText
+                        }
+
+                        Controls.Label {
+                            text: TransactionsModel.updatingAll ? KI18n.i18n("Updating") : KI18n.i18n("Update All")
+                            color: updateAllButton.palette.buttonText
+                        }
+                    }
                 }
             }
 

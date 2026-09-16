@@ -29,7 +29,12 @@ Item {
         readonly property real blockPhase: (root.phase + offset) % 1
         readonly property real bobT: (blockPhase * 12) % 1
         property color highlightColor
-        property color darkColor
+        property real shadowAlpha: 0.5
+        readonly property color shadowColor: Qt.rgba(
+            Kirigami.Theme.backgroundColor.r,
+            Kirigami.Theme.backgroundColor.g,
+            Kirigami.Theme.backgroundColor.b,
+            block.shadowAlpha)
 
         width: 56
         height: 56
@@ -41,7 +46,7 @@ Item {
 
         gradient: Gradient {
             GradientStop { position: 0.0; color: block.highlightColor }
-            GradientStop { position: 1.0; color: block.darkColor }
+            GradientStop { position: 1.0; color: block.shadowColor }
         }
 
         Rectangle {
@@ -57,27 +62,27 @@ Item {
     RollingBlock {
         offset: 0
         highlightColor: Qt.lighter(Kirigami.Theme.highlightColor, 1.35)
-        darkColor: Qt.darker(Kirigami.Theme.highlightColor, 1.7)
+        shadowAlpha: 0.3
     }
     RollingBlock {
         offset: 0.2
         highlightColor: Qt.lighter(Kirigami.Theme.highlightColor, 1.25)
-        darkColor: Qt.darker(Kirigami.Theme.highlightColor, 2.0)
+        shadowAlpha: 0.42
     }
     RollingBlock {
         offset: 0.4
         highlightColor: Qt.lighter(Kirigami.Theme.highlightColor, 1.15)
-        darkColor: Qt.darker(Kirigami.Theme.highlightColor, 2.4)
+        shadowAlpha: 0.54
     }
     RollingBlock {
         offset: 0.6
         highlightColor: Qt.lighter(Kirigami.Theme.highlightColor, 1.05)
-        darkColor: Qt.darker(Kirigami.Theme.highlightColor, 2.9)
+        shadowAlpha: 0.66
     }
     RollingBlock {
         offset: 0.8
         highlightColor: Kirigami.Theme.highlightColor
-        darkColor: Qt.darker(Kirigami.Theme.highlightColor, 3.6)
+        shadowAlpha: 0.78
     }
 
     Rectangle {

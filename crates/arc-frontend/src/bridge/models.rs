@@ -176,6 +176,7 @@ pub mod qobject {
         // pkgId to progress 0..1 for every pending or running transaction
         #[qproperty(QString, busy_packages_json, cxx_name = "busyPackagesJson")]
         #[qproperty(bool, history_loaded, cxx_name = "historyLoaded")]
+        #[qproperty(bool, updating_all, cxx_name = "updatingAll")]
         type TransactionsModel = super::TransactionsModelRust;
 
         #[qinvokable]
@@ -1143,6 +1144,7 @@ pub struct TransactionsModelRust {
     done_count: i32,
     busy_packages_json: QString,
     history_loaded: bool,
+    updating_all: bool,
 }
 
 static QT_THREAD: OnceLock<CxxQtThread<qobject::TransactionsModel>> = OnceLock::new();
@@ -1278,17 +1280,22 @@ impl qobject::TransactionsModel {
         });
     }
 
-    pub fn update_all(self: Pin<&mut Self>) {
+    pub fn update_all(mut self: Pin<&mut Self>) {
+        self.as_mut().set_updating_all(true);
         runtime::spawn(async move {
-            let Some(proxy) = runtime::proxy().await else {
-                return;
-            };
-            let Ok(updates) = proxy.updates_packages().await else {
-                return;
-            };
             let Some(qt_thread) = QT_THREAD.get() else {
                 return;
             };
+
+            let Some(proxy) = runtime::proxy().await else {
+                let _ = qt_thread.queue(|mut model| model.as_mut().set_updating_all(false));
+                return;
+            };
+            let Ok(updates) = proxy.updates_packages().await else {
+                let _ = qt_thread.queue(|mut model| model.as_mut().set_updating_all(false));
+                return;
+            };
+
             let _ = qt_thread.queue(move |mut model| {
                 for pkg in updates {
                     let icon = crate::services::icons::resolve(&pkg.id, pkg.icon_url.as_deref());
@@ -1296,6 +1303,7 @@ impl qobject::TransactionsModel {
                         .as_mut()
                         .start_transaction(pkg.id, pkg.name, icon, "update");
                 }
+                model.as_mut().set_updating_all(false);
             });
         });
     }
