@@ -11,9 +11,11 @@ Item {
     property Component delegate
     property real cardWidth: Kirigami.Units.gridUnit * 10
     property real spacing: Kirigami.Units.largeSpacing * 2
+    property real topMargin: Kirigami.Units.smallSpacing
+    property real bottomMargin: Kirigami.Units.smallSpacing
     readonly property int count: repeater.count
 
-    implicitHeight: row.implicitHeight
+    implicitHeight: row.implicitHeight + root.topMargin + root.bottomMargin
 
     HoverHandler {
         id: hover
@@ -22,6 +24,8 @@ Item {
     Flickable {
         id: flick
         anchors.fill: parent
+        anchors.topMargin: root.topMargin * 2
+        anchors.bottomMargin: root.bottomMargin * 2
         clip: true
         contentWidth: row.implicitWidth
         contentHeight: height
@@ -84,7 +88,7 @@ Item {
         visible: hover.hovered && flick.contentX > 0
         anchors.left: parent.left
         anchors.leftMargin: Kirigami.Units.smallSpacing
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenter: flick.verticalCenter
         icon.name: "go-previous-symbolic"
         onClicked: root.stepBy(-root.width * 0.8)
     }
@@ -93,7 +97,7 @@ Item {
         visible: hover.hovered && flick.contentX < flick.contentWidth - flick.width - 1
         anchors.right: parent.right
         anchors.rightMargin: Kirigami.Units.smallSpacing
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenter: flick.verticalCenter
         icon.name: "go-next-symbolic"
         onClicked: root.stepBy(root.width * 0.8)
     }
