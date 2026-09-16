@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "arc"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -140,7 +140,7 @@ dependencies = [
 
 [[package]]
 name = "arc-daemon"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anvil-appimage",
  "anyhow",
@@ -178,11 +178,11 @@ dependencies = [
 
 [[package]]
 name = "arc-dev"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "arc-frontend"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "cxx",
@@ -2028,7 +2028,7 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libarc"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "dirs",
