@@ -24,7 +24,11 @@ Kirigami.ScrollablePage {
         } else {
             DetailController.load(newPkgId);
         }
+        LeftoverDataController.check();
     }
+
+    readonly property var leftoverEntries: JSON.parse(LeftoverDataController.leftoverJson || "[]")
+    readonly property var leftoverEntryForThisApp: root.leftoverEntries.find(e => e.id === DetailController.id) ?? null
 
     readonly property var extensions: JSON.parse(DetailController.extensionsJson.length > 0 ? DetailController.extensionsJson : "[]")
 
@@ -102,6 +106,23 @@ Kirigami.ScrollablePage {
 
                 onRemoveClicked: TransactionsModel.removePackage(DetailController.id, DetailController.name, DetailController.iconUrl)
                 onAddonsClicked: extensionsSheet.open()
+            }
+
+            Kirigami.InlineMessage {
+                Layout.fillWidth: true
+                visible: root.leftoverEntryForThisApp !== null
+                type: Kirigami.MessageType.Information
+                text: KI18n.i18n("This app left data behind on your system.")
+                showCloseButton: false
+
+                actions: [
+                    Kirigami.Action {
+                        text: KI18n.i18n("Delete Data")
+                        icon.name: "delete"
+                        enabled: !LeftoverDataController.busy
+                        onTriggered: LeftoverDataController.cleanupOne(DetailController.id)
+                    }
+                ]
             }
 
             ItemProgressBar {

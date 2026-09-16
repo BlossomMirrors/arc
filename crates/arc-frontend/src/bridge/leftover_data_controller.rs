@@ -9,7 +9,6 @@ pub mod qobject {
         #[qobject]
         #[qml_element]
         #[qml_singleton]
-        #[qproperty(bool, has_data, cxx_name = "hasData")]
         #[qproperty(bool, busy)]
         #[qproperty(QString, leftover_json, cxx_name = "leftoverJson")]
         type LeftoverDataController = super::LeftoverDataControllerRust;
@@ -18,10 +17,8 @@ pub mod qobject {
         fn check(self: Pin<&mut LeftoverDataController>);
 
         #[qinvokable]
-        fn cleanup(self: Pin<&mut LeftoverDataController>);
-
-        #[qinvokable]
-        fn dismiss(self: Pin<&mut LeftoverDataController>);
+        #[cxx_name = "cleanupOne"]
+        fn cleanup_one(self: Pin<&mut LeftoverDataController>, id: QString);
     }
 
     impl cxx_qt::Threading for LeftoverDataController {}
@@ -33,7 +30,6 @@ use cxx_qt_lib::QString;
 use std::pin::Pin;
 
 pub struct LeftoverDataControllerRust {
-    has_data: bool,
     busy: bool,
     leftover_json: QString,
 }
@@ -41,7 +37,6 @@ pub struct LeftoverDataControllerRust {
 impl Default for LeftoverDataControllerRust {
     fn default() -> Self {
         Self {
-            has_data: false,
             busy: false,
             leftover_json: QString::from("[]"),
         }
@@ -58,47 +53,34 @@ impl qobject::LeftoverDataController {
             let Ok(json) = proxy.list_leftover_data().await else {
                 return;
             };
-            let has_data = serde_json::from_str::<Vec<serde_json::Value>>(&json)
-                .map(|v| !v.is_empty())
-                .unwrap_or(false);
 
             let _ = qt_thread.queue(move |mut this| {
                 this.as_mut().set_leftover_json(QString::from(&json));
-                this.as_mut().set_has_data(has_data);
             });
         });
     }
 
-    pub fn cleanup(mut self: Pin<&mut Self>) {
-        #[derive(serde::Deserialize)]
-        struct Entry {
-            id: String,
-        }
+    pub fn cleanup_one(mut self: Pin<&mut Self>, id: QString) {
+        let id = id.to_string();
 
-        let ids: Vec<String> = serde_json::from_str::<Vec<Entry>>(&self.leftover_json.to_string())
-            .unwrap_or_default()
-            .into_iter()
-            .map(|e| e.id)
-            .collect();
-        if ids.is_empty() {
-            return;
-        }
+        let remaining: Vec<serde_json::Value> =
+            serde_json::from_str::<Vec<serde_json::Value>>(&self.leftover_json.to_string())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|e| e.get("id").and_then(|v| v.as_str()) != Some(id.as_str()))
+                .collect();
+        let remaining_json = serde_json::to_string(&remaining).unwrap_or_else(|_| "[]".to_string());
 
         self.as_mut().set_busy(true);
         let qt_thread = self.qt_thread();
         runtime::spawn(async move {
             if let Some(proxy) = runtime::proxy().await {
-                let _ = proxy.delete_leftover_data(ids).await;
+                let _ = proxy.delete_leftover_data(vec![id]).await;
             }
             let _ = qt_thread.queue(move |mut this| {
                 this.as_mut().set_busy(false);
-                this.as_mut().set_has_data(false);
-                this.as_mut().set_leftover_json(QString::from("[]"));
+                this.as_mut().set_leftover_json(QString::from(&remaining_json));
             });
         });
-    }
-
-    pub fn dismiss(mut self: Pin<&mut Self>) {
-        self.as_mut().set_has_data(false);
     }
 }

@@ -339,3 +339,12 @@ msgstr "Prüfe deine Verbindung. Es wird automatisch erneut versucht."
 
 msgid "Try again"
 msgstr "Erneut versuchen"
+
+msgid "Also delete app data"
+msgstr "Auch App-Daten löschen"
+
+msgid "This app left data behind on your system."
+msgstr "Diese App hat Daten auf deinem System hinterlassen."
+
+msgid "Delete Data"
+msgstr "Daten löschen"

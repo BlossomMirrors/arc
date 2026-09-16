@@ -26,10 +26,7 @@ Kirigami.ScrollablePage {
         value: 0
     }
 
-    Component.onCompleted: {
-        HomeFeedModel.load();
-        LeftoverDataController.check();
-    }
+    Component.onCompleted: HomeFeedModel.load()
 
     readonly property bool feedEmpty: !HomeFeedModel.loading && sectionsRepeater.count === 0
 
@@ -76,9 +73,9 @@ Kirigami.ScrollablePage {
         explanation: KI18n.i18n("Check your connection. This retries on its own.")
 
         helpfulAction: Kirigami.Action {
-            icon.name: "view-refresh-symbolic"
-            text: KI18n.i18n("Try again")
-            onTriggered: HomeFeedModel.reload()
+            icon.name: "drive-harddisk-symbolic"
+            text: KI18n.i18n("View Installed Apps")
+            onTriggered: NavController.navigate(JSON.stringify([{ kind: "installed" }]))
         }
     }
 
@@ -90,30 +87,6 @@ Kirigami.ScrollablePage {
 
         Item {
             Layout.preferredHeight: badgeBar.height
-        }
-
-        Kirigami.InlineMessage {
-            Layout.fillWidth: true
-            Layout.leftMargin: root.sideInset
-            Layout.rightMargin: root.sideInset
-            Layout.topMargin: Kirigami.Units.largeSpacing
-            visible: LeftoverDataController.hasData
-            type: Kirigami.MessageType.Information
-            text: KI18n.i18n("Some removed apps left data behind on your system.")
-            showCloseButton: false
-
-            actions: [
-                Kirigami.Action {
-                    text: KI18n.i18n("Delete Data")
-                    icon.name: "delete"
-                    enabled: !LeftoverDataController.busy
-                    onTriggered: LeftoverDataController.cleanup()
-                },
-                Kirigami.Action {
-                    text: KI18n.i18n("Dismiss")
-                    onTriggered: LeftoverDataController.dismiss()
-                }
-            ]
         }
 
         ColumnLayout {

@@ -62,9 +62,7 @@ Kirigami.ApplicationWindow {
             // so only the active tab may trigger a load or their requests race
             // and clobber each other's results.
             onCurrentIndexChanged: {
-                if (currentIndex === root.tabIndex.home) {
-                    LeftoverDataController.check();
-                } else if (currentIndex === root.tabIndex.installed) {
+                if (currentIndex === root.tabIndex.installed) {
                     installedPageItem.load();
                 } else if (currentIndex === root.tabIndex.downloads) {
                     downloadsPageItem.load();
