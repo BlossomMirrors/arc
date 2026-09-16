@@ -113,6 +113,7 @@ Item {
         ColumnLayout {
             id: leftColumn
             Layout.fillWidth: true
+            Layout.preferredWidth: 0
             Layout.alignment: Qt.AlignTop
             spacing: Kirigami.Units.smallSpacing
 
@@ -125,6 +126,7 @@ Item {
         ColumnLayout {
             id: rightColumn
             Layout.fillWidth: true
+            Layout.preferredWidth: 0
             Layout.alignment: Qt.AlignTop
             spacing: Kirigami.Units.smallSpacing
 
