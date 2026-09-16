@@ -611,7 +611,19 @@ impl qobject::PackageListModel {
                 let proxy = runtime::proxy()
                     .await
                     .ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
-                proxy.search_category_packages(&category).await
+                let mut packages = proxy.search_category_packages(&category).await?;
+
+                if let Some(slug) = crate::services::forge::category_list_slug(&category) {
+                    if let Some(list) = crate::services::forge::fetch_list(slug).await {
+                        let priority: Vec<String> =
+                            list.apps.into_iter().map(|a| a.app_ref).collect();
+                        packages.sort_by_key(|pkg| {
+                            priority.iter().position(|id| id == &pkg.id).unwrap_or(usize::MAX)
+                        });
+                    }
+                }
+
+                Ok(packages)
             },
             "search category",
         );

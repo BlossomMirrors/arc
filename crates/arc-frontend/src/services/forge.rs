@@ -48,6 +48,17 @@ pub fn list_def(slug: &str) -> Option<&'static ListDef> {
     LISTS.iter().find(|l| l.slug == slug)
 }
 
+pub fn category_list_slug(category_id: &str) -> Option<&'static str> {
+    match category_id {
+        "Office" => Some("office"),
+        "Development" => Some("code"),
+        "Graphics" => Some("creative"),
+        "AudioVideo" => Some("music"),
+        "Network" => Some("browser"),
+        _ => None,
+    }
+}
+
 #[derive(serde::Deserialize, Clone)]
 pub struct ForgeListApp {
     #[serde(rename = "ref")]
