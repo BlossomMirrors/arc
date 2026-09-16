@@ -23,6 +23,7 @@ RowLayout {
     property bool fillWidth: false
     property bool flat: false
     property color textColor: Kirigami.Theme.textColor
+    property color backgroundColor: "transparent"
 
     signal removeRequested()
 
@@ -39,6 +40,19 @@ RowLayout {
 
     spacing: Kirigami.Units.smallSpacing
 
+    component TintBackground: Rectangle {
+        required property bool hovered
+        anchors.fill: parent
+        z: -1
+        visible: root.backgroundColor.a > 0
+        radius: Kirigami.Units.cornerRadius
+        color: Qt.alpha(root.backgroundColor, Math.min(1, root.backgroundColor.a * (hovered ? 1.6 : 1)))
+
+        Behavior on color {
+            ColorAnimation { duration: Kirigami.Units.shortDuration }
+        }
+    }
+
     Loader {
         Layout.fillWidth: root.fillWidth
         active: root.busy
@@ -46,6 +60,7 @@ RowLayout {
         sourceComponent: Controls.Button {
             flat: root.flat
             Kirigami.Theme.textColor: root.textColor
+            TintBackground { hovered: parent.hovered }
             icon.color: root.textColor
             text: KI18n.i18n("Cancel")
             onClicked: TransactionsModel.cancelForPackage(root.pkgId)
@@ -58,6 +73,7 @@ RowLayout {
         sourceComponent: Controls.Button {
             flat: root.flat
             Kirigami.Theme.textColor: root.textColor
+            TintBackground { hovered: parent.hovered }
             icon.name: "delete"
             icon.color: root.textColor
             display: Controls.Button.IconOnly
@@ -77,6 +93,7 @@ RowLayout {
             flat: root.flat
             highlighted: !root.flat
             Kirigami.Theme.textColor: root.textColor
+            TintBackground { hovered: parent.hovered }
             icon.color: root.textColor
             text: KI18n.i18n("Start")
             onClicked: TransactionsModel.launch(root.pkgId)
@@ -91,6 +108,7 @@ RowLayout {
             flat: root.flat
             highlighted: !root.flat
             Kirigami.Theme.textColor: root.textColor
+            TintBackground { hovered: parent.hovered }
             icon.color: root.textColor
             text: root.showUpdate ? KI18n.i18n("Update") : KI18n.i18n("Install")
             onClicked: root.triggerInstall()

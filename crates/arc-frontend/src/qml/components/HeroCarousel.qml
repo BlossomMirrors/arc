@@ -376,6 +376,7 @@ Item {
                                     allowRemove: false
                                     flat: true
                                     textColor: slide.fgColor
+                                    backgroundColor: Qt.rgba(1, 1, 1, 0.12)
                                 }
                             }
                         }
