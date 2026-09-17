@@ -8,7 +8,7 @@ name = "arc"
 path = "src/main.rs"
 
 [dependencies]
-libarc = { path = "../libarc" }
+libarc = { path = "../libarc", package = "blossom-libarc" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 zbus = { version = "5", features = ["tokio"] }

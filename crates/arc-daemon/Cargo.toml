@@ -12,7 +12,7 @@ name = "arc-daemon"
 path = "src/main.rs"
 
 [dependencies]
-libarc = { path = "../libarc" }
+libarc = { path = "../libarc", package = "blossom-libarc" }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 zbus = { version = "5", features = ["tokio"] }

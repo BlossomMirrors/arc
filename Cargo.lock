@@ -127,11 +127,11 @@ name = "arc"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "blossom-libarc",
  "clap",
  "clap_complete",
  "colored 2.2.0",
  "futures-util",
- "libarc",
  "serde",
  "serde_json",
  "tokio",
@@ -147,12 +147,12 @@ dependencies = [
  "appstream",
  "async-trait",
  "axum",
+ "blossom-libarc",
  "flate2",
  "futures-util",
  "image",
  "include-po",
  "krateio",
- "libarc",
  "libc",
  "libflatpak",
  "notify",
@@ -185,13 +185,13 @@ name = "arc-frontend"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "blossom-libarc",
  "cxx",
  "cxx-qt",
  "cxx-qt-build",
  "cxx-qt-lib",
  "cxx-qt-lib-extras",
  "futures-util",
- "libarc",
  "reqwest",
  "rust-ini",
  "serde",
@@ -439,6 +439,25 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "piper",
+]
+
+[[package]]
+name = "blossom-libarc"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "image",
+ "reqwest",
+ "resvg 0.48.1",
+ "rust-ini",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "uuid",
+ "zbus",
 ]
 
 [[package]]
@@ -2025,25 +2044,6 @@ name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
-
-[[package]]
-name = "libarc"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "dirs",
- "image",
- "reqwest",
- "resvg 0.48.1",
- "rust-ini",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "toml 0.8.23",
- "uuid",
- "zbus",
-]
 
 [[package]]
 name = "libc"

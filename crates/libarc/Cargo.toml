@@ -1,11 +1,14 @@
 [package]
-name = "libarc"
+name = "blossom-libarc"
 version = "0.3.0"
 edition = "2021"
 description = "Client library for the Arc Store D-Bus daemon, managing Flatpak and native packages on Linux"
 license = "AGPL-3.0-or-later"
 repository = "https://dev.blossomos.org/blossom/arc-store/arc"
 readme = "../../README.md"
+
+[lib]
+name = "libarc"
 
 [dependencies]
 zbus = { version = "5", features = ["tokio"] }
