@@ -17,6 +17,14 @@ target/release/arc completions bash > completions/arc.bash
 target/release/arc completions zsh  > completions/_arc
 target/release/arc completions fish > completions/arc.fish
 
+echo "Compiling frontend translations..."
+rm -rf locale
+for PO in crates/arc-frontend/locales/*.po; do
+    LANG_CODE=$(basename "$PO" .po)
+    mkdir -p locale/$LANG_CODE/LC_MESSAGES
+    msgfmt -o locale/$LANG_CODE/LC_MESSAGES/arc-frontend.mo "$PO"
+done
+
 rm -rf $BUILDROOT
 mkdir -p $SPECS_DIR $SOURCES_DIR
 
@@ -47,7 +55,8 @@ tar -czf $SOURCES_DIR/$PACKAGE_NAME-$VERSION.tar.gz \
     LICENSE \
     completions/arc.bash \
     completions/_arc \
-    completions/arc.fish
+    completions/arc.fish \
+    locale
 
 SPECFILE=$SPECS_DIR/$PACKAGE_NAME.spec
 
@@ -95,6 +104,10 @@ install -Dm 644 LICENSE                       %{buildroot}/usr/share/licenses/$P
 install -Dm 644 completions/arc.bash          %{buildroot}/usr/share/bash-completion/completions/arc
 install -Dm 644 completions/_arc              %{buildroot}/usr/share/zsh/site-functions/_arc
 install -Dm 644 completions/arc.fish          %{buildroot}/usr/share/fish/vendor_completions.d/arc.fish
+mkdir -p %{buildroot}/usr/share/locale
+cp -r locale/* %{buildroot}/usr/share/locale/
+
+%find_lang arc-frontend
 
 %post
 update-mime-database /usr/share/mime &>/dev/null || :
@@ -131,7 +144,7 @@ for MIMEAPPS in /usr/share/applications/mimeapps.list /etc/xdg/mimeapps.list; do
         "\$MIMEAPPS" 2>/dev/null || :
 done
 
-%files
+%files -f arc-frontend.lang
 /usr/bin/arc-frontend
 /usr/bin/arc-daemon
 /usr/bin/arc
