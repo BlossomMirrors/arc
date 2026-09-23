@@ -25,3 +25,13 @@ msgstr "Gói phần mềm"
 
 msgid "Cancelled"
 msgstr "Đã huỷ"
+
+msgid "{} compatibility layer"
+msgstr ""
+
+msgid "System packages of the {} container"
+msgstr ""
+
+msgid "{} package can be updated"
+msgid_plural "{} packages can be updated"
+msgstr[0] ""

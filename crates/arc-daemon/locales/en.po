@@ -24,3 +24,14 @@ msgstr "Package"
 
 msgid "Cancelled"
 msgstr "Cancelled"
+
+msgid "{} compatibility layer"
+msgstr "{} compatibility layer"
+
+msgid "System packages of the {} container"
+msgstr "System packages of the {} container"
+
+msgid "{} package can be updated"
+msgid_plural "{} packages can be updated"
+msgstr[0] "{} package can be updated"
+msgstr[1] "{} packages can be updated"

@@ -2,12 +2,15 @@ use super::{PackageProvider, Progress};
 use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::spawn;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tr::tr;
+use tracing::{info, warn};
 use uuid::Uuid;
 extern crate libc;
 
@@ -16,8 +19,11 @@ const CONTAINER_RPM: &str = "arc-fedora";
 const CONTAINER_ARCH: &str = "arc-arch";
 
 const IMAGE_DEB: &str = "quay.io/toolbx-images/debian-toolbox:13";
-const IMAGE_RPM: &str = "registry.fedoraproject.org/fedora-toolbox:44";
+const IMAGE_RPM: &str = "registry.fedoraproject.org/fedora:44";
 const IMAGE_ARCH: &str = "docker.io/archlinux:latest";
+
+const SYSTEM_PKG: &str = "@system";
+const UPDATES_CACHE_TTL: Duration = Duration::from_secs(900);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PkgType {
@@ -42,6 +48,60 @@ impl PkgType {
             "pacman" => Some(PkgType::Pacman),
             _ => None,
         }
+    }
+
+    const ALL: [PkgType; 3] = [PkgType::Deb, PkgType::Rpm, PkgType::Pacman];
+
+    fn container(self) -> &'static str {
+        match self {
+            PkgType::Deb => CONTAINER_DEB,
+            PkgType::Rpm => CONTAINER_RPM,
+            PkgType::Pacman => CONTAINER_ARCH,
+        }
+    }
+
+    fn distro(self) -> &'static str {
+        match self {
+            PkgType::Deb => "Debian",
+            PkgType::Rpm => "Fedora",
+            PkgType::Pacman => "Arch",
+        }
+    }
+}
+
+fn system_package_id(pkg_type: PkgType) -> String {
+    format!("distrobox:{}:{}:{}", pkg_type.container(), SYSTEM_PKG, pkg_type.as_str())
+}
+
+// "distrobox:CONTAINER:@system:PKG_TYPE" is the container's package type
+fn parse_system_package_id(package_id: &str) -> Option<PkgType> {
+    let parts: Vec<&str> = package_id.splitn(4, ':').collect();
+    if parts.len() != 4 || parts[0] != "distrobox" || parts[2] != SYSTEM_PKG {
+        return None;
+    }
+    PkgType::from_str(parts[3]).filter(|t| t.container() == parts[1])
+}
+
+fn system_package(pkg_type: PkgType, pending: Option<usize>) -> Package {
+    let description = match pending {
+        Some(n) => tr!("{} package can be updated" | "{} packages can be updated" % n),
+        None => tr!("System packages of the {} container", pkg_type.container()),
+    };
+    Package {
+        id: system_package_id(pkg_type),
+        name: tr!("{} compatibility layer", pkg_type.distro()),
+        version: String::new(),
+        description,
+        provider: Provider::Distrobox,
+        installed: true,
+        icon_url: None,
+        remote: None,
+        screenshots: vec![],
+        developer_name: None,
+        homepage_url: None,
+        content_rating: None,
+        is_runtime: false,
+        categories: vec![],
     }
 }
 
@@ -101,6 +161,7 @@ fn strip_version_suffix(s: &str) -> String {
 pub struct DistroboxProvider {
     packages_dir: PathBuf,
     home: String,
+    updates_cache: Mutex<Option<(Instant, Vec<Package>)>>,
 }
 
 impl DistroboxProvider {
@@ -108,7 +169,11 @@ impl DistroboxProvider {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
         let data_dir = PathBuf::from(&home).join(".local/share/arc");
         let packages_dir = data_dir.join("packages");
-        Self { packages_dir, home }
+        Self {
+            packages_dir,
+            home,
+            updates_cache: Mutex::new(None),
+        }
     }
 
     fn info_file(&self, container: &str, pkg_name: &str) -> PathBuf {
@@ -395,6 +460,119 @@ impl DistroboxProvider {
     pub async fn fetch_all(&self) -> Result<Vec<Package>, ArcError> {
         self.read_installed().await
     }
+
+    async fn run_helper(
+        &self,
+        container: &str,
+        script: &str,
+        args: &[&str],
+        cancel_token: &CancellationToken,
+    ) -> Result<(std::process::ExitStatus, String), ArcError> {
+        let work_dir =
+            PathBuf::from(&self.home).join(format!(".arc-distrobox-{}", Uuid::new_v4().simple()));
+        fs::create_dir_all(&work_dir)
+            .await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+
+        let helper_path = work_dir.join("helper.sh");
+        let output_path = work_dir.join("output.log");
+        fs::write(&helper_path, script)
+            .await
+            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
+        Command::new("chmod")
+            .args(["+x", helper_path.to_str().unwrap()])
+            .status()
+            .await
+            .ok();
+
+        let mut cmd_args = vec![
+            "enter",
+            container,
+            "--",
+            helper_path.to_str().unwrap(),
+            output_path.to_str().unwrap(),
+        ];
+        cmd_args.extend_from_slice(args);
+        let status = run_cancellable(Command::new("distrobox").args(&cmd_args), cancel_token).await;
+
+        let output = fs::read_to_string(&output_path).await.unwrap_or_default();
+        let _ = fs::remove_dir_all(&work_dir).await;
+        Ok((status?, output))
+    }
+
+    async fn count_system_updates(&self, pkg_type: PkgType) -> Result<usize, ArcError> {
+        let (status, output) = self
+            .run_helper(
+                pkg_type.container(),
+                CHECK_UPDATES_HELPER,
+                &[pkg_type.as_str()],
+                &CancellationToken::new(),
+            )
+            .await?;
+        if !status.success() {
+            return Err(ArcError::ProviderError(format!(
+                "Update check in {} failed",
+                pkg_type.container()
+            )));
+        }
+        output
+            .lines()
+            .find_map(|l| l.strip_prefix("updates:"))
+            .and_then(|n| n.trim().parse().ok())
+            .ok_or_else(|| {
+                ArcError::ProviderError(format!(
+                    "Update check in {} returned no result",
+                    pkg_type.container()
+                ))
+            })
+    }
+
+    async fn check_system_updates(&self) -> Vec<Package> {
+        let live_containers = self.existing_containers().await;
+        let checks = PkgType::ALL
+            .into_iter()
+            .filter(|t| live_containers.iter().any(|c| c == t.container()))
+            .map(|t| async move { (t, self.count_system_updates(t).await) });
+
+        let mut updates = Vec::new();
+        for (pkg_type, result) in futures_util::future::join_all(checks).await {
+            match result {
+                Ok(0) => {}
+                Ok(n) => updates.push(system_package(pkg_type, Some(n))),
+                Err(e) => warn!("{}", e),
+            }
+        }
+        updates
+    }
+
+    async fn update_system(
+        &self,
+        pkg_type: PkgType,
+        cancel_token: &CancellationToken,
+    ) -> Result<(), ArcError> {
+        info!("Updating system packages in {}", pkg_type.container());
+        // containers set up before a compat revision bump pick it up here,
+        // not only on their next package install
+        if pkg_type == PkgType::Deb {
+            self.ensure_debian_compat(cancel_token).await?;
+        }
+        let (status, _) = self
+            .run_helper(
+                pkg_type.container(),
+                UPDATE_SYSTEM_HELPER,
+                &[pkg_type.as_str()],
+                cancel_token,
+            )
+            .await?;
+        *self.updates_cache.lock().await = None;
+        if !status.success() {
+            return Err(ArcError::ProviderError(format!(
+                "Updating {} failed",
+                pkg_type.container()
+            )));
+        }
+        Ok(())
+    }
 }
 
 fn parse_info(content: &str, home: &str) -> Option<Package> {
@@ -508,7 +686,15 @@ impl PackageProvider for DistroboxProvider {
     }
 
     async fn list_updates(&self) -> Result<Vec<Package>, ArcError> {
-        Ok(Vec::new())
+        let mut cache = self.updates_cache.lock().await;
+        if let Some((checked_at, updates)) = cache.as_ref() {
+            if checked_at.elapsed() < UPDATES_CACHE_TTL {
+                return Ok(updates.clone());
+            }
+        }
+        let updates = self.check_system_updates().await;
+        *cache = Some((Instant::now(), updates.clone()));
+        Ok(updates)
     }
 
     async fn install(&self, package_id: &str) -> Result<(), ArcError> {
@@ -564,10 +750,11 @@ impl PackageProvider for DistroboxProvider {
             .await
     }
 
-    async fn update(&self, _package_id: &str) -> Result<(), ArcError> {
-        Err(ArcError::ProviderError(
-            "Updates are managed through distrobox directly".to_string(),
-        ))
+    async fn update(&self, package_id: &str) -> Result<(), ArcError> {
+        let pkg_type = parse_system_package_id(package_id).ok_or_else(|| {
+            ArcError::ProviderError(format!("Not an updatable distrobox package: {}", package_id))
+        })?;
+        self.update_system(pkg_type, &CancellationToken::new()).await
     }
 
     async fn run(&self, package_id: &str) -> Result<(), ArcError> {
@@ -625,6 +812,12 @@ impl PackageProvider for DistroboxProvider {
     }
 
     async fn get_app_info(&self, package_id: &str) -> Result<Option<Package>, ArcError> {
+        if let Some(pkg_type) = parse_system_package_id(package_id) {
+            let cached = self.updates_cache.lock().await.as_ref().and_then(|(_, updates)| {
+                updates.iter().find(|p| p.id == package_id).cloned()
+            });
+            return Ok(Some(cached.unwrap_or_else(|| system_package(pkg_type, None))));
+        }
         // Look up the package from installed packages
         let installed = self.read_installed().await?;
         Ok(installed.into_iter().find(|p| p.id == package_id))
@@ -744,9 +937,27 @@ impl DistroboxProvider {
         Ok(())
     }
 
+    pub async fn update_with_progress(
+        &self,
+        package_id: &str,
+        progress_tx: UnboundedSender<Progress>,
+        cancel_token: CancellationToken,
+    ) -> Result<(), ArcError> {
+        let pkg_type = parse_system_package_id(package_id).ok_or_else(|| {
+            ArcError::ProviderError(format!("Not an updatable distrobox package: {}", package_id))
+        })?;
+        let _ = progress_tx.send(Progress::pct(5));
+        let ticker = slow_tick(progress_tx.clone(), 5, 92, 3);
+        let result = self.update_system(pkg_type, &cancel_token).await;
+        ticker.abort();
+        result?;
+        let _ = progress_tx.send(Progress::pct(95));
+        Ok(())
+    }
+
     async fn ensure_debian_compat(&self, cancel_token: &CancellationToken) -> Result<(), ArcError> {
         let arc_dir = PathBuf::from(&self.home).join(".local/share/arc");
-        let marker = arc_dir.join("arc-debian-compat-v2.done");
+        let marker = arc_dir.join("arc-debian-compat-v4.done");
         if marker.exists() {
             return Ok(());
         }
@@ -988,15 +1199,48 @@ MARKER="$1"
 # Already done on a previous install
 [ -f "$MARKER" ] && exit 0
 
+# Fix for kwalletd6 crashing
+sudo dpkg-divert --local --rename --add \
+    --divert /usr/bin/kwalletd6.arc-diverted /usr/bin/kwalletd6
+sudo tee /usr/bin/kwalletd6 > /dev/null << 'STUB'
+#!/bin/sh
+exit 0
+STUB
+sudo chmod +x /usr/bin/kwalletd6
+
+# The container runs its own systemd --user (--init), whose dbus.socket puts a
+# container-only session bus at $XDG_RUNTIME_DIR/bus. Apps then can't reach the
+# host's wallet, portals, tray or notifications, and e.g. Electron apps hang
+# waiting for a wallet that never answers. Mask it and link the path to the
+# host's bus instead, on every container start and right now.
+sudo systemctl --global mask dbus.socket dbus.service
+sudo tee /etc/systemd/user/arc-host-bus.service > /dev/null << 'UNIT'
+[Unit]
+Description=Link the host's session bus into the container
+DefaultDependencies=no
+Before=basic.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/ln -sfn /run/host%t/bus %t/bus
+
+[Install]
+WantedBy=basic.target
+UNIT
+sudo systemctl --global enable arc-host-bus.service
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ -S "/run/host$RUNTIME_DIR/bus" ]; then
+    ln -sfn "/run/host$RUNTIME_DIR/bus" "$RUNTIME_DIR/bus"
+fi
+
 # Enable 32-bit architecture support (required for Steam and most Windows-compat libs)
 sudo dpkg --add-architecture i386
 sudo apt-get update -qq
 
-# KDE / xdg-desktop-portal support. Lets apps use native file pickers, portals,
-# and the secret service. Installed silently; nothing is exported to the host.
+# KDE / xdg-desktop-portal support. Lets apps use native file pickers and portals.
+# Installed silently; nothing is exported to the host.
 sudo apt-get install -y --no-install-recommends \
-    xdg-desktop-portal-kde \
-    libsecret-1-0
+    xdg-desktop-portal-kde
 
 # lib32 / multiarch libraries required by Steam and similar apps.
 # Installing all of these here means Steam never needs to run apt-get at
@@ -1036,6 +1280,43 @@ sudo pacman -S --noconfirm --needed \
     alsa-plugins
 
 touch "$MARKER"
+"#;
+
+const CHECK_UPDATES_HELPER: &str = r#"#!/bin/bash
+set -euo pipefail
+OUTPUT="$1"
+PKG_TYPE="$2"
+case "$PKG_TYPE" in
+    deb)
+        sudo apt-get update -qq >/dev/null 2>&1 || true
+        count="$(apt-get -s -o Debug::NoLocking=1 upgrade --with-new-pkgs 2>/dev/null | grep -c '^Inst ' || true)"
+        ;;
+    rpm)
+        # check-update exits 100 when updates are available
+        list="$(sudo dnf -q check-update --refresh 2>/dev/null || true)"
+        count="$(grep -cE '^[^[:space:]]+\.[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+$' <<< "$list" || true)"
+        ;;
+    pacman)
+        sudo pacman -Sy --noconfirm >/dev/null 2>&1 || true
+        count="$(pacman -Qu 2>/dev/null | wc -l || true)"
+        ;;
+esac
+printf 'updates:%s\n' "${count:-0}" > "$OUTPUT"
+"#;
+
+const UPDATE_SYSTEM_HELPER: &str = r#"#!/bin/bash
+set -euo pipefail
+PKG_TYPE="$2"
+case "$PKG_TYPE" in
+    deb)
+        sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock
+        sudo dpkg --configure -a 2>/dev/null || true
+        sudo apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --with-new-pkgs
+        ;;
+    rpm)    sudo dnf upgrade -y --refresh ;;
+    pacman) sudo pacman -Syu --noconfirm ;;
+esac
 "#;
 
 const UNINSTALL_HELPER: &str = r#"#!/bin/bash
