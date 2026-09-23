@@ -1,3 +1,4 @@
+use cxx_qt_lib::{QString, QUrl};
 use ini::Ini;
 use std::sync::{Mutex, OnceLock};
 
@@ -69,6 +70,24 @@ pub fn pkg_name_from_filename(filename: &str) -> String {
     no_ext.split('-').next().unwrap_or(no_ext).to_string()
 }
 
+fn local_path_from_arg(arg: &str) -> String {
+    let path = if arg.starts_with("file:") {
+        let mut url = QUrl::from(arg);
+        if url.host_or_default().to_string().eq_ignore_ascii_case("localhost") {
+            url.set_host(&QString::default());
+        }
+        url.to_local_file()
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| arg.to_string())
+    } else {
+        arg.to_string()
+    };
+    std::path::absolute(&path)
+        .ok()
+        .and_then(|p| p.to_str().map(str::to_string))
+        .unwrap_or(path)
+}
+
 pub enum LaunchIntent {
     Detail { pkg_id: String },
     List { slug: String },
@@ -120,7 +139,7 @@ pub fn parse_args() -> Option<LaunchIntent> {
     let file_args: Vec<String> = args
         .iter()
         .skip(1)
-        .map(|a| a.strip_prefix("file://").map(str::to_string).unwrap_or_else(|| a.clone()))
+        .map(|a| local_path_from_arg(a))
         .collect();
 
     if let Some(path) = file_args.iter().find(|a| is_flatpakref(a)) {
@@ -159,4 +178,16 @@ pub fn init() {
 
 pub fn take_intent() -> Option<LaunchIntent> {
     INTENT.get().and_then(|m| m.lock().unwrap().take())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_path_from_arg;
+
+    #[test]
+    fn file_uri_args() {
+        assert_eq!(local_path_from_arg("file:///home/x/My%20App%C3%A4.AppImage"), "/home/x/My Appä.AppImage");
+        assert_eq!(local_path_from_arg("file://localhost/tmp/a.deb"), "/tmp/a.deb");
+        assert_eq!(local_path_from_arg("/tmp/c%20d.rpm"), "/tmp/c%20d.rpm");
+    }
 }
