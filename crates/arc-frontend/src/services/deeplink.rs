@@ -69,6 +69,36 @@ pub fn pkg_name_from_filename(filename: &str) -> String {
     no_ext.split('-').next().unwrap_or(no_ext).to_string()
 }
 
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
+            if let Ok(b) = u8::from_str_radix(hex, 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn local_path_from_arg(arg: &str) -> String {
+    let path = match arg.strip_prefix("file://") {
+        Some(rest) => percent_decode(rest.strip_prefix("localhost").unwrap_or(rest)),
+        None => arg.to_string(),
+    };
+    std::path::absolute(&path)
+        .ok()
+        .and_then(|p| p.to_str().map(str::to_string))
+        .unwrap_or(path)
+}
+
 pub enum LaunchIntent {
     Detail { pkg_id: String },
     List { slug: String },
@@ -120,7 +150,7 @@ pub fn parse_args() -> Option<LaunchIntent> {
     let file_args: Vec<String> = args
         .iter()
         .skip(1)
-        .map(|a| a.strip_prefix("file://").map(str::to_string).unwrap_or_else(|| a.clone()))
+        .map(|a| local_path_from_arg(a))
         .collect();
 
     if let Some(path) = file_args.iter().find(|a| is_flatpakref(a)) {
