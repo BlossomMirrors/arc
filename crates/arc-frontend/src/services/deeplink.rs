@@ -1,3 +1,4 @@
+use cxx_qt_lib::{QString, QUrl};
 use ini::Ini;
 use std::sync::{Mutex, OnceLock};
 
@@ -69,29 +70,17 @@ pub fn pkg_name_from_filename(filename: &str) -> String {
     no_ext.split('-').next().unwrap_or(no_ext).to_string()
 }
 
-fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
-            if let Ok(b) = u8::from_str_radix(hex, 16) {
-                out.push(b);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 fn local_path_from_arg(arg: &str) -> String {
-    let path = match arg.strip_prefix("file://") {
-        Some(rest) => percent_decode(rest.strip_prefix("localhost").unwrap_or(rest)),
-        None => arg.to_string(),
+    let path = if arg.starts_with("file:") {
+        let mut url = QUrl::from(arg);
+        if url.host_or_default().to_string().eq_ignore_ascii_case("localhost") {
+            url.set_host(&QString::default());
+        }
+        url.to_local_file()
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| arg.to_string())
+    } else {
+        arg.to_string()
     };
     std::path::absolute(&path)
         .ok()
@@ -189,4 +178,16 @@ pub fn init() {
 
 pub fn take_intent() -> Option<LaunchIntent> {
     INTENT.get().and_then(|m| m.lock().unwrap().take())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_path_from_arg;
+
+    #[test]
+    fn file_uri_args() {
+        assert_eq!(local_path_from_arg("file:///home/x/My%20App%C3%A4.AppImage"), "/home/x/My Appä.AppImage");
+        assert_eq!(local_path_from_arg("file://localhost/tmp/a.deb"), "/tmp/a.deb");
+        assert_eq!(local_path_from_arg("/tmp/c%20d.rpm"), "/tmp/c%20d.rpm");
+    }
 }
