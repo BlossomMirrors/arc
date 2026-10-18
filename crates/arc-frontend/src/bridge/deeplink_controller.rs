@@ -70,6 +70,7 @@ impl qobject::DeepLinkController {
         runtime::spawn(async move {
             match intent {
                 LaunchIntent::Detail { pkg_id } => {
+                    let pkg_id = canonical_pkg_id(pkg_id).await;
                     qt_thread
                         .queue(move |mut this| {
                             this.as_mut().set_pkg_id(QString::from(&pkg_id));
@@ -85,7 +86,10 @@ impl qobject::DeepLinkController {
                         })
                         .ok();
                 }
-                LaunchIntent::InstallFlatpakref { source, is_local_file } => {
+                LaunchIntent::InstallFlatpakref {
+                    source,
+                    is_local_file,
+                } => {
                     let content = if is_local_file {
                         std::fs::read_to_string(&source).unwrap_or_default()
                     } else {
@@ -98,9 +102,14 @@ impl qobject::DeepLinkController {
 
                     // flathub refs are known apps so skip the confirmation
                     let is_flathub = is_local_file
-                        && (repo_url.contains("dl.flathub.org") || repo_url.contains("flathub.org"));
+                        && (repo_url.contains("dl.flathub.org")
+                            || repo_url.contains("flathub.org"));
 
-                    let install_source = if is_local_file { format!("file://{source}") } else { source };
+                    let install_source = if is_local_file {
+                        format!("file://{source}")
+                    } else {
+                        source
+                    };
 
                     qt_thread
                         .queue(move |mut this| {
@@ -126,7 +135,13 @@ impl qobject::DeepLinkController {
                         })
                         .ok();
                 }
-                LaunchIntent::InstallFile { path, file_name, pkg_name, is_appimage, is_bundle } => {
+                LaunchIntent::InstallFile {
+                    path,
+                    file_name,
+                    pkg_name,
+                    is_appimage,
+                    is_bundle,
+                } => {
                     let alt = if !is_appimage && !is_bundle {
                         find_flatpak_alternative(&pkg_name).await
                     } else {
@@ -142,7 +157,8 @@ impl qobject::DeepLinkController {
                             this.as_mut().set_file_is_bundle(is_bundle);
                             if let Some((id, name)) = alt {
                                 this.as_mut().set_file_flatpak_alt_id(QString::from(&id));
-                                this.as_mut().set_file_flatpak_alt_name(QString::from(&name));
+                                this.as_mut()
+                                    .set_file_flatpak_alt_name(QString::from(&name));
                                 this.as_mut().set_file_has_flatpak_alt(true);
                             }
                             this.as_mut().set_kind(QString::from("installfile"));
@@ -152,6 +168,29 @@ impl qobject::DeepLinkController {
             }
         });
     }
+}
+
+async fn canonical_pkg_id(pkg_id: String) -> String {
+    let Some(proxy) = runtime::proxy().await else {
+        return pkg_id;
+    };
+    if let Ok(installed) = proxy.installed_packages().await {
+        if let Some(p) = installed
+            .into_iter()
+            .find(|p| p.id.eq_ignore_ascii_case(&pkg_id))
+        {
+            return p.id;
+        }
+    }
+    if let Ok(found) = proxy.search_packages(&pkg_id).await {
+        if let Some(p) = found
+            .into_iter()
+            .find(|p| p.id.eq_ignore_ascii_case(&pkg_id))
+        {
+            return p.id;
+        }
+    }
+    pkg_id
 }
 
 async fn find_flatpak_alternative(pkg_name: &str) -> Option<(String, String)> {
