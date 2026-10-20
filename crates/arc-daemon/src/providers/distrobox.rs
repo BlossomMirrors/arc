@@ -67,10 +67,23 @@ impl PkgType {
             PkgType::Pacman => "Arch",
         }
     }
+
+    fn icon_name(self) -> &'static str {
+        match self {
+            PkgType::Deb => "application-vnd.debian.binary-package",
+            PkgType::Rpm => "application-x-rpm",
+            PkgType::Pacman => "package-x-generic",
+        }
+    }
 }
 
 fn system_package_id(pkg_type: PkgType) -> String {
-    format!("distrobox:{}:{}:{}", pkg_type.container(), SYSTEM_PKG, pkg_type.as_str())
+    format!(
+        "distrobox:{}:{}:{}",
+        pkg_type.container(),
+        SYSTEM_PKG,
+        pkg_type.as_str()
+    )
 }
 
 // "distrobox:CONTAINER:@system:PKG_TYPE" is the container's package type
@@ -94,7 +107,7 @@ fn system_package(pkg_type: PkgType, pending: Option<usize>) -> Package {
         description,
         provider: Provider::Distrobox,
         installed: true,
-        icon_url: None,
+        icon_url: Some(pkg_type.icon_name().to_string()),
         remote: None,
         screenshots: vec![],
         developer_name: None,
@@ -752,9 +765,13 @@ impl PackageProvider for DistroboxProvider {
 
     async fn update(&self, package_id: &str) -> Result<(), ArcError> {
         let pkg_type = parse_system_package_id(package_id).ok_or_else(|| {
-            ArcError::ProviderError(format!("Not an updatable distrobox package: {}", package_id))
+            ArcError::ProviderError(format!(
+                "Not an updatable distrobox package: {}",
+                package_id
+            ))
         })?;
-        self.update_system(pkg_type, &CancellationToken::new()).await
+        self.update_system(pkg_type, &CancellationToken::new())
+            .await
     }
 
     async fn run(&self, package_id: &str) -> Result<(), ArcError> {
@@ -813,10 +830,15 @@ impl PackageProvider for DistroboxProvider {
 
     async fn get_app_info(&self, package_id: &str) -> Result<Option<Package>, ArcError> {
         if let Some(pkg_type) = parse_system_package_id(package_id) {
-            let cached = self.updates_cache.lock().await.as_ref().and_then(|(_, updates)| {
-                updates.iter().find(|p| p.id == package_id).cloned()
-            });
-            return Ok(Some(cached.unwrap_or_else(|| system_package(pkg_type, None))));
+            let cached = self
+                .updates_cache
+                .lock()
+                .await
+                .as_ref()
+                .and_then(|(_, updates)| updates.iter().find(|p| p.id == package_id).cloned());
+            return Ok(Some(
+                cached.unwrap_or_else(|| system_package(pkg_type, None)),
+            ));
         }
         // Look up the package from installed packages
         let installed = self.read_installed().await?;
@@ -944,7 +966,10 @@ impl DistroboxProvider {
         cancel_token: CancellationToken,
     ) -> Result<(), ArcError> {
         let pkg_type = parse_system_package_id(package_id).ok_or_else(|| {
-            ArcError::ProviderError(format!("Not an updatable distrobox package: {}", package_id))
+            ArcError::ProviderError(format!(
+                "Not an updatable distrobox package: {}",
+                package_id
+            ))
         })?;
         let _ = progress_tx.send(Progress::pct(5));
         let ticker = slow_tick(progress_tx.clone(), 5, 92, 3);
