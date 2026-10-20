@@ -350,7 +350,9 @@ impl MultiProvider {
             bridge.abort();
             result
         } else {
-            self.native.update(package_id).await
+            self.native
+                .update_with_progress(package_id, progress_tx, cancel_token)
+                .await
         }
     }
 
