@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "arc"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "blossom-libarc",
@@ -140,7 +140,7 @@ dependencies = [
 
 [[package]]
 name = "arc-daemon"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anvil-appimage",
  "anyhow",
@@ -178,11 +178,11 @@ dependencies = [
 
 [[package]]
 name = "arc-dev"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "arc-frontend"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "blossom-libarc",
@@ -443,7 +443,7 @@ dependencies = [
 
 [[package]]
 name = "blossom-libarc"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "dirs",

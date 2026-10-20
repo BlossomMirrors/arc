@@ -1,6 +1,6 @@
 [package]
 name = "blossom-libarc"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "Client library for the Arc Store D-Bus daemon, managing Flatpak and native packages on Linux"
 license = "AGPL-3.0-or-later"

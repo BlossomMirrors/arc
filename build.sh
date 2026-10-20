@@ -2,7 +2,7 @@
 set -e
 
 PACKAGE_NAME=blossom-arc
-VERSION=0.3.0
+VERSION=0.4.0
 RELEASE=1
 BUILDROOT=$(pwd)/rpmbuild
 SPECS_DIR=$BUILDROOT/SPECS
