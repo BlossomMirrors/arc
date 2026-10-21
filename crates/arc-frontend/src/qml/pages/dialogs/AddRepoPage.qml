@@ -13,6 +13,14 @@ DialogPage {
     dialogTitle: DeepLinkController.repoTitle
     dialogDescription: DeepLinkController.repoUrl
 
+    Kirigami.InlineMessage {
+        Layout.fillWidth: true
+        visible: SettingsController.showSecurityWarnings
+        type: Kirigami.MessageType.Warning
+        text: KI18n.i18n("Adding a third-party repository gives it the ability to distribute software to your system. Only add repositories from sources you trust.")
+        showCloseButton: false
+    }
+
     Item {
         Layout.fillWidth: true
         Layout.preferredHeight: buttonRow.implicitHeight

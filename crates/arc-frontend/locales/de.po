@@ -390,3 +390,9 @@ msgstr "Link öffnen"
 
 msgid "Verified developer"
 msgstr "Verifizierter Entwickler"
+
+msgid "Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust."
+msgstr "Drittanbietersoftware hat weitreichenden Zugriff auf Systemressourcen und kann ein Sicherheitsrisiko darstellen. Installiere nur Dateien aus Quellen, denen du vertraust."
+
+msgid "Adding a third-party repository gives it the ability to distribute software to your system. Only add repositories from sources you trust."
+msgstr "Eine Drittanbieter-Paketquelle kann nach dem Hinzufügen Software auf dein System verteilen. Füge nur Paketquellen aus Quellen hinzu, denen du vertraust."

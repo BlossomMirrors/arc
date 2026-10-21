@@ -238,8 +238,8 @@ Kirigami.ScrollablePage {
         id: extensionsSheet
         title: KI18n.i18n("Add-ons")
 
-        Column {
-            width: Kirigami.Units.gridUnit * 26
+        ColumnLayout {
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             spacing: Kirigami.Units.smallSpacing
 
             Repeater {
@@ -250,7 +250,7 @@ Kirigami.ScrollablePage {
 
                     required property var modelData
 
-                    width: parent.width
+                    Layout.fillWidth: true
                     spacing: Kirigami.Units.largeSpacing
 
                     Controls.Label {

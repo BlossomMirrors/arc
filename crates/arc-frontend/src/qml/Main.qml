@@ -555,6 +555,7 @@ Kirigami.ApplicationWindow {
     }
 
     Component.onCompleted: {
+        SettingsController.load();
         TransactionsModel.init();
         goHome();
         DeepLinkController.resolve();

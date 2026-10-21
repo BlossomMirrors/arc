@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
+import org.kde.kirigami as Kirigami
 import org.blossomos.arc
 import org.kde.ki18n
 
@@ -13,6 +14,14 @@ DialogPage {
     dialogDescription: DeepLinkController.fileHasFlatpakAlt
         ? KI18n.i18n("A Flatpak version of this app is also available: %1", DeepLinkController.fileFlatpakAltName)
         : ""
+
+    Kirigami.InlineMessage {
+        Layout.fillWidth: true
+        visible: SettingsController.showSecurityWarnings
+        type: Kirigami.MessageType.Warning
+        text: KI18n.i18n("Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust.")
+        showCloseButton: false
+    }
 
     Controls.Button {
         Layout.fillWidth: true

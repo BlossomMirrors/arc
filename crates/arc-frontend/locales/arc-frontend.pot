@@ -344,3 +344,13 @@ msgstr ""
 
 msgid "Try again"
 msgstr ""
+
+msgid ""
+"Third-party software has broad access to system resources and may pose a "
+"security risk. Only install files from sources you trust."
+msgstr ""
+
+msgid ""
+"Adding a third-party repository gives it the ability to distribute software "
+"to your system. Only add repositories from sources you trust."
+msgstr ""

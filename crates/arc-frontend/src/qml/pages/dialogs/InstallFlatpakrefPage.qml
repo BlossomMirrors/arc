@@ -13,6 +13,14 @@ DialogPage {
     dialogTitle: DeepLinkController.refTitle
     dialogDescription: KI18n.i18n("This app comes from a third-party source outside your configured repositories.")
 
+    Kirigami.InlineMessage {
+        Layout.fillWidth: true
+        visible: SettingsController.showSecurityWarnings
+        type: Kirigami.MessageType.Warning
+        text: KI18n.i18n("Third-party software has broad access to system resources and may pose a security risk. Only install files from sources you trust.")
+        showCloseButton: false
+    }
+
     Item {
         Layout.fillWidth: true
         Layout.preferredHeight: buttonRow.implicitHeight
