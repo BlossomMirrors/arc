@@ -230,6 +230,12 @@ msgstr "Update installed apps in the background"
 msgid "Security warnings"
 msgstr "Security warnings"
 
+msgid "Preload store window"
+msgstr "Preload store window"
+
+msgid "Prepare the Arc Store window in the background after login so it opens instantly"
+msgstr "Prepare the Arc Store window in the background after login so it opens instantly"
+
 msgid "Warn before installing third-party software or adding repositories"
 msgstr "Warn before installing third-party software or adding repositories"
 

@@ -68,6 +68,8 @@ fn cache_key(kind: MediaKind, url: &str, width: Option<u32>) -> String {
 }
 
 // downloads an image and turns it into what gets stored so serving it and handing out its file share one recipe
+static IMAGE_WORK: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
 async fn download(kind: MediaKind, url: String, width: Option<u32>) -> Option<Blob> {
     let (bytes, content_type) = fetch_raw_into(kind, &url).await?;
     let (bytes, content_type) = match kind {
@@ -110,8 +112,9 @@ pub async fn fetch(kind: MediaKind, url: &str, width: Option<u32>) -> Option<(Ve
 
 pub fn local_file_url(kind: MediaKind, url: &str, width: Option<u32>) -> Option<String> {
     let url_owned = url.to_string();
-    let file = cache_for(kind).local_file(&cache_key(kind, url, width), move || {
-        download(kind, url_owned, width)
+    let file = cache_for(kind).local_file(&cache_key(kind, url, width), move || async move {
+        let _permit = IMAGE_WORK.acquire().await.ok()?;
+        download(kind, url_owned, width).await
     })?;
     Some(format!("file://{}", file.display()))
 }

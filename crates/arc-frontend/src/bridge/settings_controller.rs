@@ -14,6 +14,7 @@ pub mod qobject {
         #[qproperty(bool, auto_updates, cxx_name = "autoUpdates")]
         #[qproperty(i32, concurrent_downloads, cxx_name = "concurrentDownloads")]
         #[qproperty(bool, show_security_warnings, cxx_name = "showSecurityWarnings")]
+        #[qproperty(bool, preload)]
         type SettingsController = super::SettingsControllerRust;
 
         #[qinvokable]
@@ -21,6 +22,10 @@ pub mod qobject {
 
         #[qinvokable]
         fn save(self: Pin<&mut SettingsController>);
+
+        #[qinvokable]
+        #[cxx_name = "savePreload"]
+        fn save_preload(self: Pin<&mut SettingsController>);
 
         #[qinvokable]
         #[cxx_name = "forceUpdate"]
@@ -72,6 +77,7 @@ pub struct SettingsControllerRust {
     auto_updates: bool,
     concurrent_downloads: i32,
     show_security_warnings: bool,
+    preload: bool,
 }
 
 fn emit_result(qt_thread: &CxxQtThread<qobject::SettingsController>, message: String, success: bool) {
@@ -132,6 +138,16 @@ impl qobject::SettingsController {
         self.as_mut().set_auto_updates(s.auto_updates);
         self.as_mut().set_concurrent_downloads(s.concurrent_downloads as i32);
         self.as_mut().set_show_security_warnings(s.show_security_warnings);
+        self.as_mut().set_preload(crate::services::autostart::is_enabled());
+    }
+
+    pub fn save_preload(mut self: Pin<&mut Self>) {
+        if let Err(e) = crate::services::autostart::set_enabled(self.preload) {
+            tracing::warn!("failed to change the autostart entry: {e}");
+            let enabled = crate::services::autostart::is_enabled();
+            self.as_mut().set_preload(enabled);
+            self.as_mut().action_failed(QString::from(&e.to_string()));
+        }
     }
 
     pub fn save(self: Pin<&mut Self>) {

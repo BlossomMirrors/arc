@@ -545,6 +545,21 @@ const PREFETCH_FRESH: Duration = Duration::from_secs(60);
 static PREFETCHED: Mutex<Option<Prefetched>> = Mutex::new(None);
 static IN_FLIGHT: Mutex<Option<String>> = Mutex::new(None);
 
+pub async fn warm(pkg_id: &str) {
+    if is_prefetched(pkg_id) {
+        return;
+    }
+    let Some(proxy) = runtime::proxy().await else {
+        return;
+    };
+    let (detail, extensions_json) = tokio::join!(
+        build_detail(&proxy, pkg_id, shot_width()),
+        fetch_extensions_json(&proxy, pkg_id)
+    );
+    *PREFETCHED.lock().unwrap_or_else(|p| p.into_inner()) =
+        Some(Prefetched { id: pkg_id.to_string(), detail, extensions_json, at: Instant::now() });
+}
+
 fn is_in_flight(id: &str) -> bool {
     IN_FLIGHT.lock().unwrap_or_else(|p| p.into_inner()).as_deref() == Some(id)
 }

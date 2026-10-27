@@ -22,7 +22,7 @@ elif command -v toolbox >/dev/null 2>&1; then
 fi
 
 PACKAGE_NAME=blossom-arc
-VERSION=0.3.0
+VERSION=0.4.0
 RELEASE=1
 BUILDROOT=$(pwd)/rpmbuild
 SPECS_DIR=$BUILDROOT/SPECS
@@ -60,6 +60,30 @@ NoDisplay=true
 X-GNOME-Autostart-enabled=true
 AUTOSTART
 
+# the frontend waits hidden after login so opening it only has to show the window
+cat > arc-frontend-standby.desktop <<'AUTOSTART'
+[Desktop Entry]
+Type=Application
+Name=Arc Store Standby
+Comment=Prepares the Arc window in the background
+Exec=/usr/bin/arc-frontend --standby
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+AUTOSTART
+
+# the launcher activates the waiting window over dbus instead of starting a process
+cat > org.blossomos.Arc.service <<'SERVICE'
+[D-BUS Service]
+Name=org.blossomos.Arc
+Exec=/usr/bin/arc-frontend
+SERVICE
+cat > org.blossomos.Arc.Handler.service <<'SERVICE'
+[D-BUS Service]
+Name=org.blossomos.Arc.Handler
+Exec=/usr/bin/arc-frontend
+SERVICE
+
 # Bundle pre-built binaries + data files into source tarball
 tar -czf $SOURCES_DIR/$PACKAGE_NAME-$VERSION.tar.gz \
     --transform "s|^|$PACKAGE_NAME-$VERSION/|" \
@@ -71,6 +95,9 @@ tar -czf $SOURCES_DIR/$PACKAGE_NAME-$VERSION.tar.gz \
     org.blossomos.Arc.metainfo.xml \
     org.blossomos.Arc.xml \
     arc-daemon.desktop \
+    arc-frontend-standby.desktop \
+    org.blossomos.Arc.service \
+    org.blossomos.Arc.Handler.service \
     arc.svg \
     LICENSE \
     completions/arc.bash \
@@ -119,6 +146,9 @@ install -Dm 644 org.blossomos.Arc.Handler.desktop %{buildroot}/usr/share/applica
 install -Dm 644 org.blossomos.Arc.metainfo.xml %{buildroot}/usr/share/metainfo/org.blossomos.Arc.metainfo.xml
 install -Dm 644 org.blossomos.Arc.xml         %{buildroot}/usr/share/mime/packages/org.blossomos.Arc.xml
 install -Dm 644 arc-daemon.desktop            %{buildroot}/etc/xdg/autostart/arc-daemon.desktop
+install -Dm 644 arc-frontend-standby.desktop  %{buildroot}/etc/xdg/autostart/arc-frontend-standby.desktop
+install -Dm 644 org.blossomos.Arc.service     %{buildroot}/usr/share/dbus-1/services/org.blossomos.Arc.service
+install -Dm 644 org.blossomos.Arc.Handler.service %{buildroot}/usr/share/dbus-1/services/org.blossomos.Arc.Handler.service
 install -Dm 644 arc.svg                       %{buildroot}/usr/share/icons/hicolor/scalable/apps/org.blossomos.Arc.svg
 install -Dm 644 LICENSE                       %{buildroot}/usr/share/licenses/$PACKAGE_NAME/LICENSE
 install -Dm 644 completions/arc.bash          %{buildroot}/usr/share/bash-completion/completions/arc
@@ -173,6 +203,9 @@ done
 /usr/share/metainfo/org.blossomos.Arc.metainfo.xml
 /usr/share/mime/packages/org.blossomos.Arc.xml
 /etc/xdg/autostart/arc-daemon.desktop
+/etc/xdg/autostart/arc-frontend-standby.desktop
+/usr/share/dbus-1/services/org.blossomos.Arc.service
+/usr/share/dbus-1/services/org.blossomos.Arc.Handler.service
 /usr/share/icons/hicolor/scalable/apps/org.blossomos.Arc.svg
 %license /usr/share/licenses/$PACKAGE_NAME/LICENSE
 /usr/share/bash-completion/completions/arc

@@ -40,16 +40,25 @@ use cxx_qt::Threading;
 use cxx_qt_lib::QString;
 use std::pin::Pin;
 
+const DETAIL_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+
 static QT_THREAD: std::sync::OnceLock<cxx_qt::CxxQtThread<qobject::DeepLinkController>> = std::sync::OnceLock::new();
 
-pub extern "C" fn on_activate(args: *const *const std::ffi::c_char, count: i32) {
+// returns true when the window should wait hidden until the linked page is ready
+pub extern "C" fn on_activate(args: *const *const std::ffi::c_char, count: i32) -> bool {
     let args: Vec<String> = (0..count.max(0) as usize)
         .map(|i| unsafe { std::ffi::CStr::from_ptr(*args.add(i)) }.to_string_lossy().into_owned())
         .collect();
-    deeplink::set_intent(deeplink::parse_args(&args));
+    let intent = deeplink::parse_args(&args);
+    let opens_page = intent.as_ref().is_some_and(LaunchIntent::opens_page);
+    deeplink::set_intent(intent);
+    if opens_page {
+        crate::bridge::startup_controller::show_window_later();
+    }
     if let Some(qt_thread) = QT_THREAD.get() {
         let _ = qt_thread.queue(|this| this.resolve());
     }
+    opens_page
 }
 
 #[derive(Default)]
@@ -85,6 +94,8 @@ impl qobject::DeepLinkController {
             match intent {
                 LaunchIntent::Detail { pkg_id } => {
                     let pkg_id = canonical_pkg_id(pkg_id).await;
+                    // the window appears with the finished page so it waits a moment for the details
+                    let _ = tokio::time::timeout(DETAIL_WAIT, crate::bridge::detail_controller::warm(&pkg_id)).await;
                     qt_thread
                         .queue(move |mut this| {
                             this.as_mut().set_pkg_id(QString::from(&pkg_id));

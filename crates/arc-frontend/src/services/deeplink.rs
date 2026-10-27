@@ -96,6 +96,12 @@ pub enum LaunchIntent {
     InstallFile { path: String, file_name: String, pkg_name: String, is_appimage: bool, is_bundle: bool },
 }
 
+impl LaunchIntent {
+    pub fn opens_page(&self) -> bool {
+        matches!(self, LaunchIntent::Detail { .. } | LaunchIntent::List { .. })
+    }
+}
+
 pub fn parse_args(args: &[String]) -> Option<LaunchIntent> {
 
     if let Some(a) = args.iter().find(|a| a.starts_with("appstream://") || a.starts_with("appstream:")) {
@@ -180,6 +186,12 @@ pub fn set_intent(intent: Option<LaunchIntent>) {
     if let Some(slot) = INTENT.get() {
         *slot.lock().unwrap() = intent;
     }
+}
+
+pub fn pending_opens_page() -> bool {
+    INTENT
+        .get()
+        .is_some_and(|m| m.lock().unwrap().as_ref().is_some_and(LaunchIntent::opens_page))
 }
 
 pub fn take_intent() -> Option<LaunchIntent> {

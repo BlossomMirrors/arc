@@ -2,7 +2,7 @@ use futures_util::future::join_all;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use tokio::spawn;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 use tracing::{info, warn};
 
@@ -10,19 +10,6 @@ const FORGE_BASE: &str = libarc::FORGE_BASE_URL;
 
 // the store holds one frontpage and this is its key
 const FRONTPAGE: &str = "frontpage";
-
-#[derive(Default)]
-struct Inner {
-    top_json: String,
-    new_json: String,
-    trending_json: String,
-    charts_json: String,
-    // JSON: [{id, name, summary, icon_url}] where icon_url points to /forge/icon/{id}
-    // for remote icons, or keeps "local:..." for locally-installed apps
-    app_metadata_json: String,
-    // id -> original remote icon URL (used by the icon proxy endpoint)
-    original_icon_urls: HashMap<String, String>,
-}
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Persisted {
@@ -34,55 +21,28 @@ pub struct Persisted {
     original_icon_urls: HashMap<String, String>,
 }
 
-static CACHE: OnceLock<RwLock<Inner>> = OnceLock::new();
 static REFRESH_GATE: OnceLock<Mutex<()>> = OnceLock::new();
-
-fn lock() -> &'static RwLock<Inner> {
-    CACHE.get_or_init(|| RwLock::new(Inner::default()))
-}
 
 fn refresh_gate() -> &'static Mutex<()> {
     REFRESH_GATE.get_or_init(|| Mutex::new(()))
 }
 
-pub async fn warm_from_disk() {
-    let Some(p) = spawn_blocking(|| crate::cache::forge().get(FRONTPAGE)).await.ok().flatten() else {
-        return;
-    };
-    let mut w = lock().write().await;
-    w.top_json = p.top_json;
-    w.new_json = p.new_json;
-    w.trending_json = p.trending_json;
-    w.charts_json = p.charts_json;
-    w.app_metadata_json = p.app_metadata_json;
-    w.original_icon_urls = p.original_icon_urls;
-    info!("Forge cache warmed from disk");
+async fn stored() -> Persisted {
+    spawn_blocking(|| crate::cache::forge().get(FRONTPAGE)).await.ok().flatten().unwrap_or_default()
 }
 
-async fn save_to_disk() {
-    let p = {
-        let r = lock().read().await;
-        Persisted {
-            top_json: r.top_json.clone(),
-            new_json: r.new_json.clone(),
-            trending_json: r.trending_json.clone(),
-            charts_json: r.charts_json.clone(),
-            app_metadata_json: r.app_metadata_json.clone(),
-            original_icon_urls: r.original_icon_urls.clone(),
-        }
-    };
-    let _ = spawn_blocking(move || crate::cache::forge().insert(FRONTPAGE, p)).await;
-}
-
-async fn ensure_fresh() {
-    let empty = lock().read().await.top_json.is_empty();
-    if !empty {
-        return;
+async fn ensure_fresh() -> Persisted {
+    let p = stored().await;
+    if !p.top_json.is_empty() {
+        return p;
     }
     let _guard = refresh_gate().lock().await;
-    if lock().read().await.top_json.is_empty() {
-        refresh().await;
+    let p = stored().await;
+    if !p.top_json.is_empty() {
+        return p;
     }
+    refresh().await;
+    stored().await
 }
 
 #[derive(serde::Deserialize)]
@@ -257,29 +217,25 @@ pub async fn refresh() {
 
     refresh_verification(app_ids).await;
 
-    {
-        let mut w = lock().write().await;
-        if let Some(v) = top {
-            w.top_json = v;
-        }
-        if let Some(v) = new {
-            w.new_json = v;
-        }
-        if let Some(v) = trending {
-            w.trending_json = v;
-        }
-        if let Some(v) = charts {
-            w.charts_json = v;
-        }
-        if !app_metadata_json.is_empty() {
-            w.app_metadata_json = app_metadata_json;
-        }
-        let icon_url_count = original_icon_urls.len();
-        w.original_icon_urls = original_icon_urls.clone();
-        info!("Forge cache refreshed ({} apps resolved)", icon_url_count);
+    let mut p = stored().await;
+    if let Some(v) = top {
+        p.top_json = v;
     }
-
-    save_to_disk().await;
+    if let Some(v) = new {
+        p.new_json = v;
+    }
+    if let Some(v) = trending {
+        p.trending_json = v;
+    }
+    if let Some(v) = charts {
+        p.charts_json = v;
+    }
+    if !app_metadata_json.is_empty() {
+        p.app_metadata_json = app_metadata_json;
+    }
+    p.original_icon_urls = original_icon_urls.clone();
+    info!("Forge cache refreshed ({} apps resolved)", original_icon_urls.len());
+    let _ = spawn_blocking(move || crate::cache::forge().insert(FRONTPAGE, p)).await;
 
     spawn(async move {
         let futs: Vec<_> = original_icon_urls
@@ -299,31 +255,26 @@ pub async fn refresh() {
 }
 
 pub async fn top() -> String {
-    ensure_fresh().await;
-    lock().read().await.top_json.clone()
+    ensure_fresh().await.top_json
 }
 pub async fn new_apps() -> String {
-    ensure_fresh().await;
-    lock().read().await.new_json.clone()
+    ensure_fresh().await.new_json
 }
 pub async fn trending() -> String {
-    ensure_fresh().await;
-    lock().read().await.trending_json.clone()
+    ensure_fresh().await.trending_json
 }
 pub async fn charts() -> String {
-    ensure_fresh().await;
-    lock().read().await.charts_json.clone()
+    ensure_fresh().await.charts_json
 }
 pub async fn app_metadata() -> String {
-    ensure_fresh().await;
-    lock().read().await.app_metadata_json.clone()
+    ensure_fresh().await.app_metadata_json
 }
 
 pub async fn original_icon_url(id: &str) -> Option<String> {
-    lock().read().await.original_icon_urls.get(id).cloned()
+    stored().await.original_icon_urls.remove(id)
 }
 
 pub async fn icon_bytes(id: &str) -> Option<(Vec<u8>, String)> {
-    let original_url = lock().read().await.original_icon_urls.get(id).cloned()?;
+    let original_url = original_icon_url(id).await?;
     crate::media::fetch(crate::media::MediaKind::Icon, &original_url, None).await
 }

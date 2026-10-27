@@ -229,6 +229,12 @@ msgstr ""
 msgid "Security warnings"
 msgstr ""
 
+msgid "Preload store window"
+msgstr ""
+
+msgid "Prepare the Arc Store window in the background after login so it opens instantly"
+msgstr ""
+
 msgid "Warn before installing third-party software or adding repositories"
 msgstr ""
 

@@ -46,6 +46,7 @@ fn main() {
     println!("cargo::rustc-link-arg=-lKF6DBusAddons");
     println!("cargo::rustc-link-arg=-lKF6WindowSystem");
     println!("cargo::rustc-link-arg=-lQt6DBus");
+    println!("cargo::rustc-link-arg=-lQt6Quick");
     println!("cargo::rustc-link-arg=-Wl,--as-needed");
 
     let builder = CxxQtBuilder::new_qml_module(
@@ -110,6 +111,7 @@ fn main() {
             cc.include("/usr/include/KF6/KDBusAddons");
             cc.include("/usr/include/KF6/KWindowSystem");
             cc.include("/usr/include/qt6/QtDBus");
+            cc.include("/usr/include/qt6/QtQuick");
             cc.include("/usr/include/qt6/QtQmlIntegration");
             cc.flag_if_supported("-Wno-sfinae-incomplete");
         })

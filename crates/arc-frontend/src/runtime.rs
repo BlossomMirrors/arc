@@ -6,7 +6,13 @@ static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 pub fn init() {
     RUNTIME
-        .set(Runtime::new().expect("failed to start tokio runtime"))
+        .set(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("failed to start tokio runtime"),
+        )
         .expect("runtime already initialized");
 }
 

@@ -71,6 +71,22 @@ FormCard.FormCardPage {
 
         FormCard.FormDelegateSeparator {
             above: securityWarningsDelegate
+            below: preloadDelegate
+        }
+
+        FormCard.FormSwitchDelegate {
+            id: preloadDelegate
+            text: KI18n.i18n("Preload store window")
+            description: KI18n.i18n("Prepare the Arc Store window in the background after login so it opens instantly")
+            checked: SettingsController.preload
+            onToggled: {
+                SettingsController.preload = checked;
+                SettingsController.savePreload();
+            }
+        }
+
+        FormCard.FormDelegateSeparator {
+            above: preloadDelegate
             below: concurrentDelegate
         }
 

@@ -171,6 +171,7 @@ Kirigami.ScrollablePage {
                     width: height * 16 / 9
                     height: screenshotStrip.height
                     maskSource: sharedShotMask
+                    visibleWidth: screenshotStrip.width
                     failedShots: root.failedShots
                     onLoadFailed: url => {
                         var failed = Object.assign({}, root.failedShots);

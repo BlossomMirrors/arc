@@ -21,6 +21,14 @@ Kirigami.ApplicationWindow {
     onFrontendVisibleChanged: SettingsController.setFrontendVisible(root.frontendVisible)
 
     onFrameSwapped: StartupController.firstFrame()
+    visible: !StartupController.startHidden
+    onVisibleChanged: if (visible && StartupController.standby) HomeFeedModel.refresh()
+    onClosing: close => {
+        if (StartupController.preloadEnabled()) {
+            close.accepted = false;
+            StartupController.returnToStandby();
+        }
+    }
 
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
 
@@ -91,6 +99,9 @@ Kirigami.ApplicationWindow {
 
     property bool detailVisible: false
 
+    // pages opened from a link appear at once instead of sliding in
+    property bool instantNav: false
+
     property bool categoryVisible: false
 
     LazyPage {
@@ -104,6 +115,7 @@ Kirigami.ApplicationWindow {
         visible: x < width
 
         Behavior on x {
+            enabled: !root.instantNav
             NumberAnimation {
                 duration: 220
                 easing.type: Easing.OutCubic
@@ -124,6 +136,7 @@ Kirigami.ApplicationWindow {
         visible: x < width
 
         Behavior on x {
+            enabled: !root.instantNav
             NumberAnimation {
                 duration: 220
                 easing.type: Easing.OutCubic
@@ -144,6 +157,7 @@ Kirigami.ApplicationWindow {
         visible: x < width
 
         Behavior on x {
+            enabled: !root.instantNav
             NumberAnimation {
                 duration: 220
                 easing.type: Easing.OutCubic
@@ -154,6 +168,7 @@ Kirigami.ApplicationWindow {
     LazyPage {
         id: detailPage
         order: 4
+        active: StartupController.standby
         source: "pages/DetailPage.qml"
         y: 0
         width: parent.width
@@ -162,6 +177,7 @@ Kirigami.ApplicationWindow {
         visible: x < width
 
         Behavior on x {
+            enabled: !root.instantNav
             NumberAnimation {
                 duration: 220
                 easing.type: Easing.OutCubic
@@ -182,6 +198,7 @@ Kirigami.ApplicationWindow {
         visible: x < width
 
         Behavior on x {
+            enabled: !root.instantNav
             NumberAnimation {
                 duration: 220
                 easing.type: Easing.OutCubic
@@ -538,40 +555,48 @@ Kirigami.ApplicationWindow {
     Connections {
         target: DeepLinkController
         function onKindChanged() {
-            switch (DeepLinkController.kind) {
-            case "detail":
-                root.navigate([
-                    {
-                        kind: "detail",
-                        a: DeepLinkController.pkgId
-                    }
-                ]);
-                break;
-            case "list":
-                root.openList(DeepLinkController.listSlug, "");
-                break;
-            case "flatpakref":
-                root.navigate([
-                    {
-                        kind: "flatpakref"
-                    }
-                ]);
-                break;
-            case "addrepo":
-                root.navigate([
-                    {
-                        kind: "addrepo"
-                    }
-                ]);
-                break;
-            case "installfile":
-                root.navigate([
-                    {
-                        kind: "installfile"
-                    }
-                ]);
-                break;
-            }
+            root.instantNav = true;
+            root.openDeepLink();
+            root.instantNav = false;
+            if (DeepLinkController.kind === "detail" || DeepLinkController.kind === "list")
+                StartupController.showWindow();
+        }
+    }
+
+    function openDeepLink() {
+        switch (DeepLinkController.kind) {
+        case "detail":
+            root.navigate([
+                {
+                    kind: "detail",
+                    a: DeepLinkController.pkgId
+                }
+            ]);
+            break;
+        case "list":
+            root.openList(DeepLinkController.listSlug, "");
+            break;
+        case "flatpakref":
+            root.navigate([
+                {
+                    kind: "flatpakref"
+                }
+            ]);
+            break;
+        case "addrepo":
+            root.navigate([
+                {
+                    kind: "addrepo"
+                }
+            ]);
+            break;
+        case "installfile":
+            root.navigate([
+                {
+                    kind: "installfile"
+                }
+            ]);
+            break;
         }
     }
 

@@ -6,4 +6,5 @@ Icon=org.blossomos.Arc
 Terminal=false
 NoDisplay=true
 StartupNotify=true
+DBusActivatable=true
 MimeType=x-scheme-handler/arc;x-scheme-handler/appstream;x-scheme-handler/flatpak+https;x-scheme-handler/flatpak+http;

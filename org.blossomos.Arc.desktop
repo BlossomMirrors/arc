@@ -8,6 +8,7 @@ Icon=org.blossomos.Arc
 Terminal=false
 Categories=System;PackageManager;
 StartupNotify=true
+DBusActivatable=true
 StartupWMClass=arc-frontend
 MimeType=application/vnd.debian.binary-package;application/x-rpm;application/vnd.archlinux.pkg;application/vnd.appimage;application/x-iso9660-appimage;application/vnd.flatpak.ref;application/vnd.flatpak;
 Actions=ManageExtensions;

@@ -1,3 +1,4 @@
+pub mod autostart;
 pub mod blocks;
 pub mod deeplink;
 pub mod forge;

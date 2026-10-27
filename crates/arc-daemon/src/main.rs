@@ -23,10 +23,18 @@ include!(concat!(env!("OUT_DIR"), "/locale/translators.rs"));
 
 const HTTP_PORT: u16 = 1312;
 
+pub(crate) fn tune_allocator() {
+    unsafe {
+        libc::mallopt(libc::M_ARENA_MAX, 2);
+        libc::mallopt(libc::M_MMAP_THRESHOLD, 128 * 1024);
+    }
+}
+
 fn main() {
     // glibc gives every thread its own heap arena that keeps freed memory so this has to happen before any thread starts
-    unsafe { libc::mallopt(libc::M_ARENA_MAX, 2) };
+    tune_allocator();
     let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
         .enable_all()
         .build()
         .expect("failed to start the async runtime");
@@ -79,7 +87,6 @@ async fn run() -> Result<()> {
 
     terminate_stale_daemons();
 
-    forge_cache::warm_from_disk().await;
 
     // ARC_HTTP_ONLY runs without a session bus (e.g. in a container), so it
     // can't claim the D-Bus name and doesn't need to replace anything.
@@ -89,7 +96,12 @@ async fn run() -> Result<()> {
         None
     };
 
-    spawn_blocking(cache::cleanup_legacy);
+    spawn(async {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+            spawn_blocking(|| unsafe { libc::malloc_trim(0) }).await.ok();
+        }
+    });
 
     info!("Syncing the catalogue in the background...");
     spawn(async {

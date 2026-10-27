@@ -11,6 +11,7 @@ Item {
     property int index
 
     property Item maskSource: null
+    property real visibleWidth: 0
 
     property var failedShots: ({})
 
@@ -31,7 +32,8 @@ Item {
     CachedImage {
         id: shotImage
         anchors.fill: parent
-        source: root.failedShots[root.requestUrl] ? "" : root.requestUrl
+        source: root.failedShots[root.requestUrl] || root.width <= 0 ? "" : root.requestUrl
+        asynchronous: !shotImage.local || root.x >= root.visibleWidth
         sourceSize.width: root.width * 2
         sourceSize.height: root.height * 2
         fillMode: Image.PreserveAspectCrop

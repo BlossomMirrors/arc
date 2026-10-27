@@ -8,6 +8,9 @@ repo
 rpmbuild
 build-dir
 arc-daemon.desktop
+arc-frontend-standby.desktop
+org.blossomos.Arc.service
+org.blossomos.Arc.Handler.service
 .flatpak
 completions
 locale

@@ -1,6 +1,5 @@
 use libarc::cache::{Binary, BlobCache, PersistentMap};
 use libarc::Transaction;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -44,35 +43,4 @@ pub fn sweep() -> usize {
         + icons().sweep()
         + images().trim_to_bytes(IMAGE_MAX_BYTES)
         + icons().trim_to_bytes(ICON_MAX_BYTES)
-}
-
-pub fn cleanup_legacy() {
-    let Some(root) = libarc::cache::cache_root() else {
-        return;
-    };
-    for file in [
-        "daemon/appstream.json",
-        "daemon/packages.json",
-        "daemon/forge.json",
-        "daemon/transactions.json",
-        "package_cache.json",
-        "frontend/packages.json",
-        "frontend/details.json",
-        "frontend/home.json",
-        "frontend/stories.json",
-    ] {
-        let _ = fs::remove_file(root.join(file));
-    }
-    for dir in ["frontend/packages", "frontend/details", "frontend/stories"] {
-        let _ = fs::remove_dir_all(root.join(dir));
-    }
-    let Ok(entries) = fs::read_dir(&root) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with("icon-pad-") || name.starts_with("test-") {
-            let _ = fs::remove_dir_all(entry.path());
-        }
-    }
 }

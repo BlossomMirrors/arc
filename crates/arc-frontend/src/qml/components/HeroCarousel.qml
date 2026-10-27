@@ -90,7 +90,7 @@ Item {
         highlightMoveDuration: 400
         highlightMoveVelocity: -1
         boundsBehavior: Flickable.StopAtBounds
-        cacheBuffer: width
+        cacheBuffer: StartupController.firstFrameShown ? width : 0
         clip: true
 
         delegate: Item {
@@ -114,6 +114,7 @@ Item {
                 anchors.fill: parent
                 source: slide.modelData.is_story ? slide.modelData.banner_url : ""
                 fillMode: Image.PreserveAspectCrop
+                sourceSize: Qt.size(width, height)
                 visible: slide.modelData.is_story && slide.modelData.banner_url.length > 0
             }
 
