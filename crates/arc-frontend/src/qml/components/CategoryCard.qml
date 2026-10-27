@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.blossomos.arc
 
 Kirigami.AbstractCard {
     id: root
@@ -15,6 +16,11 @@ Kirigami.AbstractCard {
 
     showClickFeedback: true
     onClicked: root.activated()
+
+    HoverPrefetch {
+        categoryId: root.categoryId
+        hovered: root.hovered
+    }
 
     background: Rectangle {
         color: root.bgColor

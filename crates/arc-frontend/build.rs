@@ -43,6 +43,9 @@ fn main() {
     println!("cargo::rustc-link-arg=-Wl,--no-as-needed");
     println!("cargo::rustc-link-arg=-lKF6I18nQml");
     println!("cargo::rustc-link-arg=-lKF6I18n");
+    println!("cargo::rustc-link-arg=-lKF6DBusAddons");
+    println!("cargo::rustc-link-arg=-lKF6WindowSystem");
+    println!("cargo::rustc-link-arg=-lQt6DBus");
     println!("cargo::rustc-link-arg=-Wl,--as-needed");
 
     let builder = CxxQtBuilder::new_qml_module(
@@ -63,11 +66,14 @@ fn main() {
             "src/qml/pages/dialogs/InstallFilePage.qml",
             "src/qml/components/TopBar.qml",
             "src/qml/components/AppCard.qml",
+            "src/qml/components/HoverPrefetch.qml",
+            "src/qml/components/LazyPage.qml",
             "src/qml/components/AppGridCard.qml",
             "src/qml/components/ListBadgeBar.qml",
             "src/qml/components/ListLabels.qml",
             "src/qml/components/AppHeader.qml",
             "src/qml/components/AppIcon.qml",
+            "src/qml/components/CachedImage.qml",
             "src/qml/components/HeroCard.qml",
             "src/qml/components/HeroCarousel.qml",
             "src/qml/components/CardCarousel.qml",
@@ -93,12 +99,17 @@ fn main() {
         "src/bridge/settings_controller.rs",
         "src/bridge/deeplink_controller.rs",
         "src/bridge/nav_controller.rs",
+        "src/bridge/startup_controller.rs",
     ])
-    .cpp_file("src/cxx/i18n_setup.cpp");
+    .cpp_file("src/cxx/i18n_setup.cpp")
+    .cpp_file("src/cxx/single_instance.cpp");
 
     let builder = unsafe {
         builder.cc_builder(|cc| {
             cc.include("/usr/include/KF6/KI18n");
+            cc.include("/usr/include/KF6/KDBusAddons");
+            cc.include("/usr/include/KF6/KWindowSystem");
+            cc.include("/usr/include/qt6/QtDBus");
             cc.include("/usr/include/qt6/QtQmlIntegration");
             cc.flag_if_supported("-Wno-sfinae-incomplete");
         })

@@ -1,4 +1,6 @@
 mod appstream_db;
+mod cache;
+mod catalog;
 mod daemon;
 mod dbus_interface;
 mod forge_cache;
@@ -21,9 +23,14 @@ include!(concat!(env!("OUT_DIR"), "/locale/translators.rs"));
 
 const HTTP_PORT: u16 = 1312;
 
-#[tokio::main]
-async fn main() {
-    let code = match run().await {
+fn main() {
+    // glibc gives every thread its own heap arena that keeps freed memory so this has to happen before any thread starts
+    unsafe { libc::mallopt(libc::M_ARENA_MAX, 2) };
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to start the async runtime");
+    let code = match runtime.block_on(run()) {
         Ok(()) => 0,
         Err(e) => {
             tracing::error!("{e:?}");
@@ -31,15 +38,7 @@ async fn main() {
         }
     };
 
-    // Some background work (e.g. the AppStreamDb cold parse, which can take
-    // well over a minute) runs on spawn_blocking OS threads that can't be
-    // cancelled, and libflatpak's GLib bindings register their own atexit
-    // cleanup; both would otherwise delay process exit by however long they
-    // have left to run. All our real cleanup (cancelling transactions)
-    // already happened inside run(), so skip Rust's normal exit() (which
-    // waits for the runtime and runs atexit handlers) and terminate via the
-    // raw syscall instead. a daemon replaced early in its life should die
-    // immediately, not linger.
+    // blocking threads and glib exit handlers would hold up a replaced daemon so it exits right away since run() already cleaned up
     unsafe { libc::_exit(code) };
 }
 
@@ -90,33 +89,19 @@ async fn run() -> Result<()> {
         None
     };
 
-    info!("Loading appstream database in the background...");
+    spawn_blocking(cache::cleanup_legacy);
+
+    info!("Syncing the catalogue in the background...");
     spawn(async {
-        spawn_blocking(appstream_db::AppStreamDb::get)
-            .await
-            .ok();
-        info!("Appstream database ready");
-
-        info!("Pre-fetching Forge home page...");
+        spawn_blocking(appstream_db::sync_if_stale).await.ok();
         forge_cache::refresh().await;
-
-        // a loaded snapshot older than the live catalog files still answers
-        // instantly so this catches it up once in the background
-        if appstream_db::AppStreamDb::snapshot_was_stale() {
-            spawn_blocking(appstream_db::AppStreamDb::refresh_if_stale)
-                .await
-                .ok();
-            forge_cache::refresh().await;
-        }
 
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
             appstream_db::refresh_remotes_if_due().await;
-            spawn_blocking(appstream_db::AppStreamDb::refresh_if_stale)
-                .await
-                .ok();
+            spawn_blocking(appstream_db::sync_if_stale).await.ok();
             forge_cache::refresh().await;
-            spawn_blocking(media::sweep).await.ok();
+            spawn_blocking(cache::sweep).await.ok();
         }
     });
 

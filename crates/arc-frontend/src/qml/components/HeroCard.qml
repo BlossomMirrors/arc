@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Effects
 import org.kde.kirigami as Kirigami
+import org.blossomos.arc
 
 Item {
     id: root
@@ -12,6 +13,7 @@ Item {
     property string iconUrl: ""
     property string heroTitle: ""
     property string body: ""
+    property string pkgId: ""
 
     signal activated()
 
@@ -20,11 +22,11 @@ Item {
     Item {
         anchors.fill: parent
 
-        Image {
+        CachedImage {
             anchors.fill: parent
             source: root.bannerUrl
             fillMode: Image.PreserveAspectCrop
-            asynchronous: true
+            sourceSize: Qt.size(width, height)
         }
 
         Column {
@@ -67,5 +69,10 @@ Item {
 
     TapHandler {
         onTapped: root.activated()
+    }
+
+    HoverPrefetch {
+        pkgId: root.pkgId
+        hovered: hoverHandler.hovered
     }
 }

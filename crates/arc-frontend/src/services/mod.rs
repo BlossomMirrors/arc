@@ -4,4 +4,5 @@ pub mod forge;
 pub mod home;
 pub mod home_cache;
 pub mod icons;
+pub mod images;
 pub mod stories;

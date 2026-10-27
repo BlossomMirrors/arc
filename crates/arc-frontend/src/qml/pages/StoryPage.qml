@@ -17,6 +17,8 @@ Kirigami.ScrollablePage {
 
     property string storyId: ""
 
+    onVisibleChanged: if (!visible) StoryController.clear()
+
     function openStory(newStoryId) {
         root.storyId = newStoryId;
         StoryController.load(newStoryId);
@@ -24,13 +26,7 @@ Kirigami.ScrollablePage {
 
     title: StoryController.title
 
-    ConveyorLoader {
-        anchors.centerIn: parent
-        visible: StoryController.loading
-    }
-
     ColumnLayout {
-        visible: !StoryController.loading
         width: root.width
         spacing: 0
 
@@ -39,11 +35,10 @@ Kirigami.ScrollablePage {
             Layout.preferredHeight: 280
             visible: StoryController.bannerUrl.length > 0
 
-            Image {
+            CachedImage {
                 anchors.fill: parent
                 source: StoryController.bannerUrl
                 fillMode: Image.PreserveAspectCrop
-                asynchronous: true
             }
 
             Rectangle {
@@ -70,6 +65,11 @@ Kirigami.ScrollablePage {
                 Layout.fillWidth: true
                 text: StoryController.title
                 wrapMode: Text.WordWrap
+            }
+
+            ConveyorLoader {
+                Layout.alignment: Qt.AlignHCenter
+                visible: StoryController.loading
             }
 
             Repeater {
@@ -134,14 +134,14 @@ Kirigami.ScrollablePage {
                         ColumnLayout {
                             spacing: Kirigami.Units.smallSpacing
 
-                            Image {
+                            CachedImage {
                                 id: blockImage
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: width * 9 / 16
                                 Layout.topMargin: Kirigami.Units.smallSpacing
                                 source: blockLoader.modelData.image_url
                                 fillMode: Image.PreserveAspectCrop
-                                asynchronous: true
+                                sourceSize: Qt.size(width, width * 9 / 16)
                             }
 
                             Controls.Label {
@@ -161,6 +161,15 @@ Kirigami.ScrollablePage {
                             visible: blockLoader.modelData.app_name.length > 0
                             showClickFeedback: true
                             onClicked: NavController.openApp(blockLoader.modelData.app_id, "")
+
+                            HoverHandler {
+                                id: appBlockHover
+                            }
+
+                            HoverPrefetch {
+                                pkgId: blockLoader.modelData.app_id
+                                hovered: appBlockHover.hovered
+                            }
 
                             contentItem: RowLayout {
                                 spacing: Kirigami.Units.largeSpacing

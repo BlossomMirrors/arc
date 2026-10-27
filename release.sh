@@ -1,6 +1,26 @@
 #!/bin/bash
 set -e
 
+SRC_DIR=$(pwd)
+TOOLBOX=arc-build
+
+if [ -f /run/.toolboxenv ]; then
+    echo "=== Installing build dependencies in the toolbox ==="
+    sudo dnf install -y rpm-build rust cargo clang pkg-config gettext-devel \
+        glib2-devel flatpak-devel ostree-devel openssl-devel sqlite-devel \
+        qt6-qtbase-devel qt6-qtdeclarative-devel kf6-kirigami-devel kf6-ki18n-devel \
+        kf6-kdbusaddons-devel kf6-kwindowsystem-devel
+elif command -v toolbox >/dev/null 2>&1; then
+    # build in a toolbox so compilers and devel packages never touch the system image
+    FEDORA=$(. /etc/os-release && echo "$VERSION_ID")
+    if ! toolbox list --containers | grep -qw "$TOOLBOX"; then
+        echo "=== Creating the $TOOLBOX toolbox on Fedora $FEDORA ==="
+        toolbox create -y -r "$FEDORA" "$TOOLBOX"
+    fi
+    # the shared home puts linuxbrew and distrobox tools in the path so keep only the toolbox system tools
+    exec toolbox run -c "$TOOLBOX" env PATH=/usr/local/bin:/usr/bin bash -c 'cd "$1" && shift && ./release.sh "$@"' _ "$SRC_DIR" "$@"
+fi
+
 PACKAGE_NAME=blossom-arc
 VERSION=0.3.0
 RELEASE=1
@@ -88,7 +108,7 @@ automatic desktop integration.
 %setup -q
 
 %build
-# pre-built by build.sh
+# pre-built by release.sh
 
 %install
 install -Dm 755 target/release/arc-frontend %{buildroot}/usr/bin/arc-frontend
@@ -160,7 +180,7 @@ done
 /usr/share/fish/vendor_completions.d/arc.fish
 
 %changelog
-* $(LANG=C date +"%a %b %d %Y") Leonie Ain <me@koyu.space> - $VERSION-$RELEASE
+* $(LANG=C date +"%a %b %d %Y") Blossom Labs <hello@blossomos.org> - $VERSION-$RELEASE
 - Initial release
 EOF
 

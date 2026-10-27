@@ -11,15 +11,32 @@ Item {
     width: implicitWidth
     height: implicitHeight
     clip: true
+    opacity: root.shown ? 1 : 0
 
     property real phase: 0
+    property bool shown: false
+
+    onVisibleChanged: {
+        root.shown = false;
+        if (root.visible)
+            showTimer.restart();
+        else
+            showTimer.stop();
+    }
+    Component.onCompleted: if (root.visible) showTimer.start()
+
+    Timer {
+        id: showTimer
+        interval: 500
+        onTriggered: root.shown = true
+    }
 
     NumberAnimation on phase {
         from: 0
         to: 1
         duration: 6000
         loops: Animation.Infinite
-        running: root.visible
+        running: root.visible && root.shown
     }
 
     component RollingBlock: Rectangle {

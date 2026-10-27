@@ -18,8 +18,6 @@ Item {
     signal loadFailed(string url)
 
     readonly property string requestUrl: root.modelData
-        + (root.modelData.indexOf("?") >= 0 ? "&" : "?")
-        + "w=" + Math.round(root.width * 2)
 
     readonly property bool failed: root.failedShots[root.requestUrl] === true
 
@@ -30,19 +28,13 @@ Item {
             && shotImage.status !== Image.Error
     }
 
-    Image {
+    CachedImage {
         id: shotImage
         anchors.fill: parent
         source: root.failedShots[root.requestUrl] ? "" : root.requestUrl
         sourceSize.width: root.width * 2
         sourceSize.height: root.height * 2
         fillMode: Image.PreserveAspectCrop
-        asynchronous: true
-        opacity: status === Image.Ready ? 1 : 0
-
-        Behavior on opacity {
-            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
-        }
 
         layer.enabled: true
         layer.effect: MultiEffect {

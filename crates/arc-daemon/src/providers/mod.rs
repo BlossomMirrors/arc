@@ -1,50 +1,48 @@
 use async_trait::async_trait;
-use libarc::cache::JsonCache;
 use libarc::{ArcError, Package, Provider};
 use std::future::Future;
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::spawn;
-use tokio::sync::{mpsc::UnboundedSender, Mutex, RwLock};
+use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tokio::task::spawn_blocking;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+use crate::catalog;
 use libflatpak::gio::prelude::CancellableExt;
-
-// 15 minutes
-// newly installed packages show up without a manual refresh
-const PACKAGE_CACHE_TTL: Duration = Duration::from_secs(900);
 
 // a single slow or unreachable provider (e.g. Lutris waiting on lutris.net)
 // must not block search results from every other provider
 const PROVIDER_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-// flatpak's fetch depends on parsing the (potentially large, multi-remote)
-// appstream catalog via the shared AppStreamDb::get_static() OnceLock, a
-// one-time cost per daemon lifetime that's slow but always terminates on its
-// own; it gets more headroom than network-bound providers that could hang
-// indefinitely instead of just being slow
-const FLATPAK_FETCH_TIMEOUT: Duration = Duration::from_secs(180);
+// listing updates checks the providers again in the background at most this often
+const UPDATES_RECHECK: Duration = Duration::from_secs(300);
 
-// a timeout is presumed transient (e.g. a slow network) and worth retrying
-// soon; a real error from the provider is left at the normal cache TTL so a
-// persistently broken provider isn't hammered every few seconds
-async fn bounded<F>(name: &str, timeout: Duration, fetch: F) -> (Vec<Package>, bool)
+// becomes -1 when bound and sqlite reads LIMIT -1 as no limit
+pub const NO_LIMIT: u64 = u64::MAX;
+
+// a timeout or error keeps that provider's previous rows so one broken provider never empties the results of the others
+async fn fetch_with_timeout<F>(name: &str, fetch: F) -> Option<Vec<Package>>
 where
     F: Future<Output = Result<Vec<Package>, ArcError>>,
 {
-    match tokio::time::timeout(timeout, fetch).await {
-        Ok(Ok(packages)) => (packages, true),
+    match tokio::time::timeout(PROVIDER_FETCH_TIMEOUT, fetch).await {
+        Ok(Ok(packages)) => Some(packages),
         Ok(Err(e)) => {
             warn!("{name} provider fetch failed: {e}");
-            (Vec::new(), true)
+            None
         }
         Err(_) => {
-            warn!("{name} provider fetch timed out after {timeout:?}");
-            (Vec::new(), false)
+            warn!("{name} provider fetch timed out after {PROVIDER_FETCH_TIMEOUT:?}");
+            None
         }
     }
+}
+
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    spawn_blocking(f).await.ok()
 }
 
 #[async_trait]
@@ -66,25 +64,6 @@ pub mod flatpak;
 pub mod lutris;
 pub mod pwa;
 
-// a JSON snapshot of the last successful package_cache, so a fresh daemon
-// process can serve (slightly stale) search results immediately on startup
-// instead of making every first search wait out the full provider fetch
-static PACKAGE_STORE: OnceLock<JsonCache<Vec<Package>>> = OnceLock::new();
-
-fn package_store() -> &'static JsonCache<Vec<Package>> {
-    PACKAGE_STORE.get_or_init(|| JsonCache::new("daemon", "packages.json"))
-}
-
-fn load_disk_cache() -> Option<(Vec<Package>, Duration)> {
-    let (packages, age) = package_store().load_with_age()?;
-    info!("Loaded {} packages from on-disk cache ({}s old)", packages.len(), age.as_secs());
-    Some((packages, age))
-}
-
-fn save_disk_cache(packages: &[Package]) {
-    package_store().store(&packages.to_vec());
-}
-
 #[derive(Clone, Copy, Default)]
 pub struct Progress {
     pub percent: u8,
@@ -94,7 +73,10 @@ pub struct Progress {
 
 impl Progress {
     pub fn pct(percent: u8) -> Self {
-        Self { percent, ..Default::default() }
+        Self {
+            percent,
+            ..Default::default()
+        }
     }
 }
 
@@ -104,9 +86,9 @@ pub struct MultiProvider {
     pub lutris: Arc<lutris::LutrisProvider>,
     pub appimage: Arc<appimage::AppImageProvider>,
     pub pwa: Arc<pwa::PwaProvider>,
-    package_cache: RwLock<Option<(Instant, Vec<Package>)>>,
-    fetch_lock: Arc<Mutex<()>>,
-    self_weak: std::sync::Weak<MultiProvider>,
+    refresh_lock: Mutex<()>,
+    updates_lock: Mutex<()>,
+    installed_ready: AtomicBool,
 }
 
 impl MultiProvider {
@@ -117,39 +99,16 @@ impl MultiProvider {
         appimage: appimage::AppImageProvider,
         pwa: pwa::PwaProvider,
     ) -> Arc<Self> {
-        // pre-seed the cache from disk (if any) so the very first search
-        // after startup doesn't have to wait for a live provider fetch; an
-        // entry still within the TTL is seeded fresh, an older one is seeded
-        // already-stale so a background refresh triggers on first access
-        // instead of trusting possibly-days-old data for the full TTL
-        let seeded = load_disk_cache().map(|(packages, age)| {
-            let cached_at = if age < PACKAGE_CACHE_TTL {
-                Instant::now()
-            } else {
-                Instant::now() - PACKAGE_CACHE_TTL
-            };
-            (cached_at, packages)
-        });
-
-        Arc::new_cyclic(|weak| Self {
+        Arc::new(Self {
             native: Arc::new(native),
             flatpak: Arc::new(flatpak),
             lutris: Arc::new(lutris),
             appimage: Arc::new(appimage),
             pwa: Arc::new(pwa),
-            package_cache: RwLock::new(seeded),
-            fetch_lock: Arc::new(Mutex::new(())),
-            self_weak: weak.clone(),
+            refresh_lock: Mutex::new(()),
+            updates_lock: Mutex::new(()),
+            installed_ready: AtomicBool::new(false),
         })
-    }
-
-    fn trigger_background_refresh(&self) {
-        let Some(strong) = self.self_weak.upgrade() else { return };
-        let Ok(guard) = Arc::clone(&self.fetch_lock).try_lock_owned() else { return };
-        spawn(async move {
-            let _ = strong.fetch_and_store().await;
-            drop(guard);
-        });
     }
 
     fn is_lutris_id(id: &str) -> bool {
@@ -176,71 +135,200 @@ impl MultiProvider {
             && id.matches('.').count() >= 2
     }
 
-    async fn fetch_and_store(&self) -> Result<Vec<Package>, ArcError> {
-        let (flatpak, native, lutris, appimage, pwa) = tokio::join!(
-            bounded("flatpak", FLATPAK_FETCH_TIMEOUT, self.flatpak.fetch_all()),
-            bounded("native", PROVIDER_FETCH_TIMEOUT, self.native.fetch_all()),
-            bounded("lutris", PROVIDER_FETCH_TIMEOUT, self.lutris.fetch_all()),
-            bounded("appimage", PROVIDER_FETCH_TIMEOUT, self.appimage.fetch_all()),
-            bounded("pwa", PROVIDER_FETCH_TIMEOUT, self.pwa.search("")),
-        );
-        let complete = flatpak.1 && native.1 && lutris.1 && appimage.1 && pwa.1;
-        let previous = self.package_cache.read().await.as_ref().map(|(_, p)| p.clone()).unwrap_or_default();
-        let keep_previous = |provider: Provider| -> Vec<Package> {
-            previous.iter().filter(|p| p.provider == provider).cloned().collect()
-        };
+    fn provider_of(id: &str) -> Provider {
+        if Self::is_pwa_id(id) {
+            Provider::Pwa
+        } else if Self::is_appimage_id(id) {
+            Provider::AppImage
+        } else if Self::is_lutris_id(id) {
+            Provider::Lutris
+        } else if Self::is_flatpak_id(id) {
+            Provider::Flatpak
+        } else {
+            Provider::Distrobox
+        }
+    }
 
-        let mut packages = if flatpak.1 { flatpak.0 } else { keep_previous(Provider::Flatpak) };
-        packages.extend(if native.1 { native.0 } else { keep_previous(Provider::Distrobox) });
-        packages.extend(if lutris.1 { lutris.0 } else { keep_previous(Provider::Lutris) });
-        packages.extend(if appimage.1 { appimage.0 } else { keep_previous(Provider::AppImage) });
-        packages.extend(if pwa.1 { pwa.0 } else { keep_previous(Provider::Pwa) });
-        {
-            let mut cache = self.package_cache.write().await;
-            // if a provider timed out, keep this result around only briefly so
-            // the next search retries instead of being stuck on partial data
-            // for the full cache TTL
-            let retry_grace = Duration::from_secs(15);
-            let cached_at = if complete {
-                Instant::now()
-            } else {
-                Instant::now() - PACKAGE_CACHE_TTL.saturating_sub(retry_grace)
-            };
-            *cache = Some((cached_at, packages.clone()));
+    async fn refresh_provider(&self, provider: Provider) {
+        let (name, rows, installed) = match provider {
+            Provider::Flatpak => {
+                let (installed, runtimes) = tokio::join!(
+                    fetch_with_timeout("flatpak", self.flatpak.list_installed()),
+                    tokio::time::timeout(
+                        PROVIDER_FETCH_TIMEOUT,
+                        self.flatpak.list_installed_runtimes()
+                    ),
+                );
+                if let Ok(Ok(runtimes)) = runtimes {
+                    blocking(move || catalog::replace_installed_runtimes(&runtimes)).await;
+                }
+                ("flatpak", installed.clone(), installed)
+            }
+            Provider::Distrobox => {
+                let (rows, installed) = tokio::join!(
+                    fetch_with_timeout("native", self.native.fetch_all()),
+                    fetch_with_timeout("native", self.native.list_installed()),
+                );
+                ("native", rows, installed)
+            }
+            Provider::Lutris => {
+                let (rows, installed) = tokio::join!(
+                    fetch_with_timeout("lutris", self.lutris.fetch_all()),
+                    fetch_with_timeout("lutris", self.lutris.list_installed()),
+                );
+                ("lutris", rows, installed)
+            }
+            Provider::AppImage => {
+                let (rows, installed) = tokio::join!(
+                    fetch_with_timeout("appimage", self.appimage.fetch_all()),
+                    fetch_with_timeout("appimage", self.appimage.list_installed()),
+                );
+                ("appimage", rows, installed)
+            }
+            Provider::Pwa => {
+                let (rows, installed) = tokio::join!(
+                    fetch_with_timeout("pwa", self.pwa.search("")),
+                    fetch_with_timeout("pwa", self.pwa.list_installed()),
+                );
+                ("pwa", rows, installed)
+            }
+        };
+        let count = rows.as_ref().map(|r| r.len());
+        blocking(move || {
+            if let Some(rows) = rows {
+                catalog::replace_provider(&provider, &rows);
+            }
+            if let Some(installed) = installed {
+                catalog::replace_installed(&provider, &installed);
+            }
+        })
+        .await;
+        if let Some(n) = count {
+            info!("catalogue: {n} {name} packages");
         }
-        if complete {
-            // persist off the async path; this is plain blocking file I/O
-            let to_persist = packages.clone();
-            spawn_blocking(move || save_disk_cache(&to_persist));
-        }
-        Ok(packages)
+    }
+
+    async fn refresh_installed_and_rows(&self) {
+        tokio::join!(
+            self.refresh_provider(Provider::Flatpak),
+            self.refresh_provider(Provider::Distrobox),
+            self.refresh_provider(Provider::Lutris),
+            self.refresh_provider(Provider::AppImage),
+            self.refresh_provider(Provider::Pwa),
+        );
+        self.installed_ready.store(true, Ordering::Relaxed);
     }
 
     pub async fn refresh_cache(&self) -> Result<(), ArcError> {
-        self.fetch_and_store().await.map(|_| ())
-    }
-
-    // true if the disk-seeded cache is still within its TTL, i.e. a live
-    // provider fetch (flatpak list, distrobox enter per container, ...)
-    // isn't actually needed right now
-    pub async fn cache_is_fresh(&self) -> bool {
-        self.package_cache
-            .read()
+        let _guard = self.refresh_lock.lock().await;
+        self.refresh_installed_and_rows().await;
+        if let Some(refs) = bounded_refs(self.flatpak.list_remote_runtime_refs()).await {
+            blocking(move || catalog::replace_remote_refs(&refs)).await;
+        }
+        let icons = blocking(catalog::installed_remote_icons)
             .await
-            .as_ref()
-            .is_some_and(|(cached_at, _)| cached_at.elapsed() < PACKAGE_CACHE_TTL)
+            .unwrap_or_default();
+        spawn(async move {
+            use futures_util::StreamExt;
+            futures_util::stream::iter(icons)
+                .for_each_concurrent(4, |url| async move {
+                    crate::media::fetch(crate::media::MediaKind::Icon, &url, None).await;
+                })
+                .await;
+        });
+        Ok(())
     }
 
-    pub async fn invalidate_package_cache(&self) {
-        let mut cache = self.package_cache.write().await;
-        if let Some((cached_at, _)) = cache.as_mut() {
-            *cached_at = Instant::now() - PACKAGE_CACHE_TTL;
+    pub async fn refresh_appimages(&self) {
+        self.refresh_provider(Provider::AppImage).await;
+    }
+
+    pub async fn after_transaction(&self, package_id: Option<&str>) {
+        let provider = package_id
+            .map(Self::provider_of)
+            .unwrap_or(Provider::Flatpak);
+        self.refresh_provider(provider).await;
+        if let Some(id) = package_id.map(str::to_string) {
+            blocking(move || catalog::remove_update(&id)).await;
         }
     }
 
-    pub async fn cached_package(&self, id: &str) -> Option<Package> {
-        let cache = self.package_cache.read().await;
-        cache.as_ref()?.1.iter().find(|p| p.id == id).cloned()
+    pub async fn on_flatpak_changed(self: &Arc<Self>) {
+        self.refresh_provider(Provider::Flatpak).await;
+        let this = Arc::clone(self);
+        spawn(async move {
+            let _ = this.refresh_updates().await;
+        });
+    }
+
+    pub async fn refresh_updates(&self) -> Result<Vec<Package>, ArcError> {
+        let _guard = self.updates_lock.lock().await;
+        let (native, flatpak, appimage) = tokio::join!(
+            fetch_with_timeout("native", self.native.list_updates()),
+            fetch_with_timeout("flatpak", self.flatpak.list_updates()),
+            fetch_with_timeout("appimage", self.appimage.list_updates()),
+        );
+        blocking(move || {
+            for (provider, packages) in [
+                (Provider::Distrobox, native),
+                (Provider::Flatpak, flatpak),
+                (Provider::AppImage, appimage),
+            ] {
+                if let Some(packages) = packages {
+                    catalog::replace_updates(&provider, &packages);
+                }
+            }
+            catalog::mark_updates_checked();
+            catalog::list_updates()
+        })
+        .await
+        .ok_or_else(|| ArcError::ProviderError("update check was cancelled".into()))
+    }
+
+    pub async fn cached_updates(&self) -> Result<Vec<Package>, ArcError> {
+        if blocking(catalog::updates_checked_age)
+            .await
+            .flatten()
+            .is_some()
+        {
+            return Ok(blocking(catalog::list_updates).await.unwrap_or_default());
+        }
+        self.refresh_updates().await
+    }
+
+    pub async fn updates_stale(&self) -> bool {
+        blocking(catalog::updates_checked_age)
+            .await
+            .flatten()
+            .is_none_or(|age| age >= UPDATES_RECHECK)
+    }
+
+    pub async fn search_page(
+        &self,
+        query: &str,
+        locales: Vec<String>,
+        filter: catalog::SearchFilter,
+        offset: u64,
+        limit: u64,
+    ) -> catalog::SearchPage {
+        let query = query.to_string();
+        blocking(move || catalog::search(&query, &locales, true, &filter, offset, limit))
+            .await
+            .unwrap_or_default()
+    }
+
+    pub async fn category_page(
+        &self,
+        category: &str,
+        locales: Vec<String>,
+        priority: Vec<String>,
+        offset: u64,
+        limit: u64,
+    ) -> catalog::SearchPage {
+        let category = category.to_string();
+        blocking(move || catalog::by_category(&category, &locales, &priority, offset, limit))
+            .await
+            .unwrap_or_default()
     }
 
     pub async fn list_extensions(&self, app_id: &str) -> Result<Vec<Package>, ArcError> {
@@ -355,69 +443,55 @@ impl MultiProvider {
                 .await
         }
     }
+}
 
-    async fn all_packages(&self) -> Result<Vec<Package>, ArcError> {
-        let cached = {
-            let cache = self.package_cache.read().await;
-            cache
-                .as_ref()
-                .map(|(cached_at, packages)| (cached_at.elapsed() < PACKAGE_CACHE_TTL, packages.clone()))
-        };
-        if let Some((fresh, packages)) = cached {
-            if !fresh {
-                self.trigger_background_refresh();
-            }
-            return Ok(packages);
+async fn bounded_refs<F>(fetch: F) -> Option<Vec<(String, String, String)>>
+where
+    F: Future<Output = Result<Vec<(String, String, String)>, ArcError>>,
+{
+    match tokio::time::timeout(PROVIDER_FETCH_TIMEOUT, fetch).await {
+        Ok(Ok(refs)) => Some(refs),
+        Ok(Err(e)) => {
+            warn!("flatpak remote refs failed: {e}");
+            None
         }
-
-        let lock = self.fetch_lock.lock().await;
-        if let Some((_, packages)) = self.package_cache.read().await.as_ref() {
-            return Ok(packages.clone());
+        Err(_) => {
+            warn!("flatpak remote refs timed out");
+            None
         }
-        let (flatpak_packages, _) = bounded("flatpak", FLATPAK_FETCH_TIMEOUT, self.flatpak.fetch_all()).await;
-        {
-            let mut cache = self.package_cache.write().await;
-            *cache = Some((Instant::now() - PACKAGE_CACHE_TTL, flatpak_packages.clone()));
-        }
-        drop(lock);
-        self.trigger_background_refresh();
-        Ok(flatpak_packages)
     }
 }
 
 #[async_trait]
 impl PackageProvider for MultiProvider {
     async fn search(&self, query: &str) -> Result<Vec<Package>, ArcError> {
-        let packages = self.all_packages().await?;
-        Ok(libarc::search_and_rank(packages, query))
+        let page = self
+            .search_page(
+                query,
+                crate::appstream_db::system_locales(),
+                Default::default(),
+                0,
+                NO_LIMIT,
+            )
+            .await;
+        Ok(page
+            .items
+            .into_iter()
+            .map(catalog::CatalogApp::into_package)
+            .collect())
     }
 
     async fn list_installed(&self) -> Result<Vec<Package>, ArcError> {
-        let (native, flatpak, lutris, appimage, pwa) = tokio::join!(
-            self.native.list_installed(),
-            self.flatpak.list_installed(),
-            self.lutris.list_installed(),
-            self.appimage.list_installed(),
-            self.pwa.list_installed(),
-        );
-        let mut results = native.unwrap_or_default();
-        results.extend(flatpak.unwrap_or_default());
-        results.extend(lutris.unwrap_or_default());
-        results.extend(appimage.unwrap_or_default());
-        results.extend(pwa.unwrap_or_default());
-        Ok(results)
+        let stored = blocking(catalog::list_installed).await.unwrap_or_default();
+        if !stored.is_empty() || self.installed_ready.load(Ordering::Relaxed) {
+            return Ok(stored);
+        }
+        self.refresh_installed_and_rows().await;
+        Ok(blocking(catalog::list_installed).await.unwrap_or_default())
     }
 
     async fn list_updates(&self) -> Result<Vec<Package>, ArcError> {
-        let (native, flatpak, appimage) = tokio::join!(
-            self.native.list_updates(),
-            self.flatpak.list_updates(),
-            self.appimage.list_updates(),
-        );
-        let mut results = native.unwrap_or_default();
-        results.extend(flatpak.unwrap_or_default());
-        results.extend(appimage.unwrap_or_default());
-        Ok(results)
+        self.refresh_updates().await
     }
 
     async fn install(&self, package_id: &str) -> Result<(), ArcError> {
@@ -475,14 +549,19 @@ impl PackageProvider for MultiProvider {
     }
 
     async fn search_category(&self, category: &str) -> Result<Vec<Package>, ArcError> {
-        if crate::appstream_db::AppStreamDb::fully_loaded() {
-            return self.flatpak.search_category(category).await;
-        }
-        let cat_lower = category.to_lowercase();
-        let all = self.all_packages().await?;
-        Ok(all
+        let page = self
+            .category_page(
+                category,
+                crate::appstream_db::system_locales(),
+                Vec::new(),
+                0,
+                NO_LIMIT,
+            )
+            .await;
+        Ok(page
+            .items
             .into_iter()
-            .filter(|p| p.categories.iter().any(|c| c.eq_ignore_ascii_case(&cat_lower)))
+            .map(catalog::CatalogApp::into_package)
             .collect())
     }
 
@@ -494,11 +573,7 @@ impl PackageProvider for MultiProvider {
         } else if Self::is_lutris_id(package_id) {
             self.lutris.get_app_info(package_id).await
         } else if Self::is_flatpak_id(package_id) {
-            match self.flatpak.get_app_info(package_id).await {
-                Ok(Some(pkg)) => Ok(Some(pkg)),
-
-                _ => Ok(self.cached_package(package_id).await),
-            }
+            self.flatpak.get_app_info(package_id).await
         } else {
             self.native.get_app_info(package_id).await
         }

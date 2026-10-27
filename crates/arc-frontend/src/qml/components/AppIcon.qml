@@ -20,21 +20,14 @@ Item {
 
     onSourceChanged: root.attempt = 0
 
-    Image {
+    CachedImage {
         id: img
         anchors.fill: parent
         visible: root.isUrl
-        asynchronous: true
-        cache: true
         fillMode: Image.PreserveAspectFit
         sourceSize.width: root.decodeSize
         sourceSize.height: root.decodeSize
-
         source: root.isUrl && root.decodeSize > 0 ? root.requestUrl : ""
-        opacity: status === Image.Ready ? 1 : 0
-        Behavior on opacity {
-            NumberAnimation { duration: Kirigami.Units.shortDuration }
-        }
     }
 
     Timer {
@@ -46,6 +39,6 @@ Item {
     Kirigami.Icon {
         anchors.fill: parent
         visible: !root.isUrl || img.status === Image.Error
-        source: root.source.length > 0 && !root.isUrl ? root.source : "application-x-executable"
+        source: !visible ? "" : root.source.length > 0 && !root.isUrl ? root.source : "application-x-executable"
     }
 }

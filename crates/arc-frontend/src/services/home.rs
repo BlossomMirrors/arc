@@ -1,10 +1,10 @@
-use crate::services::forge::{self, FpLinksItem, FpSection, ForgeStory};
+use crate::services::forge::{self, ForgeStory, FpLinksItem, FpSection};
 use crate::services::icons;
 use futures_util::future::join_all;
 use libarc::ArcDaemonProxy;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize, Default)]
 pub struct Card {
     pub id: String,
     pub name: String,
@@ -13,7 +13,7 @@ pub struct Card {
     pub installed: bool,
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize, Default)]
 pub struct HeroItem {
     pub id: String,
     pub banner_url: String,
@@ -26,7 +26,7 @@ pub struct HeroItem {
     pub apps: Vec<Card>,
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize, Default)]
 pub struct LinkItem {
     pub text: String,
     pub href: String,
@@ -34,7 +34,7 @@ pub struct LinkItem {
     pub app_id: String,
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize, Default)]
 pub struct Category {
     pub id: String,
     pub label: String,
@@ -42,9 +42,43 @@ pub struct Category {
     pub color: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SectionKind {
+    H1,
+    H2,
+    H3,
+    #[default]
+    P,
+    Br,
+    Categories,
+    AppRow,
+    AppGrid,
+    AppWideGrid,
+    Carousel,
+    Links,
+}
+
+impl SectionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SectionKind::H1 => "h1",
+            SectionKind::H2 => "h2",
+            SectionKind::H3 => "h3",
+            SectionKind::P => "p",
+            SectionKind::Br => "br",
+            SectionKind::Categories => "categories",
+            SectionKind::AppRow => "app-row",
+            SectionKind::AppGrid => "app-grid",
+            SectionKind::AppWideGrid => "app-wide-grid",
+            SectionKind::Carousel => "carousel",
+            SectionKind::Links => "links",
+        }
+    }
+}
+
+#[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct HomeSection {
-    pub item_type: &'static str,
+    pub kind: SectionKind,
     pub text: String,
     pub title: String,
     pub cards: Vec<Card>,
@@ -54,25 +88,8 @@ pub struct HomeSection {
     pub link_items: Vec<LinkItem>,
     pub app_cloud_overlay: bool,
     pub categories: Vec<Category>,
+    #[serde(skip)]
     pub loading: bool,
-}
-
-impl Default for HomeSection {
-    fn default() -> Self {
-        Self {
-            item_type: "p",
-            text: String::new(),
-            title: String::new(),
-            cards: vec![],
-            hero_items: vec![],
-            editorial_items: vec![],
-            link_title: String::new(),
-            link_items: vec![],
-            app_cloud_overlay: false,
-            categories: vec![],
-            loading: false,
-        }
-    }
 }
 
 const STORY_INDEX_STRIDE: i32 = 1000;
@@ -114,9 +131,24 @@ struct AppEntry {
 }
 
 const CATEGORY_DEFS: &[(&str, &str, &str, &str); 9] = &[
-    ("AudioVideo", "Multimedia", "applications-multimedia", "#2980b9"),
-    ("Development", "Developer Tools", "applications-development", "#8e44ad"),
-    ("Education", "Education", "applications-education", "#27ae60"),
+    (
+        "AudioVideo",
+        "Multimedia",
+        "applications-multimedia",
+        "#2980b9",
+    ),
+    (
+        "Development",
+        "Developer Tools",
+        "applications-development",
+        "#8e44ad",
+    ),
+    (
+        "Education",
+        "Education",
+        "applications-education",
+        "#27ae60",
+    ),
     ("Graphics", "Graphics", "applications-graphics", "#c0392b"),
     ("Network", "Internet", "applications-internet", "#16a085"),
     ("Office", "Office", "applications-office", "#d35400"),
@@ -243,7 +275,9 @@ async fn entries_to_cards(entries: Vec<AppEntry>, installed: &HashSet<String>) -
         .collect()
 }
 
-pub async fn plan_home(proxy: Option<ArcDaemonProxy<'static>>) -> (HomePlan, std::sync::Arc<HomeCtx>) {
+pub async fn plan_home(
+    proxy: Option<ArcDaemonProxy<'static>>,
+) -> (HomePlan, std::sync::Arc<HomeCtx>) {
     let lang = sys_locale::get_locale()
         .unwrap_or_default()
         .split(['_', '-'])
@@ -276,7 +310,9 @@ pub async fn plan_home(proxy: Option<ArcDaemonProxy<'static>>) -> (HomePlan, std
     let installed_ids = installed_raw;
     let app_meta_map = app_meta_raw;
 
-    let show_categories = fp_sections.iter().any(|s| matches!(s, FpSection::Categories));
+    let show_categories = fp_sections
+        .iter()
+        .any(|s| matches!(s, FpSection::Categories));
 
     let mut sections = Vec::with_capacity(fp_sections.len());
     let mut pending = Vec::new();
@@ -284,54 +320,83 @@ pub async fn plan_home(proxy: Option<ArcDaemonProxy<'static>>) -> (HomePlan, std
     for section in fp_sections {
         let row_index = sections.len();
         let stub = match &section {
-            FpSection::H1(t) => HomeSection { item_type: "h1", text: t.clone(), ..Default::default() },
-            FpSection::H2(t) => HomeSection { item_type: "h2", text: t.clone(), ..Default::default() },
-            FpSection::H3(t) => HomeSection { item_type: "h3", text: t.clone(), ..Default::default() },
-            FpSection::P(t) => HomeSection { item_type: "p", text: t.clone(), ..Default::default() },
-            FpSection::Br => HomeSection { item_type: "br", ..Default::default() },
+            FpSection::H1(t) => HomeSection {
+                kind: SectionKind::H1,
+                text: t.clone(),
+                ..Default::default()
+            },
+            FpSection::H2(t) => HomeSection {
+                kind: SectionKind::H2,
+                text: t.clone(),
+                ..Default::default()
+            },
+            FpSection::H3(t) => HomeSection {
+                kind: SectionKind::H3,
+                text: t.clone(),
+                ..Default::default()
+            },
+            FpSection::P(t) => HomeSection {
+                kind: SectionKind::P,
+                text: t.clone(),
+                ..Default::default()
+            },
+            FpSection::Br => HomeSection {
+                kind: SectionKind::Br,
+                ..Default::default()
+            },
             FpSection::Categories => HomeSection {
-                item_type: "categories",
-                categories: if show_categories { build_categories() } else { vec![] },
+                kind: SectionKind::Categories,
+                categories: if show_categories {
+                    build_categories()
+                } else {
+                    vec![]
+                },
                 ..Default::default()
             },
             FpSection::Top => HomeSection {
-                item_type: "app-wide-grid",
+                kind: SectionKind::AppWideGrid,
                 title: "Popular".into(),
                 loading: true,
                 ..Default::default()
             },
             FpSection::New => HomeSection {
-                item_type: "app-wide-grid",
+                kind: SectionKind::AppWideGrid,
                 title: "Recently Added".into(),
                 loading: true,
                 ..Default::default()
             },
             FpSection::Trending => HomeSection {
-                item_type: "app-wide-grid",
+                kind: SectionKind::AppWideGrid,
                 title: "Trending".into(),
                 loading: true,
                 ..Default::default()
             },
             FpSection::Charts { cards: as_cards } => HomeSection {
-                item_type: if *as_cards { "app-row" } else { "app-wide-grid" },
+                kind: if *as_cards {
+                    SectionKind::AppRow
+                } else {
+                    SectionKind::AppWideGrid
+                },
                 title: "Charts".into(),
                 loading: true,
                 ..Default::default()
             },
             FpSection::Custom { title, .. } => HomeSection {
-                item_type: "app-wide-grid",
+                kind: SectionKind::AppWideGrid,
                 title: title.clone(),
                 loading: true,
                 ..Default::default()
             },
-            FpSection::CarouselSection { app_cloud_overlay, .. } => HomeSection {
-                item_type: "carousel",
+            FpSection::CarouselSection {
+                app_cloud_overlay, ..
+            } => HomeSection {
+                kind: SectionKind::Carousel,
                 app_cloud_overlay: *app_cloud_overlay,
                 loading: true,
                 ..Default::default()
             },
             FpSection::LinksSection { title, .. } => HomeSection {
-                item_type: "links",
+                kind: SectionKind::Links,
                 link_title: title.clone(),
                 loading: true,
                 ..Default::default()
@@ -344,7 +409,12 @@ pub async fn plan_home(proxy: Option<ArcDaemonProxy<'static>>) -> (HomePlan, std
         }
     }
 
-    let ctx = std::sync::Arc::new(HomeCtx { proxy, pwa_map, installed_ids, app_meta_map });
+    let ctx = std::sync::Arc::new(HomeCtx {
+        proxy,
+        pwa_map,
+        installed_ids,
+        app_meta_map,
+    });
     (HomePlan { sections, pending }, ctx)
 }
 
@@ -362,7 +432,12 @@ pub async fn resolve_pending_section(
             let entries = resolve_ids_cached(&ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
             let cards = entries_to_cards(entries, &ctx.installed_ids).await;
             (
-                HomeSection { item_type: "app-wide-grid", title: "Popular".into(), cards, ..Default::default() },
+                HomeSection {
+                    kind: SectionKind::AppWideGrid,
+                    title: "Popular".into(),
+                    cards,
+                    ..Default::default()
+                },
                 vec![],
             )
         }
@@ -371,7 +446,12 @@ pub async fn resolve_pending_section(
             let entries = resolve_ids_cached(&ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
             let cards = entries_to_cards(entries, &ctx.installed_ids).await;
             (
-                HomeSection { item_type: "app-wide-grid", title: "Recently Added".into(), cards, ..Default::default() },
+                HomeSection {
+                    kind: SectionKind::AppWideGrid,
+                    title: "Recently Added".into(),
+                    cards,
+                    ..Default::default()
+                },
                 vec![],
             )
         }
@@ -380,7 +460,12 @@ pub async fn resolve_pending_section(
             let entries = resolve_ids_cached(&ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
             let cards = entries_to_cards(entries, &ctx.installed_ids).await;
             (
-                HomeSection { item_type: "app-wide-grid", title: "Trending".into(), cards, ..Default::default() },
+                HomeSection {
+                    kind: SectionKind::AppWideGrid,
+                    title: "Trending".into(),
+                    cards,
+                    ..Default::default()
+                },
                 vec![],
             )
         }
@@ -390,7 +475,11 @@ pub async fn resolve_pending_section(
             let cards = entries_to_cards(entries, &ctx.installed_ids).await;
             (
                 HomeSection {
-                    item_type: if as_cards { "app-row" } else { "app-wide-grid" },
+                    kind: if as_cards {
+                        SectionKind::AppRow
+                    } else {
+                        SectionKind::AppWideGrid
+                    },
                     title: "Charts".into(),
                     cards,
                     ..Default::default()
@@ -401,9 +490,21 @@ pub async fn resolve_pending_section(
         FpSection::Custom { title, app_ids } => {
             let entries = resolve_ids_cached(&app_ids, &ctx.app_meta_map, p, &ctx.pwa_map).await;
             let cards = entries_to_cards(entries, &ctx.installed_ids).await;
-            (HomeSection { item_type: "app-wide-grid", title, cards, ..Default::default() }, vec![])
+            (
+                HomeSection {
+                    kind: SectionKind::AppWideGrid,
+                    title,
+                    cards,
+                    ..Default::default()
+                },
+                vec![],
+            )
         }
-        FpSection::CarouselSection { breakpoint, items, app_cloud_overlay } => {
+        FpSection::CarouselSection {
+            breakpoint,
+            items,
+            app_cloud_overlay,
+        } => {
             build_carousel(
                 breakpoint,
                 items,
@@ -417,8 +518,16 @@ pub async fn resolve_pending_section(
             .await
         }
         FpSection::LinksSection { title, items, .. } => {
-            build_links(title, items, p, &ctx.pwa_map, &ctx.installed_ids, &ctx.app_meta_map, base_story_index)
-                .await
+            build_links(
+                title,
+                items,
+                p,
+                &ctx.pwa_map,
+                &ctx.installed_ids,
+                &ctx.app_meta_map,
+                base_story_index,
+            )
+            .await
         }
         // H1/H2/H3/P/Br/Categories never produce a PendingSection in plan_home
         _ => unreachable!("non-pending FpSection reached resolve_pending_section"),
@@ -434,10 +543,8 @@ pub struct ListData {
     pub cards: Vec<Card>,
 }
 
-pub async fn load_list(slug: &str) -> ListData {
-    let Some(list) = forge::fetch_list(slug).await else {
-        return ListData { slug: slug.to_string(), ..Default::default() };
-    };
+pub async fn load_list(slug: &str) -> Option<ListData> {
+    let list = forge::fetch_list(slug).await?;
 
     let proxy = crate::runtime::proxy().await;
     let lang = forge::user_lang();
@@ -487,11 +594,11 @@ pub async fn load_list(slug: &str) -> ListData {
         })
         .collect();
 
-    ListData {
+    Some(ListData {
         slug: slug.to_string(),
         description: list.description.unwrap_or_default(),
         cards,
-    }
+    })
 }
 
 fn build_categories() -> Vec<Category> {
@@ -552,8 +659,7 @@ async fn build_carousel(
         }
     }
 
-    let story_app_ids: Vec<Vec<String>> =
-        story_forge.iter().map(|s| s.app_ids.clone()).collect();
+    let story_app_ids: Vec<Vec<String>> = story_forge.iter().map(|s| s.app_ids.clone()).collect();
 
     let mut lookup_ids = app_id_list.clone();
     for ids in &story_app_ids {
@@ -585,8 +691,11 @@ async fn build_carousel(
             ))
         })
         .collect();
-    let pos_to_story_idx: HashMap<usize, usize> =
-        story_positions.iter().enumerate().map(|(si, &pos)| (pos, si)).collect();
+    let pos_to_story_idx: HashMap<usize, usize> = story_positions
+        .iter()
+        .enumerate()
+        .map(|(si, &pos)| (pos, si))
+        .collect();
 
     let mut hero_items: Vec<HeroItem> = Vec::new();
     let mut editorial_items: Vec<HeroItem> = Vec::new();
@@ -607,7 +716,9 @@ async fn build_carousel(
                     })
                     .unwrap_or_default();
                 let hero_item = HeroItem {
-                    id: rs.map(|r| r.id.clone()).unwrap_or_else(|| format!("story-{global_story_index}")),
+                    id: rs
+                        .map(|r| r.id.clone())
+                        .unwrap_or_else(|| format!("story-{global_story_index}")),
                     banner_url: rs.map(|r| r.banner_url.clone()).unwrap_or_default(),
                     icon_url: String::new(),
                     title: s.title.clone(),
@@ -644,7 +755,7 @@ async fn build_carousel(
 
     (
         HomeSection {
-            item_type: "carousel",
+            kind: SectionKind::Carousel,
             cards: editorial_app_cards,
             hero_items,
             editorial_items,
@@ -680,16 +791,31 @@ async fn build_links(
                 let idx = story_forge.len();
                 story_forge.push(s.clone());
                 link_kinds.push(LinkKind::Story(idx));
-                link_items.push(LinkItem { text: s.title.clone(), href: String::new(), story_index: -1, app_id: String::new() });
+                link_items.push(LinkItem {
+                    text: s.title.clone(),
+                    href: String::new(),
+                    story_index: -1,
+                    app_id: String::new(),
+                });
             }
             FpLinksItem::App(id) => {
                 app_ids_batch.push(id.clone());
                 link_kinds.push(LinkKind::App(id.clone()));
-                link_items.push(LinkItem { text: String::new(), href: String::new(), story_index: -1, app_id: id.clone() });
+                link_items.push(LinkItem {
+                    text: String::new(),
+                    href: String::new(),
+                    story_index: -1,
+                    app_id: id.clone(),
+                });
             }
             FpLinksItem::Url { text, href } => {
                 link_kinds.push(LinkKind::Url);
-                link_items.push(LinkItem { text: text.clone(), href: href.clone(), story_index: -1, app_id: String::new() });
+                link_items.push(LinkItem {
+                    text: text.clone(),
+                    href: href.clone(),
+                    story_index: -1,
+                    app_id: String::new(),
+                });
             }
         }
     }
@@ -700,7 +826,8 @@ async fn build_links(
         resolve_ids_cached(&app_ids_batch, app_meta_map, proxy, pwa_map),
     );
 
-    let app_name_map: HashMap<String, String> = app_entries.into_iter().map(|e| (e.id, e.name)).collect();
+    let app_name_map: HashMap<String, String> =
+        app_entries.into_iter().map(|e| (e.id, e.name)).collect();
 
     for (kind, item) in link_kinds.iter().zip(link_items.iter_mut()) {
         match kind {
@@ -711,14 +838,22 @@ async fn build_links(
                 }
             }
             LinkKind::App(id) => {
-                item.text = app_name_map.get(id.as_str()).cloned().unwrap_or_else(|| id.clone());
+                item.text = app_name_map
+                    .get(id.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| id.clone());
             }
             LinkKind::Url => {}
         }
     }
 
     (
-        HomeSection { item_type: "links", link_title: title, link_items, ..Default::default() },
+        HomeSection {
+            kind: SectionKind::Links,
+            link_title: title,
+            link_items,
+            ..Default::default()
+        },
         loaded_stories,
     )
 }

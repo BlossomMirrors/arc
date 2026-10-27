@@ -28,6 +28,17 @@ Kirigami.ScrollablePage {
 
     Component.onCompleted: HomeFeedModel.load()
 
+    function belowWindow(index) {
+        var y = 0;
+        for (var j = 0; j < index; j++) {
+            var row = sectionsRepeater.itemAt(j);
+            if (!row)
+                return false;
+            y += row.implicitHeight;
+        }
+        return y > applicationWindow().height;
+    }
+
     readonly property bool feedEmpty: !HomeFeedModel.loading && sectionsRepeater.count === 0
 
     Timer {
@@ -99,6 +110,8 @@ Kirigami.ScrollablePage {
 
                 delegate: Loader {
                     id: rowLoader
+                    active: StartupController.firstFrameShown || !root.belowWindow(rowLoader.index)
+                    onActiveChanged: if (active) rowLoader.active = true
 
                     required property int index
                     required property string itemType
@@ -391,6 +404,7 @@ Kirigami.ScrollablePage {
                                     height: 150
                                     bannerUrl: modelData.banner_url
                                     iconUrl: modelData.icon_url
+                                    pkgId: modelData.is_story ? "" : (modelData.id ?? "")
                                     heroTitle: modelData.title
                                     body: modelData.body
                                     onActivated: modelData.is_story ? NavController.openStory("story-" + modelData.story_index) : NavController.openApp(modelData.id, "")

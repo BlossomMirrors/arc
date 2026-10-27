@@ -10,10 +10,8 @@ use std::sync::OnceLock;
 use tokio::task::spawn_blocking;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::appstream_db::{
-    find_local_flatpak_icon_bytes, parse_locale_candidates, score_entry, AppStreamDb,
-    AppStreamEntry,
-};
+use crate::appstream_db::{find_local_flatpak_icon_bytes, parse_locale_candidates, AppStreamEntry};
+use crate::catalog;
 use crate::providers::lutris::LutrisProvider;
 use crate::providers::pwa::PwaProvider;
 use crate::providers::PackageProvider;
@@ -117,11 +115,18 @@ struct AppParams {
 struct ImageParams {
     url: String,
     w: Option<u32>,
+
+    #[serde(default)]
+    kind: String,
 }
 
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
+
+fn entries(apps: Vec<catalog::CatalogApp>) -> Vec<AppStreamEntry> {
+    apps.into_iter().map(AppStreamEntry::from).collect()
+}
 
 async fn search(Query(p): Query<SearchParams>) -> impl IntoResponse {
     let locales = p.lang.locales();
@@ -131,10 +136,28 @@ async fn search(Query(p): Query<SearchParams>) -> impl IntoResponse {
         let q = p.q.clone();
         let q_lower = q_lower.clone();
         spawn_blocking(move || {
-            AppStreamDb::get()
-                .search_apps_with_locales(&q, &locales)
+            let page = catalog::search(
+                &q,
+                &locales,
+                false,
+                &Default::default(),
+                0,
+                crate::providers::NO_LIMIT,
+            );
+            page.items
                 .into_iter()
-                .filter_map(|e| score_entry(&e, &q_lower).map(|s| (e, s)))
+                .filter(|a| a.provider == Some(libarc::Provider::Flatpak))
+                .map(AppStreamEntry::from)
+                .map(|e| {
+                    let score = catalog::score(
+                        &e.name.to_lowercase(),
+                        &e.id.to_lowercase(),
+                        &e.summary.to_lowercase(),
+                        &q_lower,
+                        false,
+                    );
+                    (e, score)
+                })
                 .collect()
         })
         .await
@@ -147,13 +170,16 @@ async fn search(Query(p): Query<SearchParams>) -> impl IntoResponse {
     let mut merged: Vec<(serde_json::Value, u32)> = flatpak_results
         .into_iter()
         .map(|(mut entry, score)| {
-            crate::media::proxy_icon_url_field(&mut entry.icon_url, &entry.id);
-            crate::media::proxy_screenshot_urls(&mut entry.screenshots);
+            proxy_entry(&mut entry);
             (serde_json::to_value(&entry).unwrap_or_default(), score)
         })
         .collect();
 
-    for mut pkg in pwa_packages.unwrap_or_default().into_iter().chain(lutris_packages.unwrap_or_default()) {
+    for mut pkg in pwa_packages
+        .unwrap_or_default()
+        .into_iter()
+        .chain(lutris_packages.unwrap_or_default())
+    {
         if let Some(score) = score_package(&pkg, &q_lower) {
             crate::media::proxy_icon_url_field(&mut pkg.icon_url, &pkg.id);
             crate::media::proxy_screenshot_urls(&mut pkg.screenshots);
@@ -174,20 +200,30 @@ async fn search(Query(p): Query<SearchParams>) -> impl IntoResponse {
     Json(response)
 }
 
+fn proxy_entry(entry: &mut AppStreamEntry) {
+    if entry
+        .icon_url
+        .as_deref()
+        .is_some_and(|u| matches!(libarc::media::classify(u), libarc::media::MediaRef::Local))
+    {
+        entry.icon_url = Some(crate::media::icon_proxy_url(&entry.id));
+    }
+    crate::media::proxy_icon_url_field(&mut entry.icon_url, &entry.id);
+    crate::media::proxy_screenshot_urls(&mut entry.screenshots);
+}
+
 fn proxy_entries(entries: &mut [AppStreamEntry]) {
     for entry in entries {
-        crate::media::proxy_icon_url_field(&mut entry.icon_url, &entry.id);
-        crate::media::proxy_screenshot_urls(&mut entry.screenshots);
+        proxy_entry(entry);
     }
 }
 
 async fn home(Query(p): Query<HomeParams>) -> impl IntoResponse {
     let locales = p.lang.locales();
     let (mut popular, mut recent) = spawn_blocking(move || {
-        let db = AppStreamDb::get();
         (
-            db.get_popular_apps_with_locales(p.popular as usize, &locales),
-            db.get_recent_apps_with_locales(p.recent as usize, &locales),
+            entries(catalog::appstream_slice(&locales, p.popular as u64, false)),
+            entries(catalog::appstream_slice(&locales, p.recent as u64, true)),
         )
     })
     .await
@@ -201,7 +237,13 @@ async fn home(Query(p): Query<HomeParams>) -> impl IntoResponse {
 async fn category(Path(name): Path<String>, Query(p): Query<CategoryParams>) -> impl IntoResponse {
     let locales = p.lang.locales();
     let mut results = spawn_blocking(move || {
-        AppStreamDb::get().get_apps_by_category_with_locales(&name, &locales)
+        let page = catalog::by_category(&name, &locales, &[], 0, crate::providers::NO_LIMIT);
+        entries(
+            page.items
+                .into_iter()
+                .filter(|a| a.provider == Some(libarc::Provider::Flatpak))
+                .collect(),
+        )
     })
     .await
     .unwrap_or_default();
@@ -231,38 +273,50 @@ async fn app_metadata(Path(id): Path<String>, Query(p): Query<AppParams>) -> Res
         };
     }
 
+    crate::forge_cache::check_verification(id.clone());
     let locales = p.lang.locales();
     let result = spawn_blocking(move || {
-        let db = AppStreamDb::get();
-        db.find_by_id_with_locales(&id, &locales)
-            .or_else(|| db.load_from_exported_metainfo_with_locales(&id, &locales))
+        catalog::get(&id, &locales)
+            .map(AppStreamEntry::from)
+            .or_else(|| crate::appstream_db::load_local_metainfo(&id))
     })
     .await
     .unwrap_or(None);
 
     match result {
         Some(mut entry) => {
-            crate::media::proxy_icon_url_field(&mut entry.icon_url, &entry.id);
-            crate::media::proxy_screenshot_urls(&mut entry.screenshots);
+            proxy_entry(&mut entry);
             Json(entry).into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
-async fn app_icon(Path(id): Path<String>) -> Response {
-    let icon_url = if id.starts_with("pwa:") {
-        pwa_provider().get_app_info(&id).await.ok().flatten().and_then(|pkg| pkg.icon_url)
+pub async fn icon_source(id: &str) -> Option<String> {
+    if id.starts_with("pwa:") {
+        pwa_provider()
+            .get_app_info(id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|pkg| pkg.icon_url)
     } else if id.starts_with("lutris:") {
-        lutris_provider().get_app_info(&id).await.ok().flatten().and_then(|pkg| pkg.icon_url)
+        lutris_provider()
+            .get_app_info(id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|pkg| pkg.icon_url)
     } else {
-        let id_for_lookup = id.clone();
-        spawn_blocking(move || {
-            AppStreamDb::get().find_by_id(&id_for_lookup).and_then(|e| e.icon_url)
-        })
-        .await
-        .unwrap_or(None)
-    };
+        let id = id.to_string();
+        spawn_blocking(move || catalog::get(&id, &[]).and_then(|e| e.icon_url))
+            .await
+            .unwrap_or(None)
+    }
+}
+
+async fn app_icon(Path(id): Path<String>) -> Response {
+    let icon_url = icon_source(&id).await;
 
     let Some(url) = icon_url else {
         return StatusCode::NOT_FOUND.into_response();
@@ -271,7 +325,9 @@ async fn app_icon(Path(id): Path<String>) -> Response {
     match libarc::media::classify(&url) {
         libarc::media::MediaRef::Remote(u) => {
             match crate::media::fetch(crate::media::MediaKind::Icon, u, None).await {
-                Some((bytes, content_type)) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
+                Some((bytes, content_type)) => {
+                    ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
+                }
                 None => StatusCode::NOT_FOUND.into_response(),
             }
         }
@@ -283,12 +339,18 @@ async fn app_icon(Path(id): Path<String>) -> Response {
                 } else {
                     libarc::icons::normalize_padding(&bytes)
                 };
-                Some(padded.map(|p| (p, "image/png".to_string())).unwrap_or((bytes, content_type)))
+                Some(
+                    padded
+                        .map(|p| (p, "image/png".to_string()))
+                        .unwrap_or((bytes, content_type)),
+                )
             })
             .await
             .unwrap_or(None);
             match bytes {
-                Some((bytes, content_type)) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
+                Some((bytes, content_type)) => {
+                    ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
+                }
                 None => StatusCode::NOT_FOUND.into_response(),
             }
         }
@@ -298,11 +360,21 @@ async fn app_icon(Path(id): Path<String>) -> Response {
 
 // Proxy a remote image URL (e.g. screenshots). Only http(s) URLs are accepted.
 async fn proxy_image(Query(p): Query<ImageParams>) -> Response {
-    if !matches!(libarc::media::classify(&p.url), libarc::media::MediaRef::Remote(_)) {
+    if !matches!(
+        libarc::media::classify(&p.url),
+        libarc::media::MediaRef::Remote(_)
+    ) {
         return (StatusCode::BAD_REQUEST, "Only http(s) URLs are supported").into_response();
     }
-    match crate::media::fetch(crate::media::MediaKind::Screenshot, &p.url, p.w).await {
-        Some((bytes, content_type)) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
+    let kind = if p.kind == "icon" {
+        crate::media::MediaKind::Icon
+    } else {
+        crate::media::MediaKind::Screenshot
+    };
+    match crate::media::fetch(kind, &p.url, p.w).await {
+        Some((bytes, content_type)) => {
+            ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
+        }
         None => StatusCode::BAD_GATEWAY.into_response(),
     }
 }

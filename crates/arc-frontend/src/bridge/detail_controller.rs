@@ -33,6 +33,7 @@ pub mod qobject {
         #[qproperty(bool, busy)]
         #[qproperty(f32, progress)]
         #[qproperty(QStringList, screenshots)]
+        #[qproperty(QStringList, full_screenshots, cxx_name = "fullScreenshots")]
         type DetailController = super::DetailControllerRust;
 
         #[qinvokable]
@@ -51,7 +52,7 @@ pub mod qobject {
         );
 
         #[qinvokable]
-        fn prefetch(self: Pin<&mut DetailController>, pkg_id: QString, shot_width: i32);
+        fn prefetch(self: Pin<&mut DetailController>, pkg_id: QString);
 
         #[qinvokable]
         fn launch(self: Pin<&mut DetailController>);
@@ -59,6 +60,13 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "refreshExtensions"]
         fn refresh_extensions(self: Pin<&mut DetailController>);
+
+        #[qinvokable]
+        fn clear(self: Pin<&mut DetailController>);
+
+        #[qinvokable]
+        #[cxx_name = "setShotWidth"]
+        fn set_shot_width(self: Pin<&mut DetailController>, shot_width: i32);
     }
 
     impl cxx_qt::Threading for DetailController {}
@@ -67,11 +75,18 @@ pub mod qobject {
 use crate::runtime;
 use cxx_qt::{CxxQtThread, Threading};
 use cxx_qt_lib::{QList, QString, QStringList};
-use libarc::cache::PersistentMap;
 use std::pin::Pin;
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tokio::task::spawn_blocking;
+
+static SHOT_WIDTH: AtomicU32 = AtomicU32::new(0);
+
+fn shot_width() -> Option<u32> {
+    let width = SHOT_WIDTH.load(Ordering::Relaxed);
+    (width > 0).then_some(width)
+}
 
 pub struct DetailControllerRust {
     loading: bool,
@@ -95,6 +110,7 @@ pub struct DetailControllerRust {
     busy: bool,
     progress: f32,
     screenshots: QStringList,
+    full_screenshots: QStringList,
 }
 
 impl Default for DetailControllerRust {
@@ -123,21 +139,15 @@ impl Default for DetailControllerRust {
             busy: false,
             progress: 0.0,
             screenshots: QStringList::default(),
+            full_screenshots: QStringList::default(),
         }
     }
 }
 
 static QT_THREAD: OnceLock<CxxQtThread<qobject::DetailController>> = OnceLock::new();
 
-static WARM_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-
-fn warm_client() -> &'static reqwest::Client {
-    WARM_CLIENT.get_or_init(reqwest::Client::new)
-}
-
-// repeat visits render this instantly then revalidate in the background
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
-struct CachedDetail {
+#[derive(Clone, Default)]
+struct Detail {
     remote: String,
     name: String,
     summary: String,
@@ -151,47 +161,54 @@ struct CachedDetail {
     version: String,
     license: String,
     eula_url: String,
-    extensions_json: String,
     installed: bool,
     screenshots: Vec<String>,
+    full_screenshots: Vec<String>,
 }
 
-static DETAILS: OnceLock<PersistentMap<CachedDetail>> = OnceLock::new();
-
-fn details() -> &'static PersistentMap<CachedDetail> {
-    DETAILS.get_or_init(|| {
-        PersistentMap::new("frontend", "details.json")
-            .with_entry_ttl(Duration::from_secs(7 * 24 * 3600))
-            .with_capacity_limit(500)
-    })
+fn apply_detail(mut this: Pin<&mut qobject::DetailController>, d: &Detail) {
+    this.as_mut().set_remote(QString::from(&d.remote));
+    this.as_mut().set_name(QString::from(&d.name));
+    this.as_mut().set_summary(QString::from(&d.summary));
+    this.as_mut().set_description(QString::from(&d.description));
+    this.as_mut().set_icon_url(QString::from(&d.icon_url));
+    this.as_mut()
+        .set_developer_name(QString::from(&d.developer_name));
+    this.as_mut().set_verified(d.verified);
+    this.as_mut()
+        .set_homepage_url(QString::from(&d.homepage_url));
+    this.as_mut()
+        .set_project_urls_json(QString::from(&d.project_urls_json));
+    this.as_mut()
+        .set_content_rating(QString::from(&d.content_rating));
+    this.as_mut().set_version(QString::from(&d.version));
+    this.as_mut().set_license(QString::from(&d.license));
+    this.as_mut().set_eula_url(QString::from(&d.eula_url));
+    this.as_mut().set_installed(d.installed);
+    let screenshots: QList<QString> = d
+        .screenshots
+        .iter()
+        .map(|s| QString::from(s.as_str()))
+        .collect();
+    this.as_mut()
+        .set_screenshots(QStringList::from(&screenshots));
+    let full: QList<QString> = d
+        .full_screenshots
+        .iter()
+        .map(|s| QString::from(s.as_str()))
+        .collect();
+    this.as_mut().set_full_screenshots(QStringList::from(&full));
 }
 
-fn apply_cached(mut this: Pin<&mut qobject::DetailController>, cached: &CachedDetail) {
-    let pkg_id = this.id.to_string();
-    let icon_url = match cached.icon_url.strip_prefix("file://") {
-        Some(path) if !std::path::Path::new(path).exists() => {
-            crate::services::icons::resolve(&pkg_id, None)
-        }
-        _ => cached.icon_url.clone(),
-    };
-
-    this.as_mut().set_remote(QString::from(&cached.remote));
-    this.as_mut().set_name(QString::from(&cached.name));
-    this.as_mut().set_summary(QString::from(&cached.summary));
-    this.as_mut().set_description(QString::from(&cached.description));
-    this.as_mut().set_icon_url(QString::from(&icon_url));
-    this.as_mut().set_developer_name(QString::from(&cached.developer_name));
-    this.as_mut().set_verified(cached.verified);
-    this.as_mut().set_homepage_url(QString::from(&cached.homepage_url));
-    this.as_mut().set_project_urls_json(QString::from(&cached.project_urls_json));
-    this.as_mut().set_content_rating(QString::from(&cached.content_rating));
-    this.as_mut().set_version(QString::from(&cached.version));
-    this.as_mut().set_license(QString::from(&cached.license));
-    this.as_mut().set_eula_url(QString::from(&cached.eula_url));
-    this.as_mut().set_extensions_json(QString::from(&cached.extensions_json));
-    this.as_mut().set_installed(cached.installed);
-    let screenshots: QList<QString> = cached.screenshots.iter().map(|s| QString::from(s.as_str())).collect();
-    this.as_mut().set_screenshots(QStringList::from(&screenshots));
+fn reset_fields(mut this: Pin<&mut qobject::DetailController>) {
+    apply_detail(
+        this.as_mut(),
+        &Detail {
+            project_urls_json: "{}".into(),
+            ..Default::default()
+        },
+    );
+    this.as_mut().set_extensions_json(QString::default());
 }
 
 pub fn sync_busy(pkg_id: &str, busy: bool, progress: f32) {
@@ -208,8 +225,6 @@ pub fn sync_busy(pkg_id: &str, busy: bool, progress: f32) {
 }
 
 pub fn sync_installed(pkg_id: &str, installed: bool) {
-    details().update(pkg_id, |c| c.installed = installed);
-
     let Some(qt_thread) = QT_THREAD.get() else {
         return;
     };
@@ -231,8 +246,7 @@ struct ExtensionRow {
 }
 
 async fn fetch_extensions_json(proxy: &libarc::ArcDaemonProxy<'static>, pkg_id: &str) -> String {
-    let rows: Vec<ExtensionRow> = proxy
-        .extensions(pkg_id)
+    let rows: Vec<ExtensionRow> = runtime::call("extensions", proxy.extensions(pkg_id))
         .await
         .unwrap_or_default()
         .into_iter()
@@ -263,27 +277,80 @@ pub fn refresh_extensions_for_current() {
                 return;
             };
             let json = fetch_extensions_json(&proxy, &pkg_id).await;
-            details().update(&pkg_id, |c| c.extensions_json = json.clone());
             let _ = inner_thread.queue(move |mut this| {
-                this.as_mut().set_extensions_json(QString::from(&json));
+                if this.id.to_string() == pkg_id {
+                    this.as_mut().set_extensions_json(QString::from(&json));
+                }
             });
         });
     });
 }
 
-impl qobject::DetailController {
-    pub fn prefetch(self: Pin<&mut Self>, pkg_id: QString, shot_width: i32) {
-        let pkg_id_str = pkg_id.to_string();
-        let width = (shot_width > 0).then_some(shot_width as u32);
-        if let Some(cached) = details().get(&pkg_id_str) {
-            if !cached.screenshots.is_empty() {
-                warm_screenshots(cached.screenshots, width);
-            }
+pub fn refresh_current() {
+    *PREFETCHED.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    let Some(qt_thread) = QT_THREAD.get() else {
+        return;
+    };
+    let _ = qt_thread.queue(|this| {
+        let pkg_id = this.id.to_string();
+        if pkg_id.is_empty() {
             return;
         }
+        if let Some(inner) = QT_THREAD.get() {
+            start_fetch(inner.clone(), pkg_id, None);
+        }
+    });
+}
+
+impl qobject::DetailController {
+    pub fn set_shot_width(self: Pin<&mut Self>, shot_width: i32) {
+        if shot_width > 0 {
+            SHOT_WIDTH.store(shot_width as u32, Ordering::Relaxed);
+        }
+    }
+
+    pub fn prefetch(self: Pin<&mut Self>, pkg_id: QString) {
+        let pkg_id = pkg_id.to_string();
+        if is_prefetched(&pkg_id) || is_in_flight(&pkg_id) {
+            return;
+        }
+        *IN_FLIGHT.lock().unwrap_or_else(|p| p.into_inner()) = Some(pkg_id.clone());
+        let width = shot_width();
         let qt_thread = self.qt_thread();
-        let _ = QT_THREAD.set(qt_thread.clone());
-        start_fetch(qt_thread, pkg_id_str, width);
+        runtime::spawn(async move {
+            let built = match runtime::proxy().await {
+                Some(proxy) => Some(tokio::join!(
+                    build_detail(&proxy, &pkg_id, width),
+                    fetch_extensions_json(&proxy, &pkg_id)
+                )),
+                None => None,
+            };
+            let _ = qt_thread.queue(move |mut this| {
+                let mut in_flight = IN_FLIGHT.lock().unwrap_or_else(|p| p.into_inner());
+                if in_flight.as_deref() == Some(pkg_id.as_str()) {
+                    *in_flight = None;
+                }
+                drop(in_flight);
+                let waiting = this.id.to_string() == pkg_id && (this.loading || this.refining);
+                match built {
+                    Some((detail, extensions_json)) if waiting => {
+                        apply_detail(this.as_mut(), &detail);
+                        this.as_mut().set_extensions_json(QString::from(&extensions_json));
+                        this.as_mut().set_loading(false);
+                        this.as_mut().set_refining(false);
+                    }
+                    Some((detail, extensions_json)) => {
+                        *PREFETCHED.lock().unwrap_or_else(|p| p.into_inner()) =
+                            Some(Prefetched { id: pkg_id, detail, extensions_json, at: Instant::now() });
+                    }
+                    None if waiting => {
+                        let qt_thread = this.qt_thread();
+                        start_fetch(qt_thread, pkg_id, None);
+                    }
+                    None => {}
+                }
+            });
+        });
     }
 
     pub fn launch(self: Pin<&mut Self>) {
@@ -300,19 +367,15 @@ impl qobject::DetailController {
     pub fn load(mut self: Pin<&mut Self>, pkg_id: QString) {
         let pkg_id_str = pkg_id.to_string();
         self.as_mut().set_id(pkg_id);
-
-        let cached = details().get(&pkg_id_str);
-        if let Some(cached) = cached {
-            apply_cached(self.as_mut(), &cached);
-            self.as_mut().set_loading(false);
-            self.as_mut().set_refining(false);
-        } else {
-            self.as_mut().set_loading(true);
-            self.as_mut().set_refining(false);
-        }
+        reset_fields(self.as_mut());
+        self.as_mut().set_loading(true);
+        self.as_mut().set_refining(false);
 
         let qt_thread = self.qt_thread();
         let _ = QT_THREAD.set(qt_thread.clone());
+        if apply_prefetched(self.as_mut(), &pkg_id_str) || is_in_flight(&pkg_id_str) {
+            return;
+        }
         start_fetch(qt_thread, pkg_id_str, None);
     }
 
@@ -326,61 +389,204 @@ impl qobject::DetailController {
     ) {
         let pkg_id_str = pkg_id.to_string();
         self.as_mut().set_id(pkg_id);
-
-        let cached = details().get(&pkg_id_str);
-        if let Some(cached) = cached {
-            apply_cached(self.as_mut(), &cached);
-            self.as_mut().set_refining(false);
-        } else {
-            self.as_mut().set_remote(QString::default());
-            self.as_mut().set_name(name);
-            self.as_mut().set_summary(summary);
-            self.as_mut().set_icon_url(icon_url);
-            self.as_mut().set_installed(installed);
-            self.as_mut().set_description(QString::default());
-            self.as_mut().set_developer_name(QString::default());
-            self.as_mut().set_verified(false);
-            self.as_mut().set_homepage_url(QString::default());
-            self.as_mut().set_project_urls_json(QString::from("{}"));
-            self.as_mut().set_content_rating(QString::default());
-            self.as_mut().set_version(QString::default());
-            self.as_mut().set_license(QString::default());
-            self.as_mut().set_eula_url(QString::default());
-            self.as_mut().set_extensions_json(QString::default());
-            self.as_mut().set_screenshots(QStringList::default());
-            self.as_mut().set_refining(true);
-        }
+        reset_fields(self.as_mut());
+        self.as_mut().set_name(name);
+        self.as_mut().set_summary(summary);
+        self.as_mut().set_icon_url(icon_url);
+        self.as_mut().set_installed(installed);
+        self.as_mut().set_refining(true);
         self.as_mut().set_loading(false);
 
         let qt_thread = self.qt_thread();
         let _ = QT_THREAD.set(qt_thread.clone());
+        if apply_prefetched(self.as_mut(), &pkg_id_str) || is_in_flight(&pkg_id_str) {
+            return;
+        }
         start_fetch(qt_thread, pkg_id_str, None);
     }
 
     pub fn refresh_extensions(self: Pin<&mut Self>) {
         refresh_extensions_for_current();
     }
+
+    pub fn clear(mut self: Pin<&mut Self>) {
+        self.as_mut().set_id(QString::default());
+        reset_fields(self.as_mut());
+    }
 }
 
-fn warm_screenshots(urls: Vec<String>, width: Option<u32>) {
+pub fn prefetch_first_shots(ids: Vec<String>) {
+    if ids.is_empty() {
+        return;
+    }
+    let width = shot_width().unwrap_or(0);
     runtime::spawn(async move {
         use futures_util::StreamExt;
-        futures_util::stream::iter(urls)
-            .for_each_concurrent(3, |url| async move {
-                let target = match width {
-                    Some(w) => {
-                        let sep = if url.contains('?') { '&' } else { '?' };
-                        format!("{url}{sep}w={w}")
-                    }
-                    None => url,
-                };
-                let _ = warm_client().get(&target).send().await;
+        crate::bridge::startup_controller::after_first_frame().await;
+        let Some(proxy) = runtime::proxy().await else {
+            return;
+        };
+        let mut firsts: Vec<String> = futures_util::stream::iter(ids)
+            .map(|id| {
+                let proxy = proxy.clone();
+                async move {
+                    runtime::call("metadata", proxy.app_metadata(&id))
+                        .await
+                        .ok()?
+                        .screenshots
+                        .into_iter()
+                        .next()
+                }
             })
+            .buffer_unordered(4)
+            .filter_map(|first| async move { first })
+            .collect()
             .await;
+        crate::services::images::resolve_urls(
+            Some(&proxy),
+            firsts.iter_mut().collect(),
+            libarc::ImageKind::Image,
+            width,
+        )
+        .await;
     });
 }
 
-fn start_fetch(qt_thread: CxxQtThread<qobject::DetailController>, pkg_id: String, shot_width: Option<u32>) {
+async fn build_detail(
+    proxy: &libarc::ArcDaemonProxy<'static>,
+    pkg_id: &str,
+    shot_width: Option<u32>,
+) -> Detail {
+    let (info, meta) = tokio::join!(
+        runtime::call("app info", proxy.app_info(pkg_id)),
+        runtime::call("metadata", proxy.app_metadata(pkg_id)),
+    );
+    let package = info.ok().flatten();
+    let meta = meta.unwrap_or_default();
+
+    let screenshots = if meta.screenshots.is_empty() {
+        package
+            .as_ref()
+            .map(|p| p.screenshots.clone())
+            .unwrap_or_default()
+    } else {
+        meta.screenshots.clone()
+    };
+
+    let mut shown = screenshots.clone();
+    let width = shot_width.or_else(self::shot_width).unwrap_or(0);
+    crate::services::images::resolve_urls(
+        Some(proxy),
+        shown.iter_mut().collect(),
+        libarc::ImageKind::Image,
+        width,
+    )
+    .await;
+
+    let pkg_id_for_icon = pkg_id.to_string();
+    let raw_icon_url = package.as_ref().and_then(|p| p.icon_url.clone());
+    let mut icon_url = spawn_blocking(move || {
+        crate::services::icons::resolve(&pkg_id_for_icon, raw_icon_url.as_deref())
+    })
+    .await
+    .unwrap_or_default();
+    crate::services::images::resolve_urls(
+        Some(proxy),
+        vec![&mut icon_url],
+        libarc::ImageKind::Icon,
+        0,
+    )
+    .await;
+
+    let summary = if meta.summary.is_empty() {
+        package
+            .as_ref()
+            .map(|p| p.description.clone())
+            .unwrap_or_default()
+    } else {
+        meta.summary
+    };
+    Detail {
+        remote: package
+            .as_ref()
+            .and_then(|p| p.remote.clone())
+            .unwrap_or_default(),
+        name: package.as_ref().map(|p| p.name.clone()).unwrap_or_default(),
+        summary,
+        description: meta.description,
+        icon_url,
+        developer_name: meta.developer_name.unwrap_or_default(),
+        verified: meta.verified,
+        homepage_url: meta.homepage_url.unwrap_or_default(),
+        project_urls_json: serde_json::to_string(&meta.project_urls)
+            .unwrap_or_else(|_| "{}".to_string()),
+        content_rating: meta.content_rating,
+        version: package
+            .as_ref()
+            .map(|p| p.version.clone())
+            .unwrap_or_default(),
+        license: meta.license.unwrap_or_default(),
+        eula_url: meta.eula_url.unwrap_or_default(),
+        installed: package.as_ref().map(|p| p.installed).unwrap_or(false),
+        screenshots: shown,
+        full_screenshots: screenshots,
+    }
+}
+
+struct Prefetched {
+    id: String,
+    detail: Detail,
+    extensions_json: String,
+    at: Instant,
+}
+
+const PREFETCH_FRESH: Duration = Duration::from_secs(60);
+
+static PREFETCHED: Mutex<Option<Prefetched>> = Mutex::new(None);
+static IN_FLIGHT: Mutex<Option<String>> = Mutex::new(None);
+
+fn is_in_flight(id: &str) -> bool {
+    IN_FLIGHT.lock().unwrap_or_else(|p| p.into_inner()).as_deref() == Some(id)
+}
+
+fn take_prefetched(id: &str) -> Option<Prefetched> {
+    let mut slot = PREFETCHED.lock().unwrap_or_else(|p| p.into_inner());
+    let fresh = slot
+        .as_ref()
+        .is_some_and(|p| p.id == id && p.at.elapsed() < PREFETCH_FRESH);
+    if fresh {
+        slot.take()
+    } else {
+        None
+    }
+}
+
+fn is_prefetched(id: &str) -> bool {
+    let slot = PREFETCHED.lock().unwrap_or_else(|p| p.into_inner());
+    slot.as_ref()
+        .is_some_and(|p| p.id == id && p.at.elapsed() < PREFETCH_FRESH)
+}
+
+fn apply_prefetched(mut this: Pin<&mut qobject::DetailController>, id: &str) -> bool {
+    let Some(p) = take_prefetched(id) else {
+        return false;
+    };
+    if p.detail.name.is_empty() && p.detail.description.is_empty() {
+        return false;
+    }
+    apply_detail(this.as_mut(), &p.detail);
+    this.as_mut()
+        .set_extensions_json(QString::from(&p.extensions_json));
+    this.as_mut().set_loading(false);
+    this.as_mut().set_refining(false);
+    true
+}
+
+fn start_fetch(
+    qt_thread: CxxQtThread<qobject::DetailController>,
+    pkg_id: String,
+    shot_width: Option<u32>,
+) {
     let ext_pkg_id = pkg_id.clone();
     let ext_qt_thread = qt_thread.clone();
     runtime::spawn(async move {
@@ -388,7 +594,6 @@ fn start_fetch(qt_thread: CxxQtThread<qobject::DetailController>, pkg_id: String
             return;
         };
         let json = fetch_extensions_json(&proxy, &ext_pkg_id).await;
-        details().entry_or_default(&ext_pkg_id, |c| c.extensions_json = json.clone());
         let _ = ext_qt_thread.queue(move |mut this| {
             if this.id.to_string() == ext_pkg_id {
                 this.as_mut().set_extensions_json(QString::from(&json));
@@ -398,102 +603,28 @@ fn start_fetch(qt_thread: CxxQtThread<qobject::DetailController>, pkg_id: String
 
     runtime::spawn(async move {
         let Some(proxy) = runtime::proxy().await else {
-            qt_thread
-                .queue(|mut this| {
-                    this.as_mut().set_loading(false);
-                    this.as_mut().set_refining(false);
-                })
-                .ok();
-            return;
-        };
-        let mut package = None;
-        let mut meta = libarc::AppMetadata::default();
-        let mut warmed_screenshots = false;
-        for attempt in 0..4 {
-            let (info, m) = tokio::join!(proxy.app_info(&pkg_id), proxy.app_metadata(&pkg_id));
-            package = info.ok().flatten();
-            meta = m.unwrap_or_default();
-
-            if !warmed_screenshots {
-                let shots = if !meta.screenshots.is_empty() {
-                    meta.screenshots.clone()
-                } else {
-                    package.as_ref().map(|p| p.screenshots.clone()).unwrap_or_default()
-                };
-                if !shots.is_empty() {
-                    warmed_screenshots = true;
-                    warm_screenshots(shots, shot_width);
-                }
-            }
-
-            if package.is_some() || !meta.description.is_empty() {
-                break;
-            }
-            if attempt < 3 {
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-        }
-
-        let pkg_id_for_icon = pkg_id.clone();
-        let raw_icon_url = package.as_ref().and_then(|p| p.icon_url.clone());
-        let icon_url = spawn_blocking(move || {
-            crate::services::icons::resolve(&pkg_id_for_icon, raw_icon_url.as_deref())
-        })
-        .await
-        .unwrap_or_default();
-
-        let name = package.as_ref().map(|p| p.name.clone()).unwrap_or_default();
-        let installed = package.as_ref().map(|p| p.installed).unwrap_or(false);
-        let version = package.as_ref().map(|p| p.version.clone()).unwrap_or_default();
-        let remote = package.as_ref().and_then(|p| p.remote.clone()).unwrap_or_default();
-        let summary = if meta.summary.is_empty() {
-            package.as_ref().map(|p| p.description.clone()).unwrap_or_default()
-        } else {
-            meta.summary
-        };
-
-        let screenshots = if meta.screenshots.is_empty() {
-            package.as_ref().map(|p| p.screenshots.clone()).unwrap_or_default()
-        } else {
-            meta.screenshots
-        };
-
-        let mut cached = CachedDetail {
-            remote,
-            name,
-            summary,
-            description: meta.description,
-            icon_url,
-            developer_name: meta.developer_name.unwrap_or_default(),
-            verified: meta.verified,
-            homepage_url: meta.homepage_url.unwrap_or_default(),
-            project_urls_json: serde_json::to_string(&meta.project_urls).unwrap_or_else(|_| "{}".to_string()),
-            content_rating: meta.content_rating,
-            version,
-            license: meta.license.unwrap_or_default(),
-            eula_url: meta.eula_url.unwrap_or_default(),
-            extensions_json: String::new(),
-            installed,
-            screenshots,
-        };
-
-        if let Some(existing) = details().get(&pkg_id) {
-            if !existing.extensions_json.is_empty() {
-                cached.extensions_json = existing.extensions_json.clone();
-            }
-        }
-        details().insert(pkg_id.clone(), cached.clone());
-
-        qt_thread
-            .queue(move |mut this| {
-                // don't clobber if the user navigated elsewhere mid-fetch
-                if this.id.to_string() != pkg_id {
-                    return;
-                }
-                apply_cached(this.as_mut(), &cached);
+            let _ = qt_thread.queue(|mut this| {
                 this.as_mut().set_loading(false);
                 this.as_mut().set_refining(false);
-            })
-            .ok();
+            });
+            return;
+        };
+        let detail = build_detail(&proxy, &pkg_id, shot_width).await;
+        let _ = qt_thread.queue(move |mut this| {
+            if this.id.to_string() != pkg_id {
+                return;
+            }
+            let found = !detail.name.is_empty() || !detail.description.is_empty();
+            if found {
+                let seeded_name = this.name.to_string();
+                let mut detail = detail;
+                if detail.name.is_empty() {
+                    detail.name = seeded_name;
+                }
+                apply_detail(this.as_mut(), &detail);
+            }
+            this.as_mut().set_loading(false);
+            this.as_mut().set_refining(false);
+        });
     });
 }

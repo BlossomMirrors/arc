@@ -20,6 +20,30 @@ pub fn classify(raw: &str) -> MediaRef<'_> {
     }
 }
 
+pub fn image_proxy_url(remote_url: &str) -> String {
+    let encoded =
+        percent_encoding::utf8_percent_encode(remote_url, percent_encoding::NON_ALPHANUMERIC);
+    format!("{}/api/v1/image?url={encoded}", crate::DAEMON_HTTP_BASE)
+}
+
+pub fn image_proxy_url_sized(remote_url: &str, width: Option<u32>) -> String {
+    match width {
+        Some(w) => format!("{}&w={w}", image_proxy_url(remote_url)),
+        None => image_proxy_url(remote_url),
+    }
+}
+
+pub fn icon_image_proxy_url(remote_url: &str) -> String {
+    format!("{}&kind=icon", image_proxy_url(remote_url))
+}
+
+pub fn proxied(raw: &str) -> String {
+    match classify(raw) {
+        MediaRef::Remote(url) => image_proxy_url(url),
+        _ => raw.to_string(),
+    }
+}
+
 pub fn normalize_local_ref(raw: &str) -> String {
     if raw.starts_with('/') {
         format!("file://{raw}")

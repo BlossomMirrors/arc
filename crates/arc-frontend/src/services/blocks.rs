@@ -16,41 +16,6 @@ pub struct DescBlock {
     pub app_icon_url: String,
 }
 
-fn push_decoded(text: &str, out: &mut String) {
-    let mut rest = text;
-    while !rest.is_empty() {
-        match rest.find('&') {
-            None => {
-                out.push_str(rest);
-                break;
-            }
-            Some(pos) => {
-                out.push_str(&rest[..pos]);
-                rest = &rest[pos..];
-                if rest.starts_with("&amp;") {
-                    out.push('&');
-                    rest = &rest[5..];
-                } else if rest.starts_with("&lt;") {
-                    out.push('<');
-                    rest = &rest[4..];
-                } else if rest.starts_with("&gt;") {
-                    out.push('>');
-                    rest = &rest[4..];
-                } else if rest.starts_with("&quot;") {
-                    out.push('"');
-                    rest = &rest[6..];
-                } else if rest.starts_with("&apos;") {
-                    out.push('\'');
-                    rest = &rest[6..];
-                } else {
-                    out.push('&');
-                    rest = &rest[1..];
-                }
-            }
-        }
-    }
-}
-
 fn text_block(text: String, is_list_item: bool, is_heading: bool, is_bold: bool) -> DescBlock {
     DescBlock {
         text,
@@ -70,23 +35,43 @@ fn split_bold(text: String, is_list_item: bool, is_heading: bool) -> Vec<DescBlo
     while !remaining.is_empty() {
         match remaining.find("**") {
             None => {
-                result.push(text_block(remaining.to_string(), is_list_item, is_heading, false));
+                result.push(text_block(
+                    remaining.to_string(),
+                    is_list_item,
+                    is_heading,
+                    false,
+                ));
                 break;
             }
             Some(start) => {
                 if start > 0 {
-                    result.push(text_block(remaining[..start].to_string(), is_list_item, is_heading, false));
+                    result.push(text_block(
+                        remaining[..start].to_string(),
+                        is_list_item,
+                        is_heading,
+                        false,
+                    ));
                 }
                 remaining = &remaining[start + 2..];
                 match remaining.find("**") {
                     None => {
-                        result.push(text_block(remaining.to_string(), is_list_item, is_heading, false));
+                        result.push(text_block(
+                            remaining.to_string(),
+                            is_list_item,
+                            is_heading,
+                            false,
+                        ));
                         break;
                     }
                     Some(end) => {
                         let bold = &remaining[..end];
                         if !bold.is_empty() {
-                            result.push(text_block(bold.to_string(), is_list_item, is_heading, true));
+                            result.push(text_block(
+                                bold.to_string(),
+                                is_list_item,
+                                is_heading,
+                                true,
+                            ));
                         }
                         remaining = &remaining[end + 2..];
                     }
@@ -95,18 +80,6 @@ fn split_bold(text: String, is_list_item: bool, is_heading: bool) -> Vec<DescBlo
         }
     }
     result
-}
-
-fn attr_from_tag(tag: &str, name: &str) -> String {
-    let needle = format!("{}=\"", name);
-    let lower = tag.to_ascii_lowercase();
-    if let Some(pos) = lower.find(&needle) {
-        let after = &tag[pos + needle.len()..];
-        if let Some(end) = after.find('"') {
-            return after[..end].to_string();
-        }
-    }
-    String::new()
 }
 
 fn parse_heading(s: &str) -> Option<String> {
@@ -118,120 +91,110 @@ fn parse_heading(s: &str) -> Option<String> {
     }
 }
 
-pub fn html_to_blocks(html: &str) -> Vec<DescBlock> {
-    let mut blocks: Vec<DescBlock> = Vec::new();
-    let mut current = String::new();
-    let mut rest = html;
-    while !rest.is_empty() {
-        match rest.find('<') {
-            None => {
-                push_decoded(rest, &mut current);
-                break;
-            }
-            Some(tag_start) => {
-                push_decoded(&rest[..tag_start], &mut current);
-                rest = &rest[tag_start + 1..];
-                let tag_end = match rest.find('>') {
-                    Some(e) => e,
-                    None => {
-                        current.push('<');
-                        continue;
-                    }
-                };
-                let raw_tag = rest[..tag_end].trim();
-                let closing = raw_tag.starts_with('/');
-                let name = raw_tag
-                    .trim_start_matches('/')
-                    .split_ascii_whitespace()
-                    .next()
-                    .unwrap_or("")
-                    .to_ascii_lowercase();
-                match (closing, name.as_str()) {
-                    (false, "li") => {
-                        let t = current.trim().to_string();
-                        if !t.is_empty() {
-                            blocks.extend(split_bold(t, false, false));
-                        }
-                        current.clear();
-                    }
-                    (true, "li") => {
-                        let t = current.trim().to_string();
-                        if !t.is_empty() {
-                            blocks.extend(split_bold(t, true, false));
-                        }
-                        current.clear();
-                    }
-                    (true, "p") | (true, "figcaption") => {
-                        let t = current.trim().to_string();
-                        if !t.is_empty() {
-                            if let Some(heading) = parse_heading(&t) {
-                                blocks.push(text_block(heading, false, true, false));
-                            } else {
-                                blocks.extend(split_bold(t, false, false));
-                            }
-                        }
-                        current.clear();
-                    }
-                    (true, "h1") | (true, "h2") | (true, "h3") => {
-                        let t = current.trim().to_string();
-                        if !t.is_empty() {
-                            blocks.push(text_block(t, false, true, false));
-                        }
-                        current.clear();
-                    }
-                    (false, "app") => {
-                        let t = current.trim().to_string();
-                        if !t.is_empty() {
-                            blocks.extend(split_bold(t, false, false));
-                            current.clear();
-                        }
-                        let id = attr_from_tag(raw_tag, "id");
-                        if !id.is_empty() {
-                            blocks.push(DescBlock {
-                                is_app: true,
-                                app_id: id,
-                                ..Default::default()
-                            });
-                        }
-                    }
-                    (_, "img") => {
-                        let t = current.trim().to_string();
-                        if !t.is_empty() {
-                            blocks.extend(split_bold(t, false, false));
-                            current.clear();
-                        }
-                        let src = attr_from_tag(raw_tag, "src");
-                        if !src.is_empty() {
-                            blocks.push(DescBlock {
-                                text: attr_from_tag(raw_tag, "alt"),
-                                is_image: true,
-                                image_url: src,
-                                ..Default::default()
-                            });
-                        }
-                    }
-                    (true, "figure") => {
-                        let t = current.trim().to_string();
-                        if !t.is_empty() {
-                            blocks.extend(split_bold(t, false, false));
-                            current.clear();
-                        }
-                    }
-                    _ => {}
+#[derive(Clone, Copy)]
+enum Flush {
+    Plain,
+    ListItem,
+    Paragraph,
+    Heading,
+}
+
+fn flush(current: &mut String, blocks: &mut Vec<DescBlock>, how: Flush) {
+    let text = current.trim().to_string();
+    current.clear();
+    if text.is_empty() {
+        return;
+    }
+    match how {
+        Flush::Plain => blocks.extend(split_bold(text, false, false)),
+        Flush::ListItem => blocks.extend(split_bold(text, true, false)),
+        Flush::Paragraph => match parse_heading(&text) {
+            Some(heading) => blocks.push(text_block(heading, false, true, false)),
+            None => blocks.extend(split_bold(text, false, false)),
+        },
+        Flush::Heading => blocks.push(text_block(text, false, true, false)),
+    }
+}
+
+fn walk(node: roxmltree::Node, current: &mut String, blocks: &mut Vec<DescBlock>) {
+    for child in node.children() {
+        if let Some(text) = child.text().filter(|_| child.is_text()) {
+            current.push_str(text);
+            continue;
+        }
+        if !child.is_element() {
+            continue;
+        }
+        match child.tag_name().name().to_ascii_lowercase().as_str() {
+            "app" => {
+                flush(current, blocks, Flush::Plain);
+                if let Some(id) = child
+                    .attribute("id")
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                {
+                    blocks.push(DescBlock {
+                        is_app: true,
+                        app_id: id.to_string(),
+                        ..Default::default()
+                    });
                 }
-                rest = &rest[tag_end + 1..];
             }
+            "img" => {
+                flush(current, blocks, Flush::Plain);
+                if let Some(src) = child.attribute("src").filter(|src| !src.is_empty()) {
+                    blocks.push(DescBlock {
+                        text: child.attribute("alt").unwrap_or_default().to_string(),
+                        is_image: true,
+                        image_url: libarc::media::proxied(src),
+                        ..Default::default()
+                    });
+                }
+            }
+            "li" => {
+                flush(current, blocks, Flush::Plain);
+                walk(child, current, blocks);
+                flush(current, blocks, Flush::ListItem);
+            }
+            "p" | "figcaption" => {
+                walk(child, current, blocks);
+                flush(current, blocks, Flush::Paragraph);
+            }
+            "h1" | "h2" | "h3" => {
+                walk(child, current, blocks);
+                flush(current, blocks, Flush::Heading);
+            }
+            "figure" => {
+                walk(child, current, blocks);
+                flush(current, blocks, Flush::Plain);
+            }
+            _ => walk(child, current, blocks),
         }
     }
-    let t = current.trim().to_string();
-    if !t.is_empty() {
-        blocks.extend(split_bold(t, false, false));
-    }
+}
+
+// story markup is a piece of the forge frontpage so it gets a root element and is read with the same xml parser
+pub fn html_to_blocks(html: &str) -> Vec<DescBlock> {
+    let wrapped = format!("<story>{html}</story>");
+    let doc = match roxmltree::Document::parse(&wrapped) {
+        Ok(doc) => doc,
+        Err(e) => {
+            tracing::warn!("story text is not valid xml: {e}");
+            return Vec::new();
+        }
+    };
+    let mut blocks = Vec::new();
+    let mut current = String::new();
+    walk(doc.root_element(), &mut current, &mut blocks);
+    flush(&mut current, &mut blocks, Flush::Plain);
     blocks
 }
 
 pub fn blocks_worth_caching(blocks: &[DescBlock]) -> bool {
-    let mut apps = blocks.iter().filter(|b| b.is_app && !b.app_id.is_empty()).peekable();
+    let mut apps = blocks
+        .iter()
+        .filter(|b| b.is_app && !b.app_id.is_empty())
+        .peekable();
     if apps.peek().is_none() {
         return true;
     }
@@ -253,14 +216,13 @@ pub async fn resolve_app_blocks(blocks: &mut [DescBlock], proxy: Option<&ArcDaem
         let proxy = proxy.cloned();
         async move {
             let pkg = match proxy {
-                Some(p) => tokio::time::timeout(
-                    std::time::Duration::from_secs(15),
-                    p.app_info(&id),
-                )
-                .await
-                .ok()
-                .and_then(|r| r.ok())
-                .flatten(),
+                Some(p) => {
+                    tokio::time::timeout(std::time::Duration::from_secs(15), p.app_info(&id))
+                        .await
+                        .ok()
+                        .and_then(|r| r.ok())
+                        .flatten()
+                }
                 None => None,
             };
             (id, pkg)
@@ -273,7 +235,9 @@ pub async fn resolve_app_blocks(blocks: &mut [DescBlock], proxy: Option<&ArcDaem
         .filter_map(|(id, pkg)| pkg.map(|p| (id, p)))
         .collect();
 
-    let needs_pwa = ids.iter().any(|id| !resolved.contains_key(id) && id.starts_with("pwa:"));
+    let needs_pwa = ids
+        .iter()
+        .any(|id| !resolved.contains_key(id) && id.starts_with("pwa:"));
     let pwas: std::collections::HashMap<String, crate::services::forge::PwaApp> = if needs_pwa {
         crate::services::forge::fetch_pwas(&crate::services::forge::user_lang())
             .await

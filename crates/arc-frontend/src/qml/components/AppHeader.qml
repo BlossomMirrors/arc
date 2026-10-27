@@ -62,8 +62,8 @@ RowLayout {
             spacing: Kirigami.Units.smallSpacing / 2
 
             Controls.Label {
-                Layout.maximumWidth: developerRow.width
-                    - (verifiedBadge.visible ? verifiedBadge.width + developerRow.spacing : 0)
+                Layout.fillWidth: true
+                Layout.maximumWidth: Math.ceil(implicitWidth)
                 text: DetailController.developerName
                 opacity: 0.65
                 elide: Text.ElideRight
@@ -84,6 +84,10 @@ RowLayout {
                 Controls.ToolTip.text: KI18n.i18n("Verified developer")
                 Controls.ToolTip.visible: verifiedHover.hovered
                 Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+            }
+
+            Item {
+                Layout.fillWidth: true
             }
         }
 

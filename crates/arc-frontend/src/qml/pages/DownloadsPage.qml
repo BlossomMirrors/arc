@@ -347,10 +347,9 @@ Kirigami.ScrollablePage {
                         id: updateRowHover
                     }
 
-                    Timer {
-                        interval: 200
-                        running: updateRowHover.hovered
-                        onTriggered: DetailController.prefetch(updateDelegate.pkgId, Math.round(Kirigami.Units.gridUnit * 14 * 16 / 9 * 2))
+                    HoverPrefetch {
+                        pkgId: updateDelegate.pkgId
+                        hovered: updateRowHover.hovered
                     }
 
                     contentItem: RowLayout {

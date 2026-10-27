@@ -1,5 +1,4 @@
 use futures_util::future::join_all;
-use libarc::cache::JsonCache;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use tokio::spawn;
@@ -8,6 +7,9 @@ use tokio::task::spawn_blocking;
 use tracing::{info, warn};
 
 const FORGE_BASE: &str = libarc::FORGE_BASE_URL;
+
+// the store holds one frontpage and this is its key
+const FRONTPAGE: &str = "frontpage";
 
 #[derive(Default)]
 struct Inner {
@@ -22,8 +24,8 @@ struct Inner {
     original_icon_urls: HashMap<String, String>,
 }
 
-#[derive(Default, serde::Serialize, serde::Deserialize)]
-struct Persisted {
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct Persisted {
     top_json: String,
     new_json: String,
     trending_json: String,
@@ -43,14 +45,10 @@ fn refresh_gate() -> &'static Mutex<()> {
     REFRESH_GATE.get_or_init(|| Mutex::new(()))
 }
 
-static STORE: OnceLock<JsonCache<Persisted>> = OnceLock::new();
-
-fn store() -> &'static JsonCache<Persisted> {
-    STORE.get_or_init(|| JsonCache::new("daemon", "forge.json"))
-}
-
 pub async fn warm_from_disk() {
-    let Some(p) = store().load_async().await else { return };
+    let Some(p) = spawn_blocking(|| crate::cache::forge().get(FRONTPAGE)).await.ok().flatten() else {
+        return;
+    };
     let mut w = lock().write().await;
     w.top_json = p.top_json;
     w.new_json = p.new_json;
@@ -73,7 +71,7 @@ async fn save_to_disk() {
             original_icon_urls: r.original_icon_urls.clone(),
         }
     };
-    store().store(&p);
+    let _ = spawn_blocking(move || crate::cache::forge().insert(FRONTPAGE, p)).await;
 }
 
 async fn ensure_fresh() {
@@ -93,40 +91,63 @@ struct VerifiedResponse {
     developer_name: Option<String>,
 }
 
-async fn fetch_blossomos_verification(
+// a forge answer older than this is asked for again
+const VERIFICATION_RECHECK: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+// asks the forge about each app where a 404 means it does not know the app
+// apps it could not reach are left out so their last answer stays
+async fn fetch_verification(
     client: &reqwest::Client,
-    app_ids: &[String],
-) -> HashMap<String, crate::appstream_db::ForgeVerification> {
+    app_ids: Vec<String>,
+) -> Vec<(String, Option<crate::catalog::ForgeVerification>)> {
     use futures_util::stream::{self, StreamExt};
 
-    stream::iter(app_ids.iter().cloned())
+    stream::iter(app_ids)
         .map(|id| {
             let client = client.clone();
             async move {
                 let url = format!("{}/api/verified/{}", FORGE_BASE, id);
-                let resp = client
-                    .get(&url)
-                    .timeout(std::time::Duration::from_secs(10))
-                    .send()
-                    .await
-                    .ok()?;
+                let resp = client.get(&url).timeout(std::time::Duration::from_secs(10)).send().await.ok()?;
+                if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                    return Some((id, None));
+                }
                 if !resp.status().is_success() {
                     return None;
                 }
                 let parsed: VerifiedResponse = resp.json().await.ok()?;
-                Some((
-                    id,
-                    crate::appstream_db::ForgeVerification {
-                        verified: parsed.verified,
-                        developer_name: parsed.developer_name,
-                    },
-                ))
+                let answer = crate::catalog::ForgeVerification {
+                    verified: parsed.verified,
+                    developer_name: parsed.developer_name.filter(|n| !n.is_empty()),
+                };
+                Some((id, Some(answer)))
             }
         })
         .buffer_unordered(8)
         .filter_map(|r| async move { r })
         .collect()
         .await
+}
+
+// asks the forge again for the apps whose last answer is missing or old and stores what it says
+async fn refresh_verification(app_ids: Vec<String>) {
+    let stale = spawn_blocking(move || {
+        app_ids
+            .into_iter()
+            .filter(|id| crate::catalog::forge_checked_age(id).is_none_or(|age| age > VERIFICATION_RECHECK))
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_default();
+    if stale.is_empty() {
+        return;
+    }
+    let answers = fetch_verification(crate::media::http_client(), stale).await;
+    let _ = spawn_blocking(move || crate::catalog::store_forge_verification(&answers)).await;
+}
+
+// an opened detail page checks its app with the forge in the background and a new answer reaches it through CatalogChanged
+pub fn check_verification(id: String) {
+    spawn(refresh_verification(vec![id]));
 }
 
 async fn fetch_text(client: &reqwest::Client, url: &str) -> Option<String> {
@@ -151,24 +172,6 @@ fn collect_home_app_ids(
     charts_json: &str,
 ) -> Vec<String> {
     let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    // Extract all <app id="..."> tags from the top/new/trending/charts JSON
-    for json in [top_json, new_json, trending_json, charts_json] {
-        let mut rest = json;
-        while let Some(p) = rest.find("<app") {
-            rest = &rest[p + 4..];
-            if let Some(q) = rest.find("id=\"") {
-                rest = &rest[q + 4..];
-                if let Some(e) = rest.find('"') {
-                    let id = rest[..e].trim().to_string();
-                    if !id.is_empty() {
-                        ids.insert(id);
-                    }
-                    rest = &rest[e + 1..];
-                }
-            }
-        }
-    }
 
     // top/new/trending are Vec<String>
     for json in [top_json, new_json, trending_json] {
@@ -211,20 +214,31 @@ pub async fn refresh() {
 
     let app_ids = collect_home_app_ids(top_str, new_str, trend_str, chart_str);
 
-    // Resolve metadata from AppStreamDb. Runs in a blocking thread since the
-    // db scan is CPU-bound, and returns (metadata_json, original_icon_urls, blossomos_ids)
     let app_ids_for_db = app_ids.clone();
-    let (app_metadata_json, original_icon_urls, blossomos_ids) = spawn_blocking(move || {
-        let db = crate::appstream_db::AppStreamDb::get();
+    let (app_metadata_json, original_icon_urls) = spawn_blocking(move || {
+        let locales = crate::appstream_db::system_locales();
         let mut original_urls: HashMap<String, String> = HashMap::new();
         let entries: Vec<serde_json::Value> = app_ids_for_db
             .iter()
-            .filter_map(|id| db.find_by_id(id).map(|e| (id, e)))
+            .filter_map(|id| crate::catalog::get(id, &locales).map(|e| (id, e)))
             .map(|(id, e)| {
                 let display_url = match &e.icon_url {
-                    Some(url) if matches!(libarc::media::classify(url), libarc::media::MediaRef::Remote(_)) => {
+                    Some(url)
+                        if matches!(
+                            libarc::media::classify(url),
+                            libarc::media::MediaRef::Remote(_)
+                        ) =>
+                    {
                         original_urls.insert(id.clone(), url.clone());
                         crate::media::forge_icon_proxy_url(id)
+                    }
+                    Some(url)
+                        if matches!(
+                            libarc::media::classify(url),
+                            libarc::media::MediaRef::Local
+                        ) =>
+                    {
+                        crate::media::icon_proxy_url(&e.id)
                     }
                     other => other.clone().unwrap_or_default(),
                 };
@@ -236,21 +250,12 @@ pub async fn refresh() {
                 })
             })
             .collect();
-        (
-            serde_json::to_string(&entries).unwrap_or_default(),
-            original_urls,
-            db.blossomos_app_ids(),
-        )
+        (serde_json::to_string(&entries).unwrap_or_default(), original_urls)
     })
     .await
     .unwrap_or_default();
 
-    if !blossomos_ids.is_empty() {
-        let verification = fetch_blossomos_verification(client, &blossomos_ids).await;
-        let count = verification.len();
-        crate::appstream_db::set_blossomos_verification(verification);
-        info!("Blossomos verification refreshed ({}/{} apps)", count, blossomos_ids.len());
-    }
+    refresh_verification(app_ids).await;
 
     {
         let mut w = lock().write().await;
@@ -279,7 +284,11 @@ pub async fn refresh() {
     spawn(async move {
         let futs: Vec<_> = original_icon_urls
             .into_values()
-            .map(|url| async move { crate::media::fetch(crate::media::MediaKind::Icon, &url, None).await.is_some() })
+            .map(|url| async move {
+                crate::media::fetch(crate::media::MediaKind::Icon, &url, None)
+                    .await
+                    .is_some()
+            })
             .collect();
 
         let results = join_all(futs).await;
@@ -308,6 +317,10 @@ pub async fn charts() -> String {
 pub async fn app_metadata() -> String {
     ensure_fresh().await;
     lock().read().await.app_metadata_json.clone()
+}
+
+pub async fn original_icon_url(id: &str) -> Option<String> {
+    lock().read().await.original_icon_urls.get(id).cloned()
 }
 
 pub async fn icon_bytes(id: &str) -> Option<(Vec<u8>, String)> {

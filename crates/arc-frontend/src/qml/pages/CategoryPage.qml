@@ -27,28 +27,7 @@ ItemList {
         root.categoryColor = color ?? "";
         root.categoryIcon = icon ?? "";
         categoryListModel.searchCategory(id);
-        retryTimer.attempts = 0;
-        retryTimer.restart();
     }
 
-    Timer {
-        id: retryTimer
-        property int attempts: 0
-        interval: 2000
-        repeat: true
-        onTriggered: {
-            if (categoryListModel.loading) {
-                return;
-            }
-            if (root.rowCount > 0) {
-                stop();
-                return;
-            }
-            attempts += 1;
-            categoryListModel.searchCategory(root.categoryId);
-            if (attempts >= 5) {
-                stop();
-            }
-        }
-    }
+    onVisibleChanged: if (!visible) categoryListModel.release()
 }

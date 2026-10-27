@@ -22,34 +22,11 @@ pub fn http_client() -> &'static reqwest::Client {
     })
 }
 
-const MEDIA_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
-
-const ICON_TTL: Duration = Duration::from_secs(6 * 3600);
-
-static MEDIA: OnceLock<BlobCache> = OnceLock::new();
-static ICONS: OnceLock<BlobCache> = OnceLock::new();
-
-fn media_cache() -> &'static BlobCache {
-    MEDIA.get_or_init(|| BlobCache::new("media", MEDIA_TTL))
-}
-
-fn icon_cache() -> &'static BlobCache {
-    ICONS.get_or_init(|| BlobCache::new("media-icons", ICON_TTL))
-}
-
 fn cache_for(kind: MediaKind) -> &'static BlobCache {
     match kind {
-        MediaKind::Icon => icon_cache(),
-        MediaKind::Screenshot => media_cache(),
+        MediaKind::Icon => crate::cache::icons(),
+        MediaKind::Screenshot => crate::cache::images(),
     }
-}
-
-pub fn sweep() -> usize {
-    media_cache().sweep() + icon_cache().sweep()
-}
-
-pub fn clear_icons() {
-    icon_cache().clear();
 }
 
 fn is_svg(content_type: &str, url: &str) -> bool {
@@ -82,38 +59,69 @@ async fn fetch_raw_into(kind: MediaKind, url: &str) -> Option<(Vec<u8>, String)>
     Some((blob.bytes.as_ref().clone(), blob.content_type.to_string()))
 }
 
-pub async fn fetch(kind: MediaKind, url: &str, width: Option<u32>) -> Option<(Vec<u8>, String)> {
-    let key = match (kind, width) {
+fn cache_key(kind: MediaKind, url: &str, width: Option<u32>) -> String {
+    match (kind, width) {
         (MediaKind::Icon, _) => format!("icon:{url}"),
         (MediaKind::Screenshot, Some(w)) => format!("shot:{url}#w={w}"),
         (MediaKind::Screenshot, _) => format!("shot:{url}"),
+    }
+}
+
+// downloads an image and turns it into what gets stored so serving it and handing out its file share one recipe
+async fn download(kind: MediaKind, url: String, width: Option<u32>) -> Option<Blob> {
+    let (bytes, content_type) = fetch_raw_into(kind, &url).await?;
+    let (bytes, content_type) = match kind {
+        MediaKind::Icon => {
+            let padded = if is_svg(&content_type, &url) {
+                libarc::icons::normalize_padding_svg(&bytes)
+            } else {
+                libarc::icons::normalize_padding(&bytes)
+            };
+            padded
+                .map(|p| (p, "image/png".to_string()))
+                .unwrap_or((bytes, content_type))
+        }
+        MediaKind::Screenshot => match width {
+            Some(w) => {
+                let b = bytes.clone();
+                let resized = spawn_blocking(move || resize_image(&b, w))
+                    .await
+                    .ok()
+                    .flatten();
+                resized
+                    .map(|j| (j, "image/jpeg".to_string()))
+                    .unwrap_or((bytes, content_type))
+            }
+            _ => (bytes, content_type),
+        },
     };
+    Some(Blob::new(bytes, content_type))
+}
+
+pub async fn fetch(kind: MediaKind, url: &str, width: Option<u32>) -> Option<(Vec<u8>, String)> {
     let url_owned = url.to_string();
     let blob = cache_for(kind)
-        .get_or_fetch(&key, || async move {
-            let (bytes, content_type) = fetch_raw_into(kind, &url_owned).await?;
-            let result = match kind {
-                MediaKind::Icon => {
-                    let padded = if is_svg(&content_type, &url_owned) {
-                        libarc::icons::normalize_padding_svg(&bytes)
-                    } else {
-                        libarc::icons::normalize_padding(&bytes)
-                    };
-                    padded.map(|p| (p, "image/png".to_string())).unwrap_or((bytes, content_type))
-                }
-                MediaKind::Screenshot => match width {
-                    Some(w) => {
-                        let b = bytes.clone();
-                        let resized = spawn_blocking(move || resize_image(&b, w)).await.ok().flatten();
-                        resized.map(|j| (j, "image/jpeg".to_string())).unwrap_or((bytes, content_type))
-                    }
-                    _ => (bytes, content_type),
-                },
-            };
-            Some(Blob::new(result.0, result.1))
+        .get_or_fetch(&cache_key(kind, url, width), move || {
+            download(kind, url_owned, width)
         })
         .await?;
     Some((blob.bytes.as_ref().clone(), blob.content_type.to_string()))
+}
+
+pub fn local_file_url(kind: MediaKind, url: &str, width: Option<u32>) -> Option<String> {
+    let url_owned = url.to_string();
+    let file = cache_for(kind).local_file(&cache_key(kind, url, width), move || {
+        download(kind, url_owned, width)
+    })?;
+    Some(format!("file://{}", file.display()))
+}
+
+// what the local frontend should load for an image which is its stored file when there is one and else the proxy url
+pub fn display_url(kind: MediaKind, remote_url: &str, width: Option<u32>) -> String {
+    local_file_url(kind, remote_url, width).unwrap_or_else(|| match kind {
+        MediaKind::Icon => libarc::media::icon_image_proxy_url(remote_url),
+        MediaKind::Screenshot => libarc::media::image_proxy_url_sized(remote_url, width),
+    })
 }
 
 fn resize_image(bytes: &[u8], target_w: u32) -> Option<Vec<u8>> {
@@ -131,13 +139,14 @@ fn resize_image(bytes: &[u8], target_w: u32) -> Option<Vec<u8>> {
 }
 
 pub fn icon_proxy_url(package_id: &str) -> String {
-    format!("{}/api/v1/apps/{}/icon", libarc::DAEMON_HTTP_BASE, package_id)
+    format!(
+        "{}/api/v1/apps/{}/icon",
+        libarc::DAEMON_HTTP_BASE,
+        package_id
+    )
 }
 
-pub fn image_proxy_url(remote_url: &str) -> String {
-    let encoded = percent_encoding::utf8_percent_encode(remote_url, percent_encoding::NON_ALPHANUMERIC);
-    format!("{}/api/v1/image?url={encoded}", libarc::DAEMON_HTTP_BASE)
-}
+pub use libarc::media::image_proxy_url;
 
 pub fn forge_icon_proxy_url(package_id: &str) -> String {
     format!("{}/forge/icon/{}", libarc::DAEMON_HTTP_BASE, package_id)
@@ -149,6 +158,60 @@ pub fn proxy_icon_url_field(icon_url: &mut Option<String>, package_id: &str) {
             *icon_url = Some(icon_proxy_url(package_id));
         }
     }
+}
+
+// icons in d-bus answers point at the daemon by their own address so resolving them later needs no provider lookup
+pub fn icon_url_field(icon_url: &mut Option<String>) {
+    if let Some(MediaRef::Remote(url)) = icon_url.as_deref().map(classify) {
+        if !url.starts_with(libarc::DAEMON_HTTP_BASE) {
+            *icon_url = Some(libarc::media::icon_image_proxy_url(url));
+        }
+    }
+}
+
+// an image address the daemon itself handed out earlier
+pub enum OwnUrl {
+    Image {
+        kind: MediaKind,
+        url: String,
+        width: Option<u32>,
+    },
+    AppIcon(String),
+    ForgeIcon(String),
+}
+
+pub fn parse_own_url(raw: &str) -> Option<OwnUrl> {
+    if !raw.starts_with(libarc::DAEMON_HTTP_BASE) {
+        return None;
+    }
+    let parsed = reqwest::Url::parse(raw).ok()?;
+    let path = parsed.path();
+    if path == "/api/v1/image" {
+        let mut url = None;
+        let mut width = None;
+        let mut kind = MediaKind::Screenshot;
+        for (k, v) in parsed.query_pairs() {
+            match k.as_ref() {
+                "url" => url = Some(v.into_owned()),
+                "w" => width = v.parse().ok(),
+                "kind" if v == "icon" => kind = MediaKind::Icon,
+                _ => {}
+            }
+        }
+        return Some(OwnUrl::Image {
+            kind,
+            url: url?,
+            width,
+        });
+    }
+    if let Some(id) = path
+        .strip_prefix("/api/v1/apps/")
+        .and_then(|rest| rest.strip_suffix("/icon"))
+    {
+        return Some(OwnUrl::AppIcon(id.to_string()));
+    }
+    path.strip_prefix("/forge/icon/")
+        .map(|id| OwnUrl::ForgeIcon(id.to_string()))
 }
 
 pub fn proxy_screenshot_urls(screenshots: &mut [String]) {

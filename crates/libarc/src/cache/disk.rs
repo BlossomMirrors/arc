@@ -35,6 +35,19 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     result
 }
 
+pub fn write_replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!("{}.{}.tmp", std::process::id(), seq));
+    let result = fs::write(&tmp, bytes).and_then(|_| fs::rename(&tmp, path));
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
+}
+
 pub fn read(path: &Path) -> Option<Vec<u8>> {
     fs::read(path).ok()
 }
@@ -43,58 +56,35 @@ pub fn age(path: &Path) -> Option<Duration> {
     fs::metadata(path).ok()?.modified().ok()?.elapsed().ok()
 }
 
+pub fn touch(path: &Path) {
+    if let Ok(file) = fs::File::options().append(true).open(path) {
+        let _ = file.set_modified(std::time::SystemTime::now());
+    }
+}
+
 pub fn remove(path: &Path) {
     let _ = fs::remove_file(path);
 }
 
-pub fn sweep_older_than(dir: &Path, ttl: Duration) -> usize {
-    let mut removed = 0;
-    sweep_dir(dir, ttl, &mut removed);
-    removed
-}
-
-fn sweep_dir(dir: &Path, ttl: Duration, removed: &mut usize) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(meta) = entry.metadata() else { continue };
-        if meta.is_dir() {
-            sweep_dir(&path, ttl, removed);
-            continue;
-        }
-        if meta.modified().ok().and_then(|m| m.elapsed().ok()).is_some_and(|age| age > ttl) {
-            if fs::remove_file(&path).is_ok() {
-                *removed += 1;
-            }
-        }
-    }
-}
-
-pub fn trim_to_bytes(dir: &Path, max_bytes: u64) -> usize {
+pub fn trim_to_count(dir: &Path, max_files: usize) -> usize {
     let mut files: Vec<(PathBuf, u64, std::time::SystemTime)> = Vec::new();
     collect_files(dir, &mut files);
-
-    let mut total: u64 = files.iter().map(|(_, size, _)| size).sum();
-    if total <= max_bytes {
+    if files.len() <= max_files {
         return 0;
     }
-
     files.sort_by_key(|(_, _, mtime)| *mtime);
-    let mut removed = 0;
-    for (path, size, _) in files {
-        if total <= max_bytes {
-            break;
-        }
-        if fs::remove_file(&path).is_ok() {
-            total = total.saturating_sub(size);
-            removed += 1;
-        }
-    }
-    removed
+    let excess = files.len() - max_files;
+    files
+        .into_iter()
+        .take(excess)
+        .filter(|(path, _, _)| fs::remove_file(path).is_ok())
+        .count()
 }
 
 fn collect_files(dir: &Path, out: &mut Vec<(PathBuf, u64, std::time::SystemTime)>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         let Ok(meta) = entry.metadata() else { continue };

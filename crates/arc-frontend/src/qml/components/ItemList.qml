@@ -81,7 +81,7 @@ Kirigami.ScrollablePage {
 
             Controls.Label {
                 visible: !root.packageListModel.loading
-                text: KI18n.i18np("%1 app", "%1 apps", listView.count)
+                text: KI18n.i18np("%1 app", "%1 apps", root.packageListModel.total)
                 opacity: 0.7
             }
 
@@ -175,7 +175,7 @@ Kirigami.ScrollablePage {
             id: delegate
 
             width: Math.min(listView.width - Kirigami.Units.largeSpacing * 2, root.maxContentWidth)
-            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.horizontalCenter: parent ? parent.horizontalCenter : undefined
 
             required property int index
             required property string pkgId
@@ -196,10 +196,9 @@ Kirigami.ScrollablePage {
                 id: rowHover
             }
 
-            Timer {
-                interval: 200
-                running: rowHover.hovered
-                onTriggered: DetailController.prefetch(delegate.pkgId, Math.round(Kirigami.Units.gridUnit * 14 * 16 / 9 * 2))
+            HoverPrefetch {
+                pkgId: delegate.pkgId
+                hovered: rowHover.hovered
             }
 
             contentItem: RowLayout {

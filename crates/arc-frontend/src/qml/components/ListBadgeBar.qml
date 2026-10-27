@@ -120,7 +120,13 @@ Item {
                         onClicked: root.listActivated(badge.modelData.slug, badge.text)
 
                         HoverHandler {
+                            id: badgeHover
                             cursorShape: Qt.PointingHandCursor
+                        }
+
+                        HoverPrefetch {
+                            listSlug: badge.modelData.slug
+                            hovered: badgeHover.hovered
                         }
                     }
                 }

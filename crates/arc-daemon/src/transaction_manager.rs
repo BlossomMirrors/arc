@@ -1,7 +1,6 @@
-use libarc::cache::JsonCache;
 use libarc::{Provider, Transaction, TransactionStatus, TransactionType};
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -166,15 +165,13 @@ fn report_launcher_progress(map: &HashMap<Uuid, Transaction>) {
     crate::launcher_progress::update(true, average);
 }
 
-fn history_store() -> &'static JsonCache<Vec<Transaction>> {
-    static STORE: OnceLock<JsonCache<Vec<Transaction>>> = OnceLock::new();
-    STORE.get_or_init(|| JsonCache::new("daemon", "transactions.json"))
-}
+// the store holds one history list and this is its key
+const HISTORY: &str = "history";
 
 fn load_history() -> VecDeque<Transaction> {
-    history_store().load().map(VecDeque::from).unwrap_or_default()
+    crate::cache::transactions().get(HISTORY).map(VecDeque::from).unwrap_or_default()
 }
 
 fn save_history(items: &[Transaction]) {
-    history_store().store(&items.to_vec());
+    crate::cache::transactions().insert(HISTORY, items.to_vec());
 }

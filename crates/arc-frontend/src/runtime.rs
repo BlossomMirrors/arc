@@ -41,3 +41,17 @@ pub async fn proxy() -> Option<ArcDaemonProxy<'static>> {
 pub fn invalidate_proxy() {
     *PROXY.lock().unwrap() = None;
 }
+
+// a hung daemon must never leave a page spinning forever
+const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+pub async fn call<T>(what: &str, request: impl std::future::Future<Output = anyhow::Result<T>>) -> anyhow::Result<T> {
+    match tokio::time::timeout(CALL_TIMEOUT, request).await {
+        Ok(result) => result,
+        Err(_) => {
+            // the next request opens a fresh connection in case this one belongs to a daemon that went away
+            invalidate_proxy();
+            Err(anyhow::anyhow!("{what} timed out"))
+        }
+    }
+}

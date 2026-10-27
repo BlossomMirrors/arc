@@ -1,3 +1,5 @@
+use roxmltree::Node;
+
 const FORGE: &str = libarc::FORGE_BASE_URL;
 
 pub struct ListDef {
@@ -287,220 +289,155 @@ fn parse_frontpage(xml: &str) -> Vec<FpSection> {
 }
 
 fn parse_frontpage_for(xml: &str, user_lang: &str) -> Vec<FpSection> {
+    let body = match xml.trim_start().strip_prefix("<?xml") {
+        Some(rest) => rest.split_once("?>").map(|(_, after)| after).unwrap_or(""),
+        None => xml,
+    };
+    let wrapped = format!("<frontpage>{body}</frontpage>");
+    let doc = match roxmltree::Document::parse(&wrapped) {
+        Ok(doc) => doc,
+        Err(e) => {
+            tracing::warn!("forge frontpage is not valid xml: {e}");
+            return Vec::new();
+        }
+    };
+
     let mut sections = Vec::new();
-    let mut pos = 0;
-
-    while pos < xml.len() {
-        let Some(rel_lt) = xml[pos..].find('<') else {
-            break;
-        };
-        let lt = pos + rel_lt;
-        let Some(rel_gt) = xml[lt + 1..].find('>') else {
-            break;
-        };
-        let gt = lt + 1 + rel_gt;
-
-        let raw = xml[lt + 1..gt].trim();
-        if raw.starts_with('/') || raw.starts_with('!') || raw.starts_with('?') {
-            pos = gt + 1;
-            continue;
-        }
-
-        let self_closing = raw.ends_with('/');
-        let tag = raw.trim_end_matches('/').trim();
-        let name = tag.split_ascii_whitespace().next().unwrap_or("");
-
-        match name {
-            "top" => {
-                sections.push(FpSection::Top);
-                pos = gt + 1;
-            }
-            "new" => {
-                sections.push(FpSection::New);
-                pos = gt + 1;
-            }
-            "trending" => {
-                sections.push(FpSection::Trending);
-                pos = gt + 1;
-            }
-            "charts" => {
-                let cards = !tag.contains("cards=\"false\"");
-                sections.push(FpSection::Charts { cards });
-                pos = gt + 1;
-            }
-            "categories" => {
-                sections.push(FpSection::Categories);
-                pos = gt + 1;
-            }
-            "br" => {
-                sections.push(FpSection::Br);
-                pos = gt + 1;
-            }
-            "h1" if !self_closing => {
-                let (text, end) = extract_text_content(xml, gt + 1, "h1");
-                if !text.is_empty() {
-                    sections.push(FpSection::H1(text));
-                }
-                pos = end;
-            }
-            "h2" if !self_closing => {
-                let (text, end) = extract_text_content(xml, gt + 1, "h2");
-                if !text.is_empty() {
-                    sections.push(FpSection::H2(text));
-                }
-                pos = end;
-            }
-            "h3" if !self_closing => {
-                let (text, end) = extract_text_content(xml, gt + 1, "h3");
-                if !text.is_empty() {
-                    sections.push(FpSection::H3(text));
-                }
-                pos = end;
-            }
-            "p" if !self_closing => {
-                let (text, end) = extract_text_content(xml, gt + 1, "p");
-                if !text.is_empty() {
-                    sections.push(FpSection::P(text));
-                }
-                pos = end;
-            }
-            "carousel" if !self_closing => {
-                let breakpoint = tag
-                    .find("breakpoint=\"")
-                    .and_then(|p| {
-                        let after = &tag[p + 12..];
-                        after
-                            .find('"')
-                            .and_then(|e| after[..e].parse::<usize>().ok())
-                    })
-                    .unwrap_or(usize::MAX);
-                let app_cloud_overlay = tag.contains("app-cloud=\"true\"");
-                const CLOSE: &str = "</carousel>";
-                let body_start = gt + 1;
-                let body_end = xml[body_start..]
-                    .find(CLOSE)
-                    .map(|i| i + body_start)
-                    .unwrap_or(xml.len());
-                let items = extract_carousel_items(&xml[body_start..body_end]);
-                if !items.is_empty() {
-                    sections.push(FpSection::CarouselSection {
-                        breakpoint,
-                        items,
-                        app_cloud_overlay,
-                    });
-                }
-                pos = body_end + CLOSE.len();
-            }
-            "custom" if !self_closing => {
-                const CLOSE: &str = "</custom>";
-                let body_start = gt + 1;
-                let body_end = xml[body_start..]
-                    .find(CLOSE)
-                    .map(|i| i + body_start)
-                    .unwrap_or(xml.len());
-                let inner = &xml[body_start..body_end];
-                let title = extract_localized_title(inner);
-                let app_ids = extract_app_ids(inner);
-                if !app_ids.is_empty() {
-                    sections.push(FpSection::Custom { title, app_ids });
-                }
-                pos = body_end + CLOSE.len();
-            }
-            "links" if !self_closing => {
-                const CLOSE: &str = "</links>";
-                let body_start = gt + 1;
-                let body_end = xml[body_start..]
-                    .find(CLOSE)
-                    .map(|i| i + body_start)
-                    .unwrap_or(xml.len());
-                let inner = &xml[body_start..body_end];
-                let title = extract_localized_title(inner);
-                let title_lang = primary_title_lang(inner);
-                let items = extract_links_items(inner);
-                sections.push(FpSection::LinksSection {
-                    title,
-                    title_lang,
+    for node in doc.root_element().children().filter(Node::is_element) {
+        let section = match node.tag_name().name() {
+            "top" => Some(FpSection::Top),
+            "new" => Some(FpSection::New),
+            "trending" => Some(FpSection::Trending),
+            "charts" => Some(FpSection::Charts {
+                cards: node.attribute("cards") != Some("false"),
+            }),
+            "categories" => Some(FpSection::Categories),
+            "br" => Some(FpSection::Br),
+            "h1" => text_section(node, FpSection::H1),
+            "h2" => text_section(node, FpSection::H2),
+            "h3" => text_section(node, FpSection::H3),
+            "p" => text_section(node, FpSection::P),
+            "carousel" => {
+                let items = carousel_items(node, &wrapped, user_lang);
+                (!items.is_empty()).then(|| FpSection::CarouselSection {
+                    breakpoint: node
+                        .attribute("breakpoint")
+                        .and_then(|b| b.parse().ok())
+                        .unwrap_or(usize::MAX),
                     items,
-                });
-                pos = body_end + CLOSE.len();
+                    app_cloud_overlay: node.attribute("app-cloud") == Some("true"),
+                })
             }
-            _ if self_closing => pos = gt + 1,
-            _ => {
-                let close = format!("</{}>", name);
-                pos = xml[gt + 1..]
-                    .find(close.as_str())
-                    .map(|i| gt + 1 + i + close.len())
-                    .unwrap_or(gt + 1);
+            "custom" => {
+                let app_ids = app_ids(node);
+                (!app_ids.is_empty()).then(|| FpSection::Custom {
+                    title: localized_title(node, user_lang),
+                    app_ids,
+                })
             }
-        }
+            "links" => Some(FpSection::LinksSection {
+                title: localized_title(node, user_lang),
+                title_lang: titles(node)
+                    .first()
+                    .map(|(lang, _)| lang.clone())
+                    .unwrap_or_else(|| "en".into()),
+                items: links_items(node, &wrapped, user_lang),
+            }),
+            _ => None,
+        };
+        sections.extend(section);
     }
 
     keep_one_links_language(&mut sections, user_lang);
-
     sections
 }
 
-fn primary_title_lang(xml: &str) -> String {
-    let p = match xml.find("<title") {
-        Some(p) => p,
-        None => return "en".to_string(),
-    };
-    let chunk = &xml[p..];
-    let gt = match chunk.find('>') {
-        Some(g) => g,
-        None => return "en".to_string(),
-    };
-    let tag = &chunk[1..gt];
-    tag.find("lang=\"")
-        .and_then(|lp| {
-            let after = &tag[lp + 6..];
-            after.find('"').map(|e| after[..e].to_string())
-        })
-        .unwrap_or_else(|| "en".to_string())
+fn text_section(node: Node, make: fn(String) -> FpSection) -> Option<FpSection> {
+    let text = text_of(node);
+    (!text.is_empty()).then(|| make(text))
 }
 
-fn extract_text_content(xml: &str, start: usize, tag: &str) -> (String, usize) {
-    let close = format!("</{}>", tag);
-    let end = xml[start..]
-        .find(close.as_str())
-        .map(|i| i + start)
-        .unwrap_or(xml.len());
-    let text = xml[start..end].trim().to_string();
-    (text, end + close.len())
+fn text_of(node: Node) -> String {
+    node.descendants()
+        .filter(Node::is_text)
+        .filter_map(|t| t.text())
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
-fn extract_all_titles(xml: &str) -> Vec<(String, String)> {
-    let mut titles = Vec::new();
-    let mut t = xml;
-    while let Some(tp) = t.find("<title") {
-        let rest = &t[tp..];
-        let Some(tgt) = rest.find('>') else { break };
-        let tag = &rest[1..tgt];
-        let lang = tag
-            .find("lang=\"")
-            .and_then(|p| {
-                let a = &tag[p + 6..];
-                a.find('"').map(|e| a[..e].to_string())
-            })
-            .unwrap_or_else(|| "en".to_string());
-        let text_start = tp + tgt + 1;
-        let text_end = t[text_start..]
-            .find("</title>")
-            .map(|e| text_start + e)
-            .unwrap_or(t.len());
-        let text = t[text_start..text_end].trim().to_string();
-        if !text.is_empty() {
-            titles.push((lang, text));
-        }
-        t = &t[text_end + 8..];
+fn inner_markup(node: Node, source: &str) -> String {
+    match (node.first_child(), node.last_child()) {
+        (Some(first), Some(last)) => source[first.range().start..last.range().end]
+            .trim()
+            .to_string(),
+        _ => String::new(),
     }
-    titles
+}
+
+fn titles(node: Node) -> Vec<(String, String)> {
+    node.children()
+        .filter(|c| c.has_tag_name("title"))
+        .map(|t| (t.attribute("lang").unwrap_or("en").to_string(), text_of(t)))
+        .filter(|(_, text)| !text.is_empty())
+        .collect()
+}
+
+fn localized_title(node: Node, user_lang: &str) -> String {
+    let titles = titles(node);
+    let in_lang = |lang: &str| {
+        titles
+            .iter()
+            .find(|(l, _)| l == lang)
+            .map(|(_, t)| t.clone())
+    };
+    in_lang(user_lang)
+        .or_else(|| in_lang("en"))
+        .or_else(|| titles.first().map(|(_, t)| t.clone()))
+        .unwrap_or_default()
+}
+
+fn app_ids(node: Node) -> Vec<String> {
+    node.descendants()
+        .filter(|d| d.is_element() && d.tag_name().name().eq_ignore_ascii_case("app"))
+        .filter_map(|d| d.attribute("id").map(str::trim))
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 struct RawStory {
     banner_url: Option<String>,
     body: String,
+    app_ids: Vec<String>,
     titles: Vec<(String, String)>,
+}
+
+fn raw_story(node: Node, source: &str) -> Option<RawStory> {
+    let titles = titles(node);
+    if titles.is_empty() {
+        return None;
+    }
+    let body = node.children().find(|c| c.has_tag_name("body"));
+    Some(RawStory {
+        banner_url: node.attribute("banner").map(libarc::media::proxied),
+        body: body.map(|b| inner_markup(b, source)).unwrap_or_default(),
+        app_ids: body.map(app_ids).unwrap_or_default(),
+        titles,
+    })
+}
+
+fn preferred_lang<'a>(mut stories: impl Iterator<Item = &'a RawStory>, user_lang: &str) -> String {
+    let has_user_lang = stories.any(|s| s.titles.iter().any(|(l, _)| l == user_lang));
+    if has_user_lang { user_lang } else { "en" }.to_string()
+}
+
+fn title_in(story: &RawStory, lang: &str) -> Option<String> {
+    story
+        .titles
+        .iter()
+        .find(|(l, _)| l == lang)
+        .map(|(_, t)| t.clone())
 }
 
 enum RawCarouselItem {
@@ -508,97 +445,36 @@ enum RawCarouselItem {
     Story(RawStory),
 }
 
-fn extract_carousel_items(xml: &str) -> Vec<CarouselItem> {
-    let sys = sys_locale::get_locale().unwrap_or_default();
-    let user_lang = sys.split(['_', '-']).next().unwrap_or("en").to_string();
-
-    let mut raw: Vec<RawCarouselItem> = Vec::new();
-    let mut pos = 0;
-    while pos < xml.len() {
-        let Some(rel_lt) = xml[pos..].find('<') else {
-            break;
-        };
-        let lt = pos + rel_lt;
-        let Some(rel_gt) = xml[lt + 1..].find('>') else {
-            break;
-        };
-        let gt = lt + 1 + rel_gt;
-
-        let chunk = xml[lt + 1..gt].trim();
-        if chunk.starts_with('/') || chunk.starts_with('!') || chunk.starts_with('?') {
-            pos = gt + 1;
-            continue;
-        }
-
-        let self_closing = chunk.ends_with('/');
-        let tag = chunk.trim_end_matches('/').trim();
-        let name = tag.split_ascii_whitespace().next().unwrap_or("");
-
-        match name {
-            "app" => {
-                if let Some(id) = tag.find("id=\"").and_then(|p| {
-                    let after = &tag[p + 4..];
-                    after.find('"').map(|e| after[..e].trim().to_string())
-                }) {
-                    if !id.is_empty() {
-                        raw.push(RawCarouselItem::App(id));
-                    }
-                }
-                pos = gt + 1;
-            }
-            "story" if !self_closing => {
-                let banner_url = tag.find("banner=\"").and_then(|p| {
-                    let after = &tag[p + 8..];
-                    after.find('"').map(|e| after[..e].to_string())
-                });
-
-                const CLOSE: &str = "</story>";
-                let body_start = gt + 1;
-                let body_end = xml[body_start..]
-                    .find(CLOSE)
-                    .map(|i| i + body_start)
-                    .unwrap_or(xml.len());
-                let inner = &xml[body_start..body_end];
-
-                let titles = extract_all_titles(inner);
-                let body_text = inner
-                    .find("<body>")
-                    .and_then(|bp| {
-                        let after = &inner[bp + 6..];
-                        after.find("</body>").map(|e| after[..e].trim().to_string())
-                    })
-                    .unwrap_or_default();
-
-                if !titles.is_empty() {
-                    raw.push(RawCarouselItem::Story(RawStory {
-                        banner_url,
-                        body: body_text,
-                        titles,
-                    }));
-                }
-                pos = body_end + CLOSE.len();
-            }
-            _ => {
-                pos = gt + 1;
-            }
-        }
-    }
-
-    let has_user_lang = raw.iter().any(|item| {
-        matches!(item, RawCarouselItem::Story(s) if s.titles.iter().any(|(l, _)| l == &user_lang))
-    });
-    let preferred: &str = if has_user_lang { &user_lang } else { "en" };
+fn carousel_items(node: Node, source: &str, user_lang: &str) -> Vec<CarouselItem> {
+    let raw: Vec<RawCarouselItem> = node
+        .children()
+        .filter_map(|c| match c.tag_name().name() {
+            "app" => c
+                .attribute("id")
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(|id| RawCarouselItem::App(id.to_string())),
+            "story" => raw_story(c, source).map(RawCarouselItem::Story),
+            _ => None,
+        })
+        .collect();
+    let preferred = preferred_lang(
+        raw.iter().filter_map(|i| match i {
+            RawCarouselItem::Story(s) => Some(s),
+            _ => None,
+        }),
+        user_lang,
+    );
 
     let mut group_of: Vec<usize> = Vec::with_capacity(raw.len());
     let mut group_langs: Vec<Vec<String>> = Vec::new();
     let mut current: Option<usize> = None;
-
     for item in &raw {
         match item {
             RawCarouselItem::Story(s) => {
                 let langs: Vec<String> = s.titles.iter().map(|(l, _)| l.clone()).collect();
                 let repeats = current
-                    .map(|g: usize| langs.iter().any(|l| group_langs[g].contains(l)))
+                    .map(|g| langs.iter().any(|l| group_langs[g].contains(l)))
                     .unwrap_or(true);
                 if repeats {
                     group_langs.push(langs);
@@ -614,14 +490,14 @@ fn extract_carousel_items(xml: &str) -> Vec<CarouselItem> {
             }
         }
     }
-
     let mut apps_by_group: std::collections::HashMap<usize, Vec<String>> =
         std::collections::HashMap::new();
     for (i, item) in raw.iter().enumerate() {
         if let RawCarouselItem::Story(s) = item {
-            let ids = extract_app_ids(&s.body);
-            if !ids.is_empty() {
-                apps_by_group.entry(group_of[i]).or_insert(ids);
+            if !s.app_ids.is_empty() {
+                apps_by_group
+                    .entry(group_of[i])
+                    .or_insert_with(|| s.app_ids.clone());
             }
         }
     }
@@ -636,229 +512,87 @@ fn extract_carousel_items(xml: &str) -> Vec<CarouselItem> {
                 }
             }
             RawCarouselItem::Story(s) => {
-                let title = s
-                    .titles
-                    .iter()
-                    .find(|(l, _)| l.as_str() == preferred)
-                    .map(|(_, t)| t.clone());
+                let title = title_in(&s, &preferred);
                 hide_following_apps = title.is_none();
-
-                if let Some(title) = title {
-                    let mut body = s.body;
-                    let mut app_ids = extract_app_ids(&body);
-                    if app_ids.is_empty() {
-                        if let Some(shared) = apps_by_group.get(&group_of[i]) {
-                            app_ids = shared.clone();
-                            for id in &app_ids {
-                                body.push_str(&format!("\n<App id=\"{id}\" />"));
-                            }
+                let Some(title) = title else { continue };
+                let mut body = s.body;
+                let mut app_ids = s.app_ids;
+                if app_ids.is_empty() {
+                    if let Some(shared) = apps_by_group.get(&group_of[i]) {
+                        app_ids = shared.clone();
+                        for id in &app_ids {
+                            body.push_str(&format!("\n<App id=\"{id}\" />"));
                         }
                     }
-                    items.push(CarouselItem::Story(ForgeStory {
-                        banner_url: s.banner_url,
-                        title,
-                        body,
-                        app_ids,
-                    }));
                 }
+                items.push(CarouselItem::Story(ForgeStory {
+                    banner_url: s.banner_url,
+                    title,
+                    body,
+                    app_ids,
+                }));
             }
         }
     }
-
     items
 }
 
-pub fn extract_app_ids(xml: &str) -> Vec<String> {
-    let lower = xml.to_ascii_lowercase();
-    let mut ids = Vec::new();
-    let mut pos = 0;
-
-    while let Some(rel) = lower[pos..].find("<app") {
-        let start = pos + rel;
-        let after = lower[start + 4..].chars().next();
-        if !matches!(after, Some(c) if c.is_ascii_whitespace() || c == '>' || c == '/') {
-            pos = start + 4;
-            continue;
-        }
-        let end = lower[start..]
-            .find('>')
-            .map(|e| start + e)
-            .unwrap_or(lower.len());
-        if let Some(idp) = lower[start..end].find("id=\"") {
-            let value_start = start + idp + 4;
-            if let Some(rel_end) = xml[value_start..end].find('"') {
-                let id = xml[value_start..value_start + rel_end].trim();
-                if !id.is_empty() {
-                    ids.push(id.to_string());
-                }
-            }
-        }
-        pos = end.max(start + 4);
-    }
-    ids
-}
-
-fn extract_links_items(xml: &str) -> Vec<FpLinksItem> {
-    let sys = sys_locale::get_locale().unwrap_or_default();
-    let user_lang = sys.split(['_', '-']).next().unwrap_or("en").to_string();
-
+fn links_items(node: Node, source: &str, user_lang: &str) -> Vec<FpLinksItem> {
     enum RawLinksItem {
         Url { text: String, href: String },
         App(String),
         Story(RawStory),
     }
 
-    let mut raw: Vec<RawLinksItem> = Vec::new();
-    let mut pos = 0;
-    while pos < xml.len() {
-        let Some(rel_lt) = xml[pos..].find('<') else {
-            break;
-        };
-        let lt = pos + rel_lt;
-        let Some(rel_gt) = xml[lt + 1..].find('>') else {
-            break;
-        };
-        let gt = lt + 1 + rel_gt;
-
-        let chunk = xml[lt + 1..gt].trim();
-        if chunk.starts_with('/') || chunk.starts_with('!') || chunk.starts_with('?') {
-            pos = gt + 1;
-            continue;
-        }
-        let self_closing = chunk.ends_with('/');
-        let tag = chunk.trim_end_matches('/').trim();
-        let name = tag.split_ascii_whitespace().next().unwrap_or("");
-
-        match name {
-            "a" if !self_closing => {
-                let href = tag
-                    .find("href=\"")
-                    .and_then(|p| {
-                        let after = &tag[p + 6..];
-                        after.find('"').map(|e| after[..e].to_string())
-                    })
-                    .unwrap_or_default();
-                let text_start = gt + 1;
-                let text_end = xml[text_start..]
-                    .find("</a>")
-                    .map(|e| text_start + e)
-                    .unwrap_or(xml.len());
-                let text = xml[text_start..text_end].trim().to_string();
-                pos = text_end + 4;
-                if !href.is_empty() {
-                    raw.push(RawLinksItem::Url { text, href });
-                }
-            }
-            "app" => {
-                let id = tag
-                    .find("id=\"")
-                    .and_then(|p| {
-                        let after = &tag[p + 4..];
-                        after.find('"').map(|e| after[..e].trim().to_string())
-                    })
-                    .unwrap_or_default();
-                pos = gt + 1;
-                if !id.is_empty() {
-                    raw.push(RawLinksItem::App(id));
-                }
-            }
-            "story" if !self_closing => {
-                let banner_url = tag.find("banner=\"").and_then(|p| {
-                    let after = &tag[p + 8..];
-                    after.find('"').map(|e| after[..e].to_string())
-                });
-                const CLOSE: &str = "</story>";
-                let body_start = gt + 1;
-                let body_end = xml[body_start..]
-                    .find(CLOSE)
-                    .map(|i| i + body_start)
-                    .unwrap_or(xml.len());
-                let inner = &xml[body_start..body_end];
-                let titles = extract_all_titles(inner);
-                let body_text = inner
-                    .find("<body>")
-                    .and_then(|bp| {
-                        let after = &inner[bp + 6..];
-                        after.find("</body>").map(|e| after[..e].trim().to_string())
-                    })
-                    .unwrap_or_default();
-                pos = body_end + CLOSE.len();
-                if !titles.is_empty() {
-                    raw.push(RawLinksItem::Story(RawStory {
-                        banner_url,
-                        body: body_text,
-                        titles,
-                    }));
-                }
-            }
-            _ => {
-                pos = gt + 1;
-            }
-        }
-    }
-
-    let has_user_lang = raw.iter().any(|item| {
-        matches!(item, RawLinksItem::Story(s) if s.titles.iter().any(|(l, _)| l == &user_lang))
-    });
-    let preferred: &str = if has_user_lang { &user_lang } else { "en" };
+    let raw: Vec<RawLinksItem> = node
+        .children()
+        .filter_map(|c| match c.tag_name().name() {
+            "a" => c
+                .attribute("href")
+                .filter(|href| !href.is_empty())
+                .map(|href| RawLinksItem::Url {
+                    text: text_of(c),
+                    href: href.to_string(),
+                }),
+            "app" => c
+                .attribute("id")
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(|id| RawLinksItem::App(id.to_string())),
+            "story" => raw_story(c, source).map(RawLinksItem::Story),
+            _ => None,
+        })
+        .collect();
+    let preferred = preferred_lang(
+        raw.iter().filter_map(|i| match i {
+            RawLinksItem::Story(s) => Some(s),
+            _ => None,
+        }),
+        user_lang,
+    );
 
     let mut items = Vec::new();
     let mut hide_following = false;
     for item in raw {
         match item {
-            RawLinksItem::Url { text, href } => {
-                if !hide_following {
-                    items.push(FpLinksItem::Url { text, href });
-                }
+            RawLinksItem::Url { text, href } if !hide_following => {
+                items.push(FpLinksItem::Url { text, href })
             }
-            RawLinksItem::App(id) => {
-                if !hide_following {
-                    items.push(FpLinksItem::App(id));
-                }
-            }
+            RawLinksItem::App(id) if !hide_following => items.push(FpLinksItem::App(id)),
             RawLinksItem::Story(s) => {
-                let title = s
-                    .titles
-                    .iter()
-                    .find(|(l, _)| l.as_str() == preferred)
-                    .map(|(_, t)| t.clone());
+                let title = title_in(&s, &preferred);
                 hide_following = title.is_none();
-
                 if let Some(title) = title {
-                    let app_ids = extract_app_ids(&s.body);
                     items.push(FpLinksItem::Story(ForgeStory {
                         banner_url: s.banner_url,
                         title,
                         body: s.body,
-                        app_ids,
+                        app_ids: s.app_ids,
                     }));
                 }
             }
+            _ => {}
         }
     }
     items
-}
-
-fn extract_localized_title(xml: &str) -> String {
-    let try_lang = |lang: &str| -> Option<String> {
-        let marker = format!("lang=\"{}\"", lang);
-        let mp = xml.find(&marker)?;
-        let tag_start = xml[..mp].rfind('<')?;
-        let chunk = &xml[tag_start..];
-        let gt = chunk.find('>')?;
-        let end = chunk[gt + 1..].find("</title>")? + gt + 1;
-        Some(chunk[gt + 1..end].trim().to_string())
-    };
-    let sys = sys_locale::get_locale().unwrap_or_default();
-    let lang = sys.split(['_', '-']).next().unwrap_or("en");
-    try_lang(lang)
-        .or_else(|| try_lang("en"))
-        .or_else(|| {
-            let p = xml.find("<title")?;
-            let chunk = &xml[p..];
-            let gt = chunk.find('>')?;
-            let end = chunk[gt + 1..].find("</title>")? + gt + 1;
-            Some(chunk[gt + 1..end].trim().to_string())
-        })
-        .unwrap_or_default()
 }

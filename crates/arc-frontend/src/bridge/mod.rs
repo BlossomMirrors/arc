@@ -6,3 +6,4 @@ pub mod list_controller;
 pub mod models;
 pub mod nav_controller;
 pub mod settings_controller;
+pub mod startup_controller;

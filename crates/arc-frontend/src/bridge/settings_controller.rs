@@ -189,7 +189,7 @@ impl qobject::SettingsController {
         runtime::spawn(async move {
             match crate::services::icons::clear_icon_cache() {
                 Ok(()) => {
-                    crate::bridge::models::invalidate_package_cache();
+                    crate::bridge::models::reload_package_lists();
                     emit_result(&qt_thread, "Icon cache cleared".into(), true);
                     let _ = qt_thread.queue(|mut this| {
                         this.as_mut().icon_cache_cleared();

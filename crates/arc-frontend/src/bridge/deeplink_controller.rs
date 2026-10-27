@@ -40,6 +40,18 @@ use cxx_qt::Threading;
 use cxx_qt_lib::QString;
 use std::pin::Pin;
 
+static QT_THREAD: std::sync::OnceLock<cxx_qt::CxxQtThread<qobject::DeepLinkController>> = std::sync::OnceLock::new();
+
+pub extern "C" fn on_activate(args: *const *const std::ffi::c_char, count: i32) {
+    let args: Vec<String> = (0..count.max(0) as usize)
+        .map(|i| unsafe { std::ffi::CStr::from_ptr(*args.add(i)) }.to_string_lossy().into_owned())
+        .collect();
+    deeplink::set_intent(deeplink::parse_args(&args));
+    if let Some(qt_thread) = QT_THREAD.get() {
+        let _ = qt_thread.queue(|this| this.resolve());
+    }
+}
+
 #[derive(Default)]
 pub struct DeepLinkControllerRust {
     kind: QString,
@@ -61,10 +73,12 @@ pub struct DeepLinkControllerRust {
 }
 
 impl qobject::DeepLinkController {
-    pub fn resolve(self: Pin<&mut Self>) {
+    pub fn resolve(mut self: Pin<&mut Self>) {
+        let _ = QT_THREAD.set(self.qt_thread());
         let Some(intent) = deeplink::take_intent() else {
             return;
         };
+        self.as_mut().set_kind(QString::default());
 
         let qt_thread = self.qt_thread();
         runtime::spawn(async move {
@@ -93,7 +107,12 @@ impl qobject::DeepLinkController {
                     let content = if is_local_file {
                         std::fs::read_to_string(&source).unwrap_or_default()
                     } else {
-                        match reqwest::get(&source).await {
+                        let request = reqwest::Client::new()
+                            .get(&source)
+                            .timeout(std::time::Duration::from_secs(15))
+                            .send()
+                            .await;
+                        match request {
                             Ok(r) => r.text().await.unwrap_or_default(),
                             Err(_) => String::new(),
                         }

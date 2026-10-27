@@ -96,8 +96,7 @@ pub enum LaunchIntent {
     InstallFile { path: String, file_name: String, pkg_name: String, is_appimage: bool, is_bundle: bool },
 }
 
-pub fn parse_args() -> Option<LaunchIntent> {
-    let args: Vec<String> = std::env::args().collect();
+pub fn parse_args(args: &[String]) -> Option<LaunchIntent> {
 
     if let Some(a) = args.iter().find(|a| a.starts_with("appstream://") || a.starts_with("appstream:")) {
         let id = a
@@ -173,7 +172,14 @@ pub fn parse_args() -> Option<LaunchIntent> {
 static INTENT: OnceLock<Mutex<Option<LaunchIntent>>> = OnceLock::new();
 
 pub fn init() {
-    let _ = INTENT.set(Mutex::new(parse_args()));
+    let args: Vec<String> = std::env::args().collect();
+    let _ = INTENT.set(Mutex::new(parse_args(&args)));
+}
+
+pub fn set_intent(intent: Option<LaunchIntent>) {
+    if let Some(slot) = INTENT.get() {
+        *slot.lock().unwrap() = intent;
+    }
 }
 
 pub fn take_intent() -> Option<LaunchIntent> {

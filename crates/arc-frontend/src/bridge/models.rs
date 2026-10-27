@@ -45,6 +45,7 @@ pub mod qobject {
         #[qml_element]
         #[qproperty(bool, loading)]
         #[qproperty(QStringList, providers)]
+        #[qproperty(i32, total)]
         type PackageListModel = super::PackageListModelRust;
 
         #[qinvokable]
@@ -78,6 +79,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setSearchText"]
         fn set_search_text(self: Pin<&mut PackageListModel>, text: QString);
+
+        #[qinvokable]
+        fn release(self: Pin<&mut PackageListModel>);
+
+        #[qinvokable]
+        fn restore(self: Pin<&mut PackageListModel>);
     }
 
     extern "RustQt" {
@@ -94,6 +101,14 @@ pub mod qobject {
         #[cxx_override]
         #[cxx_name = "rowCount"]
         fn row_count(self: &PackageListModel, _parent: &QModelIndex) -> i32;
+
+        #[cxx_override]
+        #[cxx_name = "canFetchMore"]
+        fn can_fetch_more(self: &PackageListModel, _parent: &QModelIndex) -> bool;
+
+        #[cxx_override]
+        #[cxx_name = "fetchMore"]
+        fn fetch_more(self: Pin<&mut PackageListModel>, _parent: &QModelIndex);
     }
 
     unsafe extern "RustQt" {
@@ -415,12 +430,7 @@ pub mod qobject {
         #[cxx_name = "endInsertRows"]
         unsafe fn end_insert_rows(self: Pin<&mut HomeFeedModel>);
         #[inherit]
-        fn index(
-            self: &HomeFeedModel,
-            row: i32,
-            column: i32,
-            parent: &QModelIndex,
-        ) -> QModelIndex;
+        fn index(self: &HomeFeedModel, row: i32, column: i32, parent: &QModelIndex) -> QModelIndex;
         #[inherit]
         #[cxx_name = "dataChanged"]
         fn data_changed(
@@ -509,6 +519,7 @@ use libarc::{ArcDaemonProxy, Package};
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tokio::task::spawn_blocking;
 
 #[derive(Clone)]
@@ -536,8 +547,66 @@ enum ListMode {
     Updates,
 }
 
+#[derive(Clone)]
+enum PageSource {
+    Search(String),
+    Category(String),
+}
+
+const PAGE_SIZE: u64 = 60;
+
+pub struct PrefetchedCategory {
+    category: String,
+    rows: Vec<PackageRow>,
+    providers: Vec<String>,
+    total: u64,
+    at: Instant,
+}
+
+const CATEGORY_PREFETCH_FRESH: Duration = Duration::from_secs(60);
+
+static PREFETCHED_CATEGORY: Mutex<Option<PrefetchedCategory>> = Mutex::new(None);
+
+fn take_prefetched_category(category: &str) -> Option<PrefetchedCategory> {
+    let mut slot = PREFETCHED_CATEGORY.lock().unwrap_or_else(|p| p.into_inner());
+    let fresh = slot.as_ref().is_some_and(|p| p.category == category && p.at.elapsed() < CATEGORY_PREFETCH_FRESH);
+    if fresh {
+        slot.take()
+    } else {
+        None
+    }
+}
+
+pub fn prefetch_category(category: String) {
+    let fresh = PREFETCHED_CATEGORY
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .as_ref()
+        .is_some_and(|p| p.category == category && p.at.elapsed() < CATEGORY_PREFETCH_FRESH);
+    if fresh {
+        return;
+    }
+    runtime::spawn(async move {
+        let source = PageSource::Category(category.clone());
+        let Ok(mut page) = fetch_page(&source, &libarc::SearchFilter::default(), 0, PAGE_SIZE).await else {
+            return;
+        };
+        crate::services::images::resolve_packages(&mut page.items).await;
+        let Ok((rows, providers, total)) = spawn_blocking(move || page_rows(page)).await else {
+            return;
+        };
+        *PREFETCHED_CATEGORY.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some(PrefetchedCategory { category, rows, providers, total, at: Instant::now() });
+    });
+}
+
+const PREFETCH_TOP: usize = 6;
+
 pub struct PackageListModelRust {
     loading: bool,
+    total: i32,
+    source: Option<PageSource>,
+    fetching: bool,
     // Installed drops rows on remove and Updates drops rows on update
     // while Search only flips the installed flag
     mode: ListMode,
@@ -556,6 +625,9 @@ impl Default for PackageListModelRust {
     fn default() -> Self {
         Self {
             loading: true,
+            total: 0,
+            source: None,
+            fetching: false,
             mode: ListMode::default(),
             packages: Vec::new(),
             all_packages: Vec::new(),
@@ -570,52 +642,97 @@ impl Default for PackageListModelRust {
     }
 }
 
-
 static PACKAGE_LIST_QT_THREADS: Mutex<Vec<CxxQtThread<qobject::PackageListModel>>> =
     Mutex::new(Vec::new());
 
-// keyed by "search:<q>" / "installed" / "updates" / "category:<id>",
-// cleared wholesale after any successful transaction
-static PACKAGE_CACHE: OnceLock<libarc::cache::PersistentMap<Vec<Package>>> = OnceLock::new();
-
-fn package_cache() -> &'static libarc::cache::PersistentMap<Vec<Package>> {
-    PACKAGE_CACHE.get_or_init(|| {
-        libarc::cache::PersistentMap::new("frontend", "packages.json")
-            .with_entry_ttl(std::time::Duration::from_secs(24 * 3600))
-            .with_capacity_limit(64)
-    })
+fn catalog_lang() -> String {
+    sys_locale::get_locale().unwrap_or_default()
 }
 
-pub(crate) fn invalidate_package_cache() {
-    package_cache().clear();
+fn provider_filter_name(display: &str) -> String {
+    match display {
+        "PWA" => "Pwa".to_string(),
+        other => other.to_string(),
+    }
+}
+
+async fn fetch_page(
+    source: &PageSource,
+    filter: &libarc::SearchFilter,
+    offset: u64,
+    limit: u64,
+) -> anyhow::Result<libarc::PackagePage> {
+    let proxy = runtime::proxy()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
+    let lang = catalog_lang();
+    match source {
+        PageSource::Search(query) => {
+            runtime::call(
+                "search",
+                proxy.search_packages_page(query, &lang, filter, offset, limit),
+            )
+            .await
+        }
+        PageSource::Category(id) => {
+            let key = id.clone();
+            let priority = spawn_blocking(move || crate::cache::forge_lists().get(&key))
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            runtime::call(
+                "category",
+                proxy.category_packages_page(id, &lang, priority, offset, limit),
+            )
+            .await
+        }
+    }
+}
+
+fn page_rows(page: libarc::PackagePage) -> (Vec<PackageRow>, Vec<String>, u64) {
+    let total = page.total;
+    let mut packages = page.items;
+    for pkg in &mut packages {
+        pkg.icon_url = Some(crate::services::icons::resolve(
+            &pkg.id,
+            pkg.icon_url.as_deref(),
+        ));
+    }
+    let providers = page
+        .providers
+        .iter()
+        .map(|p| provider_str(p).to_string())
+        .collect();
+    let (rows, _) = rows_and_providers(packages);
+    (rows, providers, total)
 }
 
 impl qobject::PackageListModel {
     pub fn search(mut self: Pin<&mut Self>, query: QString) {
-        let query = query.to_string();
-        self.as_mut().rust_mut().mode = ListMode::Search;
-        let cache_key = format!("search:{query}");
-        self.as_mut().load_with(
-            cache_key,
-            async move {
-                let proxy = runtime::proxy()
-                    .await
-                    .ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
-                proxy.search_packages(&query).await
-            },
-            "search",
-        );
+        {
+            let mut rust = self.as_mut().rust_mut();
+            rust.mode = ListMode::Search;
+            rust.source = Some(PageSource::Search(query.to_string()));
+            rust.filter_provider = String::new();
+            rust.filter_installed = 0;
+            rust.sort_by_name = false;
+        }
+        self.load_page(true);
     }
 
     pub fn load_installed(mut self: Pin<&mut Self>) {
-        self.as_mut().rust_mut().mode = ListMode::Installed;
+        {
+            let mut rust = self.as_mut().rust_mut();
+            rust.mode = ListMode::Installed;
+            rust.source = None;
+        }
         self.as_mut().load_with(
-            "installed".to_string(),
             async move {
                 let proxy = runtime::proxy()
                     .await
                     .ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
-                proxy.installed_packages().await
+                runtime::call("load installed", proxy.installed_packages()).await
             },
             "load installed",
         );
@@ -623,30 +740,269 @@ impl qobject::PackageListModel {
 
     pub fn search_category(mut self: Pin<&mut Self>, category: QString) {
         let category = category.to_string();
-        self.as_mut().rust_mut().mode = ListMode::Search;
-        let cache_key = format!("category:{category}");
-        self.as_mut().load_with(
-            cache_key,
-            async move {
-                let proxy = runtime::proxy()
-                    .await
-                    .ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
-                let mut packages = proxy.search_category_packages(&category).await?;
+        {
+            let mut rust = self.as_mut().rust_mut();
+            rust.mode = ListMode::Search;
+            rust.source = Some(PageSource::Category(category.clone()));
+            rust.filter_provider = String::new();
+            rust.filter_installed = 0;
+            rust.sort_by_name = false;
+        }
+        let seq = match take_prefetched_category(&category) {
+            Some(page) => self.as_mut().apply_first_page(page),
+            None => self.as_mut().load_page(true),
+        };
 
-                if let Some(slug) = crate::services::forge::category_list_slug(&category) {
-                    if let Some(list) = crate::services::forge::fetch_list(slug).await {
-                        let priority: Vec<String> =
-                            list.apps.into_iter().map(|a| a.app_ref).collect();
-                        packages.sort_by_key(|pkg| {
-                            priority.iter().position(|id| id == &pkg.id).unwrap_or(usize::MAX)
-                        });
+        // the curated order is refreshed after the first page is already on screen
+        let Some(slug) = crate::services::forge::category_list_slug(&category) else {
+            return;
+        };
+        let qt_thread = self.qt_thread();
+        runtime::spawn(async move {
+            let Some(list) = crate::services::forge::fetch_list(slug).await else {
+                return;
+            };
+            let fresh: Vec<String> = list.apps.into_iter().map(|a| a.app_ref).collect();
+            let key = category.clone();
+            let changed = spawn_blocking(move || {
+                let changed = crate::cache::forge_lists().get(&key).as_ref() != Some(&fresh);
+                if changed {
+                    crate::cache::forge_lists().insert(key, fresh);
+                }
+                changed
+            })
+            .await
+            .unwrap_or(false);
+            if changed {
+                let _ = qt_thread.queue(move |this| {
+                    if this.request_seq == seq {
+                        this.load_page(true);
+                    }
+                });
+            }
+        });
+    }
+
+    // asks the daemon for the next page or with reset for the first one and returns the request number
+    fn apply_first_page(mut self: Pin<&mut Self>, page: PrefetchedCategory) -> u64 {
+        self.as_mut().register();
+        let seq = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.request_seq += 1;
+            rust.fetching = false;
+            rust.request_seq
+        };
+        let mut rows = page.rows;
+        carry_busy_state(&self.all_packages, &mut rows);
+        unsafe {
+            self.as_mut().begin_reset_model();
+            let mut rust = self.as_mut().rust_mut();
+            rust.all_packages = rows.clone();
+            rust.packages = rows;
+            drop(rust);
+            self.as_mut().end_reset_model();
+        }
+        self.as_mut().set_providers(provider_qlist(&page.providers));
+        self.as_mut().set_total(page.total as i32);
+        self.as_mut().set_loading(false);
+        seq
+    }
+
+    fn load_page(mut self: Pin<&mut Self>, reset: bool) -> u64 {
+        let Some(source) = self.source.clone() else {
+            return self.request_seq;
+        };
+        if !reset && self.fetching {
+            return self.request_seq;
+        }
+        self.as_mut().register();
+        let qt_thread = self.qt_thread();
+        let (seq, offset) = {
+            let mut rust = self.as_mut().rust_mut();
+            if reset {
+                rust.request_seq += 1;
+            }
+            rust.fetching = true;
+            (
+                rust.request_seq,
+                if reset {
+                    0
+                } else {
+                    rust.all_packages.len() as u64
+                },
+            )
+        };
+        if reset {
+            self.as_mut().set_loading(true);
+        }
+        let filter = libarc::SearchFilter {
+            provider: provider_filter_name(&self.filter_provider),
+            installed: self.filter_installed,
+            sort_by_name: self.sort_by_name,
+        };
+        runtime::spawn(async move {
+            let page = fetch_page(&source, &filter, offset, PAGE_SIZE).await;
+            let built = match page {
+                Ok(mut page) => {
+                    crate::services::images::resolve_packages(&mut page.items).await;
+                    spawn_blocking(move || page_rows(page)).await.ok()
+                }
+                Err(e) => {
+                    tracing::warn!("list page failed: {e}");
+                    None
+                }
+            };
+            let _ = qt_thread.queue(move |mut this| {
+                if this.request_seq != seq {
+                    return;
+                }
+                this.as_mut().rust_mut().fetching = false;
+                let Some((mut rows, providers, total)) = built else {
+                    this.as_mut().set_loading(false);
+                    return;
+                };
+                if reset {
+                    let top: Vec<String> = rows
+                        .iter()
+                        .take(PREFETCH_TOP)
+                        .map(|r| r.pkg.id.clone())
+                        .collect();
+                    crate::bridge::detail_controller::prefetch_first_shots(top);
+                    carry_busy_state(&this.all_packages, &mut rows);
+                    unsafe {
+                        this.as_mut().begin_reset_model();
+                        let mut rust = this.as_mut().rust_mut();
+                        rust.all_packages = rows.clone();
+                        rust.packages = rows;
+                        drop(rust);
+                        this.as_mut().end_reset_model();
+                    }
+                    this.as_mut().set_providers(provider_qlist(&providers));
+                } else if !rows.is_empty() {
+                    let first = this.packages.len() as i32;
+                    let last = first + rows.len() as i32 - 1;
+                    unsafe {
+                        this.as_mut()
+                            .begin_insert_rows(&QModelIndex::default(), first, last);
+                        let mut rust = this.as_mut().rust_mut();
+                        rust.all_packages.extend(rows.iter().cloned());
+                        rust.packages.extend(rows);
+                        drop(rust);
+                        this.as_mut().end_insert_rows();
                     }
                 }
+                this.as_mut().set_total(total as i32);
+                this.as_mut().set_loading(false);
+            });
+        });
+        seq
+    }
 
-                Ok(packages)
-            },
-            "search category",
-        );
+    fn refresh_loaded_pages(mut self: Pin<&mut Self>) {
+        let Some(source) = self.source.clone() else {
+            return;
+        };
+        if self.fetching || self.all_packages.is_empty() {
+            return;
+        }
+        let qt_thread = self.qt_thread();
+        let seq = self.request_seq;
+        let limit = (self.all_packages.len() as u64).max(PAGE_SIZE);
+        let filter = libarc::SearchFilter {
+            provider: provider_filter_name(&self.filter_provider),
+            installed: self.filter_installed,
+            sort_by_name: self.sort_by_name,
+        };
+        self.as_mut().rust_mut().fetching = true;
+        runtime::spawn(async move {
+            let built = match fetch_page(&source, &filter, 0, limit).await {
+                Ok(mut page) => {
+                    crate::services::images::resolve_packages(&mut page.items).await;
+                    spawn_blocking(move || page_rows(page)).await.ok()
+                }
+                Err(_) => None,
+            };
+            let _ = qt_thread.queue(move |mut this| {
+                if this.request_seq != seq {
+                    return;
+                }
+                this.as_mut().rust_mut().fetching = false;
+                let Some((mut rows, providers, total)) = built else {
+                    return;
+                };
+                carry_busy_state(&this.all_packages, &mut rows);
+                if same_ids(&this.all_packages, &rows) {
+                    let count = rows.len() as i32;
+                    {
+                        let mut rust = this.as_mut().rust_mut();
+                        rust.all_packages = rows.clone();
+                        rust.packages = rows;
+                    }
+                    if count > 0 {
+                        let top = this.index(0, 0, &QModelIndex::default());
+                        let bottom = this.index(count - 1, 0, &QModelIndex::default());
+                        this.as_mut()
+                            .data_changed(&top, &bottom, &QList::<i32>::default());
+                    }
+                } else {
+                    unsafe {
+                        this.as_mut().begin_reset_model();
+                        let mut rust = this.as_mut().rust_mut();
+                        rust.all_packages = rows.clone();
+                        rust.packages = rows;
+                        drop(rust);
+                        this.as_mut().end_reset_model();
+                    }
+                }
+                this.as_mut().set_providers(provider_qlist(&providers));
+                this.as_mut().set_total(total as i32);
+            });
+        });
+    }
+
+    fn register(mut self: Pin<&mut Self>) {
+        if !self.registered {
+            let qt_thread = self.qt_thread();
+            PACKAGE_LIST_QT_THREADS.lock().unwrap().push(qt_thread);
+            self.as_mut().rust_mut().registered = true;
+        }
+    }
+
+    pub fn release(mut self: Pin<&mut Self>) {
+        unsafe {
+            self.as_mut().begin_reset_model();
+            let mut rust = self.as_mut().rust_mut();
+            rust.request_seq += 1;
+            rust.fetching = false;
+            rust.all_packages = Vec::new();
+            rust.packages = Vec::new();
+            drop(rust);
+            self.as_mut().end_reset_model();
+        }
+        self.as_mut().set_total(0);
+    }
+
+    pub fn restore(mut self: Pin<&mut Self>) {
+        if !self.all_packages.is_empty() {
+            return;
+        }
+        if self.source.is_some() {
+            self.load_page(true);
+            return;
+        }
+        match self.mode {
+            ListMode::Installed => self.as_mut().load_installed(),
+            ListMode::Updates => self.as_mut().load_updates(),
+            ListMode::Search => {}
+        }
+    }
+
+    pub fn can_fetch_more(&self, _parent: &QModelIndex) -> bool {
+        self.source.is_some() && !self.fetching && (self.all_packages.len() as i32) < self.total
+    }
+
+    pub fn fetch_more(self: Pin<&mut Self>, _parent: &QModelIndex) {
+        self.load_page(false);
     }
 
     pub fn check_for_updates(mut self: Pin<&mut Self>) {
@@ -662,14 +1018,17 @@ impl qobject::PackageListModel {
     }
 
     pub fn load_updates(mut self: Pin<&mut Self>) {
-        self.as_mut().rust_mut().mode = ListMode::Updates;
+        {
+            let mut rust = self.as_mut().rust_mut();
+            rust.mode = ListMode::Updates;
+            rust.source = None;
+        }
         self.as_mut().load_with(
-            "updates".to_string(),
             async move {
                 let proxy = runtime::proxy()
                     .await
                     .ok_or_else(|| anyhow::anyhow!("no daemon connection"))?;
-                proxy.updates_packages().await
+                runtime::call("load updates", proxy.updates_packages()).await
             },
             "load updates",
         );
@@ -687,7 +1046,11 @@ impl qobject::PackageListModel {
             rust.filter_installed = installed;
             rust.sort_by_name = sort_by_name;
         }
-        self.apply_rows();
+        if self.source.is_some() {
+            self.load_page(true);
+        } else {
+            self.apply_rows();
+        }
     }
 
     pub fn set_search_text(mut self: Pin<&mut Self>, text: QString) {
@@ -726,25 +1089,22 @@ impl qobject::PackageListModel {
             rows.sort_by(|a, b| a.pkg.name.to_lowercase().cmp(&b.pkg.name.to_lowercase()));
         }
 
+        let count = rows.len() as i32;
         unsafe {
             self.as_mut().begin_reset_model();
             self.as_mut().rust_mut().packages = rows;
             self.as_mut().end_reset_model();
         }
+        self.as_mut().set_total(count);
     }
 
     fn load_with(
         mut self: Pin<&mut Self>,
-        cache_key: String,
         fetch: impl std::future::Future<Output = anyhow::Result<Vec<Package>>> + Send + 'static,
         what: &'static str,
     ) {
+        self.as_mut().register();
         let qt_thread = self.qt_thread();
-        if !self.registered {
-            PACKAGE_LIST_QT_THREADS.lock().unwrap().push(qt_thread.clone());
-            self.as_mut().rust_mut().registered = true;
-        }
-
         let seq = {
             let mut rust = self.as_mut().rust_mut();
             rust.filter_provider = String::new();
@@ -754,36 +1114,25 @@ impl qobject::PackageListModel {
             rust.request_seq += 1;
             rust.request_seq
         };
-        self.as_mut().set_loading(true);
+        if self.all_packages.is_empty() {
+            self.as_mut().set_loading(true);
+        }
 
         runtime::spawn(async move {
-            let cached = package_cache().get(&cache_key);
-            let had_cache = cached.is_some();
-            if let Some(cached) = cached {
-                let qt = qt_thread.clone();
-                if let Ok(built) =
-                    spawn_blocking(move || rows_and_providers(cached)).await
-                {
-                    fill_incrementally(qt, seq, built, false);
-                }
-            }
-
-            let packages = match fetch.await {
+            let mut packages = match fetch.await {
                 Ok(packages) => packages,
                 Err(e) => {
                     tracing::warn!("{what} failed: {e}");
-                    if !had_cache {
-                        let qt_thread = qt_thread.clone();
-                        let _ = qt_thread.queue(move |mut this| {
-                            if this.request_seq == seq {
-                                this.as_mut().set_loading(false);
-                            }
-                        });
-                    }
+                    let _ = qt_thread.queue(move |mut this| {
+                        if this.request_seq == seq {
+                            this.as_mut().set_loading(false);
+                        }
+                    });
                     return;
                 }
             };
 
+            crate::services::images::resolve_packages(&mut packages).await;
             let built = spawn_blocking(move || {
                 let mut packages = packages;
                 for pkg in &mut packages {
@@ -792,13 +1141,12 @@ impl qobject::PackageListModel {
                         pkg.icon_url.as_deref(),
                     ));
                 }
-                package_cache().insert(cache_key, packages.clone());
                 rows_and_providers(packages)
             })
             .await
             .unwrap_or_default();
 
-            fill_incrementally(qt_thread, seq, built, had_cache);
+            fill_incrementally(qt_thread, seq, built, true);
         });
     }
 
@@ -921,10 +1269,17 @@ fn fill_incrementally(
             return;
         }
         let (mut rows, provider_names) = built;
-        if skip_if_same && same_ids(&this.all_packages, &rows) {
+        if skip_if_same
+            && same_ids(&this.all_packages, &rows)
+            && rows
+                .iter()
+                .zip(this.all_packages.iter())
+                .all(|(a, b)| a.pkg.installed == b.pkg.installed)
+        {
             this.as_mut().set_loading(false);
             return;
         }
+        let count = rows.len() as i32;
         carry_busy_state(&this.all_packages, &mut rows);
         this.as_mut().set_providers(provider_qlist(&provider_names));
         unsafe {
@@ -936,6 +1291,7 @@ fn fill_incrementally(
             }
             this.as_mut().end_reset_model();
         }
+        this.as_mut().set_total(count);
         this.as_mut().set_loading(false);
     });
 }
@@ -957,15 +1313,18 @@ fn carry_busy_state(old: &[PackageRow], rows: &mut [PackageRow]) {
     }
 }
 
-fn reload_package_lists() {
+pub(crate) fn reload_package_lists() {
     PACKAGE_LIST_QT_THREADS.lock().unwrap().retain(|qt_thread| {
         qt_thread
             .queue(|mut model| {
+                if model.all_packages.is_empty() {
+                    return;
+                }
                 let mode = model.mode;
                 match mode {
                     ListMode::Updates => model.as_mut().load_updates(),
                     ListMode::Installed => model.as_mut().load_installed(),
-                    ListMode::Search => {}
+                    ListMode::Search => model.as_mut().refresh_loaded_pages(),
                 }
             })
             .is_ok()
@@ -1011,7 +1370,6 @@ fn sync_package_busy(pkg_id: &str, busy: bool, progress: f32) {
 fn sync_package_finished(pkg_id: &str, tx_type: &str, success: bool) {
     let is_remove = tx_type == "remove" || tx_type == "remove_with_data";
     if success {
-        invalidate_package_cache();
         crate::bridge::detail_controller::sync_installed(pkg_id, !is_remove);
         crate::bridge::detail_controller::refresh_extensions_for_current();
         sync_home_installed(pkg_id, !is_remove);
@@ -1038,7 +1396,8 @@ fn sync_package_finished(pkg_id: &str, tx_type: &str, success: bool) {
                     return;
                 }
                 let drop_row = success
-                    && ((is_remove && matches!(model.mode, ListMode::Installed | ListMode::Updates))
+                    && ((is_remove
+                        && matches!(model.mode, ListMode::Installed | ListMode::Updates))
                         || (is_update && model.mode == ListMode::Updates));
 
                 {
@@ -1175,7 +1534,10 @@ where
     Fut: std::future::Future<Output = bool>,
 {
     for _ in 0..5 {
-        if tokio::time::timeout(DAEMON_STARTUP_TIMEOUT, call()).await.unwrap_or(false) {
+        if tokio::time::timeout(DAEMON_STARTUP_TIMEOUT, call())
+            .await
+            .unwrap_or(false)
+        {
             return;
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -1204,10 +1566,25 @@ impl qobject::TransactionsModel {
             retry_until_daemon_answers(|| load_running_transactions(&proxy)).await;
             let _ = qt_thread.queue(|mut this| this.as_mut().set_history_loaded(true));
             retry_until_daemon_answers(|| refresh_updates_count(&proxy)).await;
+            let pad_proxy = proxy.clone();
+            runtime::spawn(async move {
+                crate::bridge::startup_controller::after_first_frame().await;
+                prepare_installed_icons(&pad_proxy).await;
+            });
 
+            let mut proxy = proxy;
             loop {
                 run_signal_listener(proxy.clone()).await;
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                runtime::invalidate_proxy();
+                let Some(fresh) = runtime::proxy().await else {
+                    continue;
+                };
+                proxy = fresh;
+                retry_until_daemon_answers(|| load_running_transactions(&proxy)).await;
+                retry_until_daemon_answers(|| refresh_updates_count(&proxy)).await;
+                reload_package_lists();
+                crate::bridge::detail_controller::refresh_current();
             }
         });
     }
@@ -1315,9 +1692,21 @@ impl qobject::TransactionsModel {
                 return;
             };
 
+            let updates: Vec<(Package, String)> = spawn_blocking(move || {
+                updates
+                    .into_iter()
+                    .map(|pkg| {
+                        let icon =
+                            crate::services::icons::resolve(&pkg.id, pkg.icon_url.as_deref());
+                        (pkg, icon)
+                    })
+                    .collect()
+            })
+            .await
+            .unwrap_or_default();
+
             let _ = qt_thread.queue(move |mut model| {
-                for pkg in updates {
-                    let icon = crate::services::icons::resolve(&pkg.id, pkg.icon_url.as_deref());
+                for (pkg, icon) in updates {
                     model
                         .as_mut()
                         .start_transaction(pkg.id, pkg.name, icon, "update");
@@ -1327,10 +1716,19 @@ impl qobject::TransactionsModel {
         });
     }
 
-    pub fn remove_package(mut self: Pin<&mut Self>, pkg_id: QString, name: QString, icon_url: QString) {
+    pub fn remove_package(
+        mut self: Pin<&mut Self>,
+        pkg_id: QString,
+        name: QString,
+        icon_url: QString,
+    ) {
         let pkg_id = pkg_id.to_string();
         let name = name.to_string();
-        let name = if name.is_empty() { pkg_id.clone() } else { name };
+        let name = if name.is_empty() {
+            pkg_id.clone()
+        } else {
+            name
+        };
         self.as_mut().remove_confirmation_needed(
             QString::from(&pkg_id),
             QString::from(&name),
@@ -1347,8 +1745,16 @@ impl qobject::TransactionsModel {
     ) {
         let pkg_id = pkg_id.to_string();
         let name = name.to_string();
-        let name = if name.is_empty() { pkg_id.clone() } else { name };
-        let tx_type = if delete_data { "remove_with_data" } else { "remove" };
+        let name = if name.is_empty() {
+            pkg_id.clone()
+        } else {
+            name
+        };
+        let tx_type = if delete_data {
+            "remove_with_data"
+        } else {
+            "remove"
+        };
         self.as_mut()
             .start_transaction(pkg_id, name, icon_url.to_string(), tx_type);
     }
@@ -1675,18 +2081,26 @@ fn ordered_rows(mut rows: Vec<Tx>) -> Vec<Tx> {
         let slot = newest.entry(tx.pkg_id.as_str()).or_default();
         *slot = (*slot).max(tx.seq);
     }
-    let newest: HashMap<String, u64> =
-        newest.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+    let newest: HashMap<String, u64> = newest
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
     rows.retain(|tx| !is_finished(tx.status) || newest.get(&tx.pkg_id) == Some(&tx.seq));
 
-    rows.sort_by(|a, b| match (is_finished(a.status), is_finished(b.status)) {
-        (false, true) => std::cmp::Ordering::Less,
-        (true, false) => std::cmp::Ordering::Greater,
-        (true, true) => (b.finished_at, b.seq).cmp(&(a.finished_at, a.seq)),
-        (false, false) => a.seq.cmp(&b.seq),
-    });
+    rows.sort_by(
+        |a, b| match (is_finished(a.status), is_finished(b.status)) {
+            (false, true) => std::cmp::Ordering::Less,
+            (true, false) => std::cmp::Ordering::Greater,
+            (true, true) => (b.finished_at, b.seq).cmp(&(a.finished_at, a.seq)),
+            (false, false) => a.seq.cmp(&b.seq),
+        },
+    );
+    let running = rows.iter().filter(|tx| !is_finished(tx.status)).count();
+    rows.truncate(running + MAX_FINISHED_ROWS);
     rows
 }
+
+const MAX_FINISHED_ROWS: usize = 100;
 
 fn rebuild_rows(mut model: Pin<&mut qobject::TransactionsModel>) {
     let rows = ordered_rows(model.transactions.clone());
@@ -1770,6 +2184,29 @@ async fn load_running_transactions(proxy: &ArcDaemonProxy<'static>) -> bool {
     .filter_map(|(id, pkg)| pkg.map(|pkg| (id, pkg)))
     .collect();
 
+    let lookup: Vec<(String, Option<String>)> = txs
+        .iter()
+        .map(|tx| {
+            (
+                tx.package_id.clone(),
+                resolved
+                    .get(&tx.package_id)
+                    .and_then(|p| p.icon_url.clone()),
+            )
+        })
+        .collect();
+    let icons: HashMap<String, String> = spawn_blocking(move || {
+        lookup
+            .into_iter()
+            .map(|(id, raw)| {
+                let icon = crate::services::icons::resolve(&id, raw.as_deref());
+                (id, icon)
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default();
+
     let _ = qt_thread.queue(move |mut model| {
         for tx in txs {
             let (status, error) = match &tx.status {
@@ -1801,10 +2238,7 @@ async fn load_running_transactions(proxy: &ArcDaemonProxy<'static>) -> bool {
                 .map(|p| p.name.clone())
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| tx.package_id.clone());
-            let icon_url = crate::services::icons::resolve(
-                &tx.package_id,
-                pkg.and_then(|p| p.icon_url.as_deref()),
-            );
+            let icon_url = icons.get(&tx.package_id).cloned().unwrap_or_default();
             let seq = next_seq(model.as_mut());
             let row = model.transactions.len() as i32;
             unsafe {
@@ -1834,6 +2268,20 @@ async fn load_running_transactions(proxy: &ArcDaemonProxy<'static>) -> bool {
     true
 }
 
+async fn prepare_installed_icons(proxy: &ArcDaemonProxy<'static>) {
+    let Ok(Ok(packages)) =
+        tokio::time::timeout(DAEMON_STARTUP_TIMEOUT, proxy.installed_packages()).await
+    else {
+        return;
+    };
+    let _ = spawn_blocking(move || {
+        for pkg in packages {
+            crate::services::icons::resolve(&pkg.id, pkg.icon_url.as_deref());
+        }
+    })
+    .await;
+}
+
 async fn refresh_updates_count(proxy: &ArcDaemonProxy<'static>) -> bool {
     let Ok(updates) = proxy.updates_packages().await else {
         return false;
@@ -1850,19 +2298,17 @@ async fn refresh_updates_count(proxy: &ArcDaemonProxy<'static>) -> bool {
 }
 
 async fn run_signal_listener(proxy: ArcDaemonProxy<'static>) {
-    let subscribed = tokio::time::timeout(
-        DAEMON_STARTUP_TIMEOUT,
-        async {
-            tokio::join!(
-                proxy.receive_transaction_progress(),
-                proxy.receive_transaction_finished(),
-                proxy.receive_updates_available(),
-                proxy.receive_transaction_stats(),
-                proxy.receive_transaction_started(),
-                proxy.receive_catalog_refreshed(),
-            )
-        },
-    )
+    let subscribed = tokio::time::timeout(DAEMON_STARTUP_TIMEOUT, async {
+        tokio::join!(
+            proxy.receive_transaction_progress(),
+            proxy.receive_transaction_finished(),
+            proxy.receive_updates_available(),
+            proxy.receive_transaction_stats(),
+            proxy.receive_transaction_started(),
+            proxy.receive_catalog_refreshed(),
+            proxy.receive_catalog_changed(),
+        )
+    })
     .await;
 
     let Ok((
@@ -1872,6 +2318,7 @@ async fn run_signal_listener(proxy: ArcDaemonProxy<'static>) {
         Ok(mut stats_stream),
         Ok(mut started_stream),
         Ok(mut catalog_stream),
+        Ok(mut changed_stream),
     )) = subscribed
     else {
         tracing::warn!("run_signal_listener: failed to subscribe to transaction signal streams");
@@ -1904,6 +2351,11 @@ async fn run_signal_listener(proxy: ArcDaemonProxy<'static>) {
                 let Some(_) = sig else { break };
                 refresh_updates_count(&proxy).await;
                 reload_package_lists();
+            }
+            sig = changed_stream.next() => {
+                let Some(_) = sig else { break };
+                reload_package_lists();
+                crate::bridge::detail_controller::refresh_current();
             }
             sig = started_stream.next() => {
                 let Some(sig) = sig else { break };
@@ -1977,15 +2429,9 @@ fn to_json<T: serde::Serialize>(v: &T) -> String {
 pub struct HomeFeedModelRust {
     loading: bool,
     sections: Vec<crate::services::home::HomeSection>,
-    // bumped on every load()/refresh(); a Phase B row-resolution that lands
-    // after a newer generation has already reset the model is stale and
-    // must be dropped instead of patched in
+    raw_sections: Vec<crate::services::home::HomeSection>,
     request_seq: u64,
-    // how many rows of the current generation are still resolving; disk
-    // cache save fires once this hits 0
     pending_count: u32,
-    // accumulates as pending rows resolve; snapshotted for the cache save
-    // and re-stashed (replacing the global stash) after every row lands
     all_stories: Vec<crate::services::home::Story>,
 }
 
@@ -1994,6 +2440,7 @@ impl Default for HomeFeedModelRust {
         Self {
             loading: true,
             sections: Vec::new(),
+            raw_sections: Vec::new(),
             request_seq: 0,
             pending_count: 0,
             all_stories: Vec::new(),
@@ -2024,6 +2471,11 @@ fn sync_home_installed(pkg_id: &str, installed: bool) {
                     changed_rows.push(row as i32);
                 }
             }
+            for section in rust.raw_sections.iter_mut() {
+                for card in section.cards.iter_mut().filter(|c| c.id == pkg_id) {
+                    card.installed = installed;
+                }
+            }
         }
         for row in changed_rows {
             let idx = this.index(row, 0, &QModelIndex::default());
@@ -2036,8 +2488,38 @@ fn sync_home_installed(pkg_id: &str, installed: bool) {
 fn worth_snapshotting(sections: &[crate::services::home::HomeSection]) -> bool {
     sections
         .iter()
-        .filter(|s| matches!(s.item_type, "app-row" | "app-grid" | "app-wide-grid"))
+        .filter(|s| {
+            use crate::services::home::SectionKind;
+            matches!(
+                s.kind,
+                SectionKind::AppRow | SectionKind::AppGrid | SectionKind::AppWideGrid
+            )
+        })
         .all(|s| !s.cards.is_empty())
+}
+
+// frontpage apps are the most opened ones so their first screenshots are fetched once per session in the background
+fn prefetch_frontpage(sections: &[crate::services::home::HomeSection]) {
+    static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if DONE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let mut ids: Vec<String> = Vec::new();
+    for section in sections {
+        let card_ids = section.cards.iter().map(|c| c.id.clone());
+        let hero_ids = section
+            .hero_items
+            .iter()
+            .chain(section.editorial_items.iter())
+            .map(|h| h.id.clone());
+        for id in card_ids.chain(hero_ids) {
+            if !id.is_empty() && !id.starts_with("pwa:") && !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    ids.truncate(24);
+    crate::bridge::detail_controller::prefetch_first_shots(ids);
 }
 
 // off the GUI thread: writes to disk are cheap to trigger but the actual
@@ -2049,6 +2531,7 @@ fn save_home_cache_in_background(
     if !worth_snapshotting(&sections) {
         return;
     }
+    prefetch_frontpage(&sections);
     runtime::spawn(async move {
         let _ = spawn_blocking(move || {
             crate::services::home_cache::save(&sections, &stories);
@@ -2057,37 +2540,41 @@ fn save_home_cache_in_background(
     });
 }
 
+fn apply_stored_home(
+    mut this: Pin<&mut qobject::HomeFeedModel>,
+    preloaded: crate::services::home_cache::Preloaded,
+) {
+    unsafe {
+        this.as_mut().begin_reset_model();
+        this.as_mut().rust_mut().sections = preloaded.display;
+        this.as_mut().rust_mut().raw_sections = preloaded.raw;
+        this.as_mut().end_reset_model();
+    }
+    this.as_mut().set_loading(false);
+    crate::bridge::startup_controller::log_step("home filled from disk");
+}
+
 impl qobject::HomeFeedModel {
     pub fn load(mut self: Pin<&mut Self>) {
         if !self.sections.is_empty() {
             return;
         }
-        // kick off the live fetch and the disk-cache read at the same time
-        // neither should wait on the other, whichever produces visible
-        // content first wins
-        self.as_mut().fetch();
-
-        let qt_thread = self.qt_thread();
-        runtime::spawn(async move {
-            let cached = spawn_blocking(crate::services::home_cache::load)
-                .await
-                .ok()
-                .flatten();
-            let Some(sections) = cached else {
-                return;
-            };
-            let _ = qt_thread.queue(move |mut this| unsafe {
-                // the live fetch already produced (or is producing) newer
-                // content don't clobber it with a stale disk snapshot
-                if !this.sections.is_empty() {
+        if let Some(preloaded) = crate::services::home_cache::take_preloaded() {
+            apply_stored_home(self.as_mut(), preloaded);
+        } else {
+            let qt_thread = self.qt_thread();
+            runtime::spawn(async move {
+                let Some(preloaded) = crate::services::home_cache::wait_preloaded().await else {
                     return;
-                }
-                this.as_mut().begin_reset_model();
-                this.as_mut().rust_mut().sections = sections;
-                this.as_mut().end_reset_model();
-                this.as_mut().set_loading(false);
+                };
+                let _ = qt_thread.queue(move |mut this| {
+                    if this.sections.is_empty() {
+                        apply_stored_home(this.as_mut(), preloaded);
+                    }
+                });
             });
-        });
+        }
+        self.as_mut().fetch();
     }
 
     pub fn refresh(self: Pin<&mut Self>) {
@@ -2098,6 +2585,7 @@ impl qobject::HomeFeedModel {
         unsafe {
             self.as_mut().begin_reset_model();
             self.as_mut().rust_mut().sections = Vec::new();
+            self.as_mut().rust_mut().raw_sections = Vec::new();
             self.as_mut().end_reset_model();
         }
         self.fetch();
@@ -2121,7 +2609,10 @@ impl qobject::HomeFeedModel {
             let (plan, ctx) = crate::services::home::plan_home(proxy).await;
 
             let pending_count = plan.pending.len() as u32;
-            let sections = plan.sections;
+            let raw = plan.sections;
+            let mut display = raw.clone();
+            let images_proxy = runtime::proxy().await;
+            crate::services::images::resolve_sections(images_proxy.as_ref(), &mut display).await;
 
             let qt_reset = qt_thread.clone();
             let _ = qt_reset.queue(move |mut this| unsafe {
@@ -2130,14 +2621,19 @@ impl qobject::HomeFeedModel {
                 }
                 if this.sections.is_empty() {
                     this.as_mut().begin_reset_model();
-                    this.as_mut().rust_mut().sections = sections;
+                    this.as_mut().rust_mut().sections = display;
+                    this.as_mut().rust_mut().raw_sections = raw;
                     this.as_mut().end_reset_model();
+                    crate::bridge::startup_controller::log_step("home filled from network");
                 }
                 this.as_mut().rust_mut().all_stories = Vec::new();
                 this.as_mut().rust_mut().pending_count = pending_count;
                 this.as_mut().set_loading(false);
                 if pending_count == 0 {
-                    save_home_cache_in_background(this.sections.clone(), this.all_stories.clone());
+                    save_home_cache_in_background(
+                        this.raw_sections.clone(),
+                        this.all_stories.clone(),
+                    );
                 }
             });
 
@@ -2147,29 +2643,59 @@ impl qobject::HomeFeedModel {
                 runtime::spawn(async move {
                     let (row_index, section, stories) =
                         crate::services::home::resolve_pending_section(pending, &ctx).await;
+                    let mut display = section.clone();
+                    let images_proxy = runtime::proxy().await;
+                    crate::services::images::resolve_sections(
+                        images_proxy.as_ref(),
+                        std::slice::from_mut(&mut display),
+                    )
+                    .await;
                     let _ = qt_thread.queue(move |mut this| {
                         if this.request_seq != seq {
                             return;
                         }
-                        if let Some(slot) = this.as_mut().rust_mut().sections.get_mut(row_index) {
-                            if !is_empty_section(&section) || is_empty_section(slot) {
-                                *slot = section;
-                            } else {
-                                slot.loading = false;
+                        let changed = {
+                            let mut rust = this.as_mut().rust_mut();
+                            let unchanged = rust.raw_sections.get(row_index) == Some(&section);
+                            match (rust.raw_sections.get(row_index).cloned(), unchanged) {
+                                (_, true) => false,
+                                (Some(old), false)
+                                    if is_empty_section(&section) && !is_empty_section(&old) =>
+                                {
+                                    let was_loading =
+                                        rust.sections.get(row_index).is_some_and(|s| s.loading);
+                                    if let Some(slot) = rust.sections.get_mut(row_index) {
+                                        slot.loading = false;
+                                    }
+                                    if let Some(slot) = rust.raw_sections.get_mut(row_index) {
+                                        slot.loading = false;
+                                    }
+                                    was_loading
+                                }
+                                (Some(_), false) => {
+                                    rust.raw_sections[row_index] = section;
+                                    if let Some(slot) = rust.sections.get_mut(row_index) {
+                                        *slot = display;
+                                    }
+                                    true
+                                }
+                                (None, _) => false,
                             }
-                        }
+                        };
                         crate::services::stories::remember_all(&stories);
                         this.as_mut().rust_mut().all_stories.extend(stories);
 
-                        let idx = this.index(row_index as i32, 0, &QModelIndex::default());
-                        let roles = QList::<i32>::default();
-                        this.as_mut().data_changed(&idx, &idx, &roles);
+                        if changed {
+                            let idx = this.index(row_index as i32, 0, &QModelIndex::default());
+                            let roles = QList::<i32>::default();
+                            this.as_mut().data_changed(&idx, &idx, &roles);
+                        }
 
                         let remaining = this.pending_count.saturating_sub(1);
                         this.as_mut().rust_mut().pending_count = remaining;
                         if remaining == 0 {
                             save_home_cache_in_background(
-                                this.sections.clone(),
+                                this.raw_sections.clone(),
                                 this.all_stories.clone(),
                             );
                         }
@@ -2185,7 +2711,7 @@ impl qobject::HomeFeedModel {
         };
         let role = qobject::HomeRoles { repr: role };
         match role {
-            qobject::HomeRoles::ItemType => QVariant::from(&QString::from(s.item_type)),
+            qobject::HomeRoles::ItemType => QVariant::from(&QString::from(s.kind.as_str())),
             qobject::HomeRoles::Text => QVariant::from(&QString::from(&s.text)),
             qobject::HomeRoles::Title => QVariant::from(&QString::from(&s.title)),
             qobject::HomeRoles::CardsJson => QVariant::from(&QString::from(&to_json(&s.cards))),

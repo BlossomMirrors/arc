@@ -10,8 +10,9 @@ use tokio::spawn;
 use tokio::sync::{Mutex, Semaphore};
 use tokio::task::spawn_blocking;
 
+// answers keep stable daemon urls and the frontend asks resolve_images for the stored file right before showing them
 fn proxy_icon_url(pkg: &mut Package) {
-    crate::media::proxy_icon_url_field(&mut pkg.icon_url, &pkg.id);
+    crate::media::icon_url_field(&mut pkg.icon_url);
     crate::media::proxy_screenshot_urls(&mut pkg.screenshots);
 }
 
@@ -19,6 +20,26 @@ fn proxy_icon_urls(packages: &mut [Package]) {
     for pkg in packages {
         proxy_icon_url(pkg);
     }
+}
+
+// the frontend passes its own language and an empty one falls back to the daemons
+fn request_locales(lang: &str) -> Vec<String> {
+    if lang.is_empty() {
+        crate::appstream_db::system_locales()
+    } else {
+        crate::appstream_db::parse_locale_candidates(lang)
+    }
+}
+
+fn page_json(page: crate::catalog::SearchPage) -> String {
+    let mut items: Vec<Package> = page
+        .items
+        .into_iter()
+        .map(crate::catalog::CatalogApp::into_list_package)
+        .collect();
+    proxy_icon_urls(&mut items);
+    serde_json::json!({ "total": page.total, "items": items, "providers": page.providers })
+        .to_string()
 }
 
 // flatpak ids look like "org.gimp.GIMP" (reverse dns, dots, no slashes or semicolons).
@@ -47,11 +68,14 @@ pub async fn run_auto_updates(
                     }
 
                     if any_succeeded {
-                        provider.invalidate_package_cache().await;
+                        provider.on_flatpak_changed().await;
                     }
                     info!("Auto-update: done");
-                    let remaining =
-                        provider.list_updates().await.map(|u| u.len() as u32).unwrap_or(0);
+                    let remaining = provider
+                        .list_updates()
+                        .await
+                        .map(|u| u.len() as u32)
+                        .unwrap_or(0);
                     let _ = ArcDaemonInterface::updates_available(&emitter, remaining).await;
                 }
             }
@@ -76,18 +100,16 @@ async fn auto_update_one(
         .await;
     let tx_id = tx.id;
 
-    let _ = ArcDaemonInterface::transaction_started(
-        emitter,
-        tx_id.to_string(),
-        package_id.to_string(),
-    )
-    .await;
+    let _ =
+        ArcDaemonInterface::transaction_started(emitter, tx_id.to_string(), package_id.to_string())
+            .await;
     tm.update_progress(tx_id, 10).await;
     let _ = ArcDaemonInterface::transaction_progress(emitter, tx_id.to_string(), 10).await;
 
     match provider.update(package_id).await {
         Ok(()) => {
-            tm.complete(tx_id, true, "Update successful".to_string()).await;
+            tm.complete(tx_id, true, "Update successful".to_string())
+                .await;
             let _ = ArcDaemonInterface::transaction_progress(emitter, tx_id.to_string(), 100).await;
             let _ = ArcDaemonInterface::transaction_finished(
                 emitter,
@@ -139,9 +161,7 @@ use tracing::{error, info, warn};
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
 
-// AppStreamDb's cold parse can take well over a minute; fail fast instead of
-// making a UI click hang for that whole window - the caller can just retry
-// once the background warm-up (kicked off at daemon startup) finishes.
+// provider lookups for pwa lutris and distrobox apps can wait on the network or other processes
 const APP_INFO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub struct ArcDaemonInterface {
@@ -227,7 +247,8 @@ impl ArcDaemonInterface {
                 }
             };
 
-            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
+            let (progress_tx, mut progress_rx) =
+                tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
 
             // Forward GLib progress signals to DBus as they arrive
             let emitter_fwd = emitter.clone();
@@ -274,7 +295,7 @@ impl ArcDaemonInterface {
                 result = provider.install_with_progress(&package_id, progress_tx, cancel_token.clone()) => {
                     match result {
                         Ok(()) => {
-                            provider.invalidate_package_cache().await;
+                            provider.after_transaction(Some(&package_id)).await;
                             tm.complete(tx_id, true, "Installation successful".to_string())
                                 .await;
                             kio.finish(true, "");
@@ -351,7 +372,8 @@ impl ArcDaemonInterface {
                 }
             };
 
-            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
+            let (progress_tx, mut progress_rx) =
+                tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
 
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
@@ -397,7 +419,7 @@ impl ArcDaemonInterface {
                 result = provider.install_flatpakref_with_progress(&url, progress_tx, cancel_token.clone()) => {
                     match result {
                         Ok(()) => {
-                            provider.invalidate_package_cache().await;
+                            provider.after_transaction(None).await;
                             tm.complete(tx_id, true, "Installation successful".to_string())
                                 .await;
                             kio.finish(true, "");
@@ -455,8 +477,12 @@ impl ArcDaemonInterface {
         spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
-            let kio =
-                crate::kio::KioJob::start(&tr!("Removing application"), &package_id, None, kio_hidden);
+            let kio = crate::kio::KioJob::start(
+                &tr!("Removing application"),
+                &package_id,
+                None,
+                kio_hidden,
+            );
 
             tm.update_progress(tx_id, 10).await;
             kio.progress(10);
@@ -464,7 +490,7 @@ impl ArcDaemonInterface {
 
             match provider.remove(&package_id).await {
                 Ok(()) => {
-                    provider.invalidate_package_cache().await;
+                    provider.after_transaction(Some(&package_id)).await;
                     tm.complete(tx_id, true, "Removal successful".to_string())
                         .await;
                     kio.finish(true, "");
@@ -502,7 +528,10 @@ impl ArcDaemonInterface {
         notify: bool,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> String {
-        info!("RemovePackageWithData: {} delete_data={}", package_id, delete_data);
+        info!(
+            "RemovePackageWithData: {} delete_data={}",
+            package_id, delete_data
+        );
         let (tx, _cancel_token) = self
             .transaction_manager
             .create(
@@ -521,8 +550,12 @@ impl ArcDaemonInterface {
         spawn(async move {
             let _ =
                 Self::transaction_started(&emitter, tx_id.to_string(), package_id.clone()).await;
-            let kio =
-                crate::kio::KioJob::start(&tr!("Removing application"), &package_id, None, kio_hidden);
+            let kio = crate::kio::KioJob::start(
+                &tr!("Removing application"),
+                &package_id,
+                None,
+                kio_hidden,
+            );
             tm.update_progress(tx_id, 10).await;
             kio.progress(10);
             let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 10).await;
@@ -537,17 +570,17 @@ impl ArcDaemonInterface {
                                 let _ = fs::remove_dir_all(&flatpak_dir);
                             }
                             if let Some(appid) = package_id.strip_prefix("pwa:") {
-                                let pwa_dir = home
-                                    .join(".local/share/blossomos-webapps")
-                                    .join(appid);
+                                let pwa_dir =
+                                    home.join(".local/share/blossomos-webapps").join(appid);
                                 if pwa_dir.exists() {
                                     let _ = fs::remove_dir_all(&pwa_dir);
                                 }
                             }
                         }
                     }
-                    provider.invalidate_package_cache().await;
-                    tm.complete(tx_id, true, "Removal successful".to_string()).await;
+                    provider.after_transaction(Some(&package_id)).await;
+                    tm.complete(tx_id, true, "Removal successful".to_string())
+                        .await;
                     kio.finish(true, "");
                     let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
                     let _ = Self::transaction_finished(
@@ -621,7 +654,8 @@ impl ArcDaemonInterface {
                 }
             };
 
-            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
+            let (progress_tx, mut progress_rx) =
+                tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
 
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
@@ -667,7 +701,7 @@ impl ArcDaemonInterface {
                 result = provider.update_with_progress(&package_id, progress_tx, cancel_token.clone()) => {
                     match result {
                         Ok(()) => {
-                            provider.invalidate_package_cache().await;
+                            provider.after_transaction(Some(&package_id)).await;
                             tm.complete(tx_id, true, "Update successful".to_string())
                                 .await;
                             kio.finish(true, "");
@@ -799,49 +833,61 @@ impl ArcDaemonInterface {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn search_page(
+        &self,
+        query: String,
+        lang: String,
+        provider: String,
+        installed: i32,
+        sort_by_name: bool,
+        offset: u64,
+        limit: u64,
+    ) -> String {
+        let filter = crate::catalog::SearchFilter {
+            provider,
+            installed,
+            by_name: sort_by_name,
+        };
+        let page = self
+            .provider
+            .search_page(&query, request_locales(&lang), filter, offset, limit)
+            .await;
+        page_json(page)
+    }
+
+    async fn search_category_page(
+        &self,
+        category: String,
+        lang: String,
+        priority: Vec<String>,
+        offset: u64,
+        limit: u64,
+    ) -> String {
+        let page = self
+            .provider
+            .category_page(&category, request_locales(&lang), priority, offset, limit)
+            .await;
+        page_json(page)
+    }
+
     async fn get_app_metadata(&self, package_id: String) -> String {
         info!("GetAppMetadata: {}", package_id);
         if package_id.starts_with("pwa:") {
             return self.provider.pwa.get_metadata_json(&package_id).await;
         }
-
-        let fast_id = package_id.clone();
-        if let Some(mut entry) = spawn_blocking(move || crate::appstream_db::load_local_metainfo(&fast_id))
-            .await
-            .ok()
-            .flatten()
-        {
-            crate::media::proxy_screenshot_urls(&mut entry.screenshots);
-            if let Ok(json) = serde_json::to_string(&entry) {
-                return json;
-            }
-        }
-
-        // resolve_now checks the already-loaded db first then decompresses
-        // and scans just the catalog files not yet folded in
-        // stays well under APP_INFO_TIMEOUT instead of waiting on the full parse
-        let resolve_id = package_id.clone();
-        let fetch = spawn_blocking(move || {
-            crate::appstream_db::resolve_now(&resolve_id)
-                .or_else(|| crate::appstream_db::AppStreamDb::try_get().load_from_exported_metainfo(&resolve_id))
-        });
-        let entry = tokio::time::timeout(APP_INFO_TIMEOUT, fetch)
-            .await
-            .ok()
-            .and_then(|r| r.ok())
-            .flatten();
-        if let Some(mut entry) = entry {
-            crate::media::proxy_screenshot_urls(&mut entry.screenshots);
-            if let Ok(json) = serde_json::to_string(&entry) {
-                return json;
-            }
-        }
-
-        // id missing from every catalog file
-        // fall back to the disk-seeded package cache for a partial answer
-        match self.provider.cached_package(&package_id).await {
-            Some(pkg) => {
-                let mut entry = crate::appstream_db::partial_entry_from_package(&pkg);
+        crate::forge_cache::check_verification(package_id.clone());
+        let entry = spawn_blocking(move || {
+            let locales = crate::appstream_db::system_locales();
+            crate::catalog::get(&package_id, &locales)
+                .map(crate::appstream_db::AppStreamEntry::from)
+                .or_else(|| crate::appstream_db::load_local_metainfo(&package_id))
+        })
+        .await
+        .ok()
+        .flatten();
+        match entry {
+            Some(mut entry) => {
                 crate::media::proxy_screenshot_urls(&mut entry.screenshots);
                 serde_json::to_string(&entry).unwrap_or_else(|_| "null".to_string())
             }
@@ -897,11 +943,7 @@ impl ArcDaemonInterface {
                 if installed.contains(&id) {
                     continue;
                 }
-                let name = crate::appstream_db::AppStreamDb::try_get()
-                    .find_by_id(&id)
-                    .map(|e| e.name)
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or_else(|| id.clone());
+                let name = crate::catalog::name_of(&id).unwrap_or_else(|| id.clone());
                 entries.push(LeftoverDataEntry { id, name });
             }
         }
@@ -951,15 +993,21 @@ impl ArcDaemonInterface {
         let emitter = emitter.to_owned();
         spawn(async move {
             crate::appstream_db::refresh_remotes_now().await;
-            spawn_blocking(crate::appstream_db::AppStreamDb::refresh_if_stale).await.ok();
+            spawn_blocking(crate::appstream_db::sync_if_stale)
+                .await
+                .ok();
             crate::forge_cache::refresh().await;
 
-            crate::media::clear_icons();
+            crate::cache::icons().clear();
 
             provider.pwa.refresh_installed_icons().await;
-            provider.invalidate_package_cache().await;
+            let _ = provider.refresh_cache().await;
 
-            let count = provider.list_updates().await.map(|u| u.len() as u32).unwrap_or(0);
+            let count = provider
+                .list_updates()
+                .await
+                .map(|u| u.len() as u32)
+                .unwrap_or(0);
             info!("RefreshCatalog: done, {} update(s)", count);
             let _ = Self::updates_available(&emitter, count).await;
             let _ = Self::catalog_refreshed(&emitter).await;
@@ -968,7 +1016,19 @@ impl ArcDaemonInterface {
 
     async fn list_updates(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) -> String {
         info!("ListUpdates");
-        match self.provider.list_updates().await {
+        if self.provider.updates_stale().await {
+            let provider = self.provider.clone();
+            let background_emitter = emitter.to_owned();
+            spawn(async move {
+                if let Ok(updates) = provider.refresh_updates().await {
+                    let count = updates.len() as u32;
+                    if count > 0 {
+                        let _ = Self::updates_available(&background_emitter, count).await;
+                    }
+                }
+            });
+        }
+        match self.provider.cached_updates().await {
             Ok(mut packages) => {
                 let count = packages.len() as u32;
                 // fire the signal so any notification daemon listening can
@@ -1043,13 +1103,62 @@ impl ArcDaemonInterface {
         }
     }
 
+    async fn resolve_images(&self, urls: Vec<String>, kind: String, width: u32) -> Vec<String> {
+        use crate::media::{MediaKind, OwnUrl};
+        let default_kind = if kind == "icon" {
+            MediaKind::Icon
+        } else {
+            MediaKind::Screenshot
+        };
+        let default_width = (width > 0 && default_kind == MediaKind::Screenshot).then_some(width);
+        let targets: Vec<Option<(MediaKind, String, Option<u32>)>> =
+            futures_util::future::join_all(urls.iter().map(|url| async move {
+                let target = match crate::media::parse_own_url(url) {
+                    Some(OwnUrl::Image { kind, url, width }) => {
+                        Some((kind, url, width.or(default_width)))
+                    }
+                    Some(OwnUrl::AppIcon(id)) => crate::http_api::icon_source(&id)
+                        .await
+                        .map(|u| (MediaKind::Icon, u, None)),
+                    Some(OwnUrl::ForgeIcon(id)) => crate::forge_cache::original_icon_url(&id)
+                        .await
+                        .map(|u| (MediaKind::Icon, u, None)),
+                    None => Some((default_kind, url.clone(), default_width)),
+                };
+                target.filter(|(_, u, _)| {
+                    matches!(
+                        libarc::media::classify(u),
+                        libarc::media::MediaRef::Remote(_)
+                    ) && !u.starts_with(libarc::DAEMON_HTTP_BASE)
+                })
+            }))
+            .await;
+        spawn_blocking(move || {
+            urls.into_iter()
+                .zip(targets)
+                .map(|(original, target)| match target {
+                    Some((kind, remote, width)) => crate::media::display_url(kind, &remote, width),
+                    None => original,
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
+    }
+
     async fn get_home_apps(&self, popular_count: u32, recent_count: u32) -> String {
         spawn_blocking(move || {
-            let db = crate::appstream_db::AppStreamDb::try_get();
-            let mut popular = db.get_popular_apps(popular_count as usize);
-            let mut recent = db.get_recent_apps(recent_count as usize);
+            let locales = crate::appstream_db::system_locales();
+            let entries = |n: u32, newest: bool| -> Vec<crate::appstream_db::AppStreamEntry> {
+                crate::catalog::appstream_slice(&locales, n as u64, newest)
+                    .into_iter()
+                    .map(Into::into)
+                    .collect()
+            };
+            let mut popular = entries(popular_count, false);
+            let mut recent = entries(recent_count, true);
             for entry in popular.iter_mut().chain(recent.iter_mut()) {
-                crate::media::proxy_icon_url_field(&mut entry.icon_url, &entry.id);
+                crate::media::icon_url_field(&mut entry.icon_url);
                 crate::media::proxy_screenshot_urls(&mut entry.screenshots);
             }
             serde_json::json!({ "popular": popular, "recent": recent }).to_string()
@@ -1145,7 +1254,8 @@ impl ArcDaemonInterface {
                 }
             };
 
-            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
+            let (progress_tx, mut progress_rx) =
+                tokio::sync::mpsc::unbounded_channel::<crate::providers::Progress>();
             let emitter_fwd = emitter.clone();
             let tm_fwd = tm.clone();
             let cancel_token_fwd = cancel_token.clone();
@@ -1176,7 +1286,7 @@ impl ArcDaemonInterface {
                 result = provider.install_bundle_with_progress(&path, progress_tx, cancel_token.clone()) => {
                     match result {
                         Ok(()) => {
-                            provider.invalidate_package_cache().await;
+                            provider.after_transaction(None).await;
                             tm.complete(tx_id, true, "Installation successful".to_string()).await;
                             kio.finish(true, "");
                             let _ = Self::transaction_progress(&emitter, tx_id.to_string(), 100).await;
@@ -1228,8 +1338,17 @@ impl ArcDaemonInterface {
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]
-    pub(crate) async fn updates_available(signal_emitter: &SignalEmitter<'_>, count: u32) -> zbus::Result<()>;
+    pub(crate) async fn updates_available(
+        signal_emitter: &SignalEmitter<'_>,
+        count: u32,
+    ) -> zbus::Result<()>;
 
     #[zbus(signal)]
     pub(crate) async fn catalog_refreshed(signal_emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub(crate) async fn catalog_changed(
+        signal_emitter: &SignalEmitter<'_>,
+        generation: u64,
+    ) -> zbus::Result<()>;
 }

@@ -45,10 +45,9 @@ Kirigami.AbstractCard {
         id: hoverHandler
     }
 
-    Timer {
-        interval: 200
-        running: hoverHandler.hovered
-        onTriggered: DetailController.prefetch(root.pkgId, Math.round(Kirigami.Units.gridUnit * 14 * 16 / 9 * 2))
+    HoverPrefetch {
+        pkgId: root.pkgId
+        hovered: hoverHandler.hovered
     }
 
     contentItem: ColumnLayout {

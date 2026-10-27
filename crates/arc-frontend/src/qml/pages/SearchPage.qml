@@ -29,19 +29,6 @@ ItemList {
         NavController.updateQuery(edited);
     }
 
-    Timer {
-        property int attempts: 0
-        interval: 2000
-        running: true
-        repeat: true
-        onTriggered: {
-            attempts += 1;
-            if (root.query.length > 0) {
-                searchListModel.search(root.query);
-            }
-            if (attempts >= 5) {
-                stop();
-            }
-        }
-    }
+    function release() { searchListModel.release() }
+    function restore() { searchListModel.restore() }
 }

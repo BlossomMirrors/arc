@@ -17,6 +17,8 @@ Kirigami.ScrollablePage {
     property var failedShots: ({})
     property bool descriptionExpanded: false
 
+    onVisibleChanged: if (!visible) DetailController.clear()
+
     function openEntry(newPkgId, seed) {
         root.pkgId = newPkgId;
         root.failedShots = {};
@@ -274,8 +276,8 @@ Kirigami.ScrollablePage {
         id: lightbox
 
         property int currentIndex: 0
-        readonly property string currentScreenshot: lightbox.visible && lightbox.currentIndex < DetailController.screenshots.length
-            ? DetailController.screenshots[lightbox.currentIndex]
+        readonly property string currentScreenshot: lightbox.visible && lightbox.currentIndex < DetailController.fullScreenshots.length
+            ? DetailController.fullScreenshots[lightbox.currentIndex]
             : ""
 
         parent: Controls.Overlay.overlay
@@ -288,12 +290,12 @@ Kirigami.ScrollablePage {
             color: Qt.rgba(0, 0, 0, 0.9)
         }
 
-        Image {
+        CachedImage {
             anchors.fill: parent
             anchors.margins: Kirigami.Units.gridUnit * 2
             source: lightbox.currentScreenshot
             fillMode: Image.PreserveAspectFit
-            asynchronous: true
+            sourceSize: Qt.size(width, height)
         }
 
         TapHandler {

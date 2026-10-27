@@ -1,5 +1,29 @@
 use super::{PackageProvider, Progress};
-use crate::appstream_db::{entry_to_flatpak_package, AppStreamDb};
+use crate::appstream_db::AppStreamEntry;
+
+fn entry_package(entry: AppStreamEntry) -> Package {
+    let name = if entry.name.is_empty() {
+        entry.id.clone()
+    } else {
+        entry.name
+    };
+    Package {
+        id: entry.id,
+        name,
+        version: String::new(),
+        description: entry.summary,
+        provider: Provider::Flatpak,
+        installed: false,
+        icon_url: entry.icon_url,
+        remote: entry.remote,
+        screenshots: entry.screenshots,
+        developer_name: entry.developer_name,
+        homepage_url: entry.homepage_url,
+        content_rating: Some(entry.content_rating).filter(|s| !s.is_empty()),
+        is_runtime: false,
+        categories: entry.categories,
+    }
+}
 use async_trait::async_trait;
 use libarc::{ArcError, Package, Provider, RemoteInfo};
 use libflatpak::glib;
@@ -233,130 +257,66 @@ fn installed_ref_to_package(r: &libflatpak::InstalledRef) -> Package {
 }
 
 impl FlatpakProvider {
-    pub async fn fetch_all(&self) -> Result<Vec<Package>, ArcError> {
+    // every installed runtime with the name from its metadata or empty when it has none
+    pub async fn list_installed_runtimes(&self) -> Result<Vec<(String, String)>, ArcError> {
+        spawn_blocking(|| -> Result<Vec<(String, String)>, ArcError> {
+            let cancel = libflatpak::gio::Cancellable::NONE;
+            let mut out = Vec::new();
+            for inst in all_installations() {
+                for r in inst
+                    .list_installed_refs_by_kind(libflatpak::RefKind::Runtime, cancel)
+                    .unwrap_or_default()
+                {
+                    let Some(name) = r.name() else { continue };
+                    let display = r.appdata_name().map(|s| s.to_string()).unwrap_or_default();
+                    out.push((name.to_string(), display));
+                }
+            }
+            Ok(out)
+        })
+        .await
+        .map_err(|e| ArcError::ProviderError(e.to_string()))?
+    }
+
+    pub async fn list_remote_runtime_refs(
+        &self,
+    ) -> Result<Vec<(String, String, String)>, ArcError> {
         let _permit = self
             .network_sem
             .acquire()
             .await
             .map_err(|e| ArcError::ProviderError(e.to_string()))?;
-        spawn_blocking(|| -> Result<Vec<Package>, ArcError> {
+        spawn_blocking(|| -> Result<Vec<(String, String, String)>, ArcError> {
             let cancel = libflatpak::gio::Cancellable::NONE;
-            let db = AppStreamDb::get();
-
-            // collect installed app ids so we can mark them correctly in search results
-            let mut installed_ids: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
+            let mut out = Vec::new();
             for inst in all_installations() {
-                let refs = inst
-                    .list_installed_refs_by_kind(libflatpak::RefKind::App, cancel)
-                    .unwrap_or_default();
-                for r in &refs {
-                    if let Some(name) = r.name() {
-                        installed_ids.insert(name.to_string());
-                    }
-                }
-            }
-
-            // collect unique app ids from all remotes across all installations
-            let mut app_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-            for inst in all_installations() {
-                let remotes = inst.list_remotes(cancel).unwrap_or_default();
-                for remote in remotes {
+                for remote in inst.list_remotes(cancel).unwrap_or_default() {
                     let Some(remote_name) = remote.name() else {
                         continue;
                     };
-                    let refs = inst
+                    for r in inst
                         .list_remote_refs_sync(remote_name.as_str(), cancel)
-                        .unwrap_or_default();
-                    for r in refs {
-                        if r.kind() == libflatpak::RefKind::App {
-                            if let Some(name) = r.name() {
-                                app_ids.insert(name.to_string());
-                            }
+                        .unwrap_or_default()
+                    {
+                        if r.kind() != libflatpak::RefKind::Runtime {
+                            continue;
                         }
+                        let Some(name) = r.name() else { continue };
+                        let branch = r.branch().map(|b| b.to_string()).unwrap_or_default();
+                        out.push((name.to_string(), remote_name.to_string(), branch));
                     }
                 }
             }
-
-            Ok(app_ids
-                .into_iter()
-                .filter_map(|id| {
-                    let is_installed = installed_ids.contains(&id);
-                    if let Some(entry) = db.find_by_id(&id) {
-                        Some(entry_to_flatpak_package(entry, is_installed))
-                    } else if is_installed {
-                        // Installed but absent from any catalog, try the exported metainfo.
-                        let pkg = db
-                            .load_from_exported_metainfo(&id)
-                            .map(|e| entry_to_flatpak_package(e, true))
-                            .unwrap_or_else(|| Package {
-                                name: id.clone(),
-                                id: id.clone(),
-                                version: String::new(),
-                                description: String::new(),
-                                provider: libarc::Provider::Flatpak,
-                                installed: true,
-                                icon_url: None,
-                                remote: None,
-                                screenshots: vec![],
-                                developer_name: None,
-                                homepage_url: None,
-                                content_rating: None,
-                                is_runtime: false,
-                                categories: vec![],
-                            });
-                        Some(pkg)
-                    } else {
-                        // Not installed and no catalog entry, skip so it doesn't
-                        // show up as a nameless ghost in search results.
-                        None
-                    }
-                })
-                .collect())
+            Ok(out)
         })
         .await
         .map_err(|e| ArcError::ProviderError(e.to_string()))?
     }
 
-    pub async fn search_category(&self, category: &str) -> Result<Vec<Package>, ArcError> {
-        let category = category.to_string();
-        spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
-            let cancel = libflatpak::gio::Cancellable::NONE;
-            let mut installed_ids: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
-            for inst in all_installations() {
-                let refs = inst
-                    .list_installed_refs_by_kind(libflatpak::RefKind::App, cancel)
-                    .unwrap_or_default();
-                for r in &refs {
-                    if let Some(name) = r.name() {
-                        installed_ids.insert(name.to_string());
-                    }
-                }
-            }
-
-            Ok(AppStreamDb::try_get()
-                .get_apps_by_category(&category)
-                .into_iter()
-                .map(|e| {
-                    let is_installed = installed_ids.contains(&e.id);
-                    entry_to_flatpak_package(e, is_installed)
-                })
-                .collect())
-        })
-        .await
-        .map_err(|e| ArcError::ProviderError(e.to_string()))?
-    }
-
+    // remote and installed extensions both come from the catalogue so opening a detail page never waits on flatpak
     pub async fn list_extensions(&self, app_id: &str) -> Result<Vec<Package>, ArcError> {
         let app_id = app_id.to_string();
-        let _permit = self
-            .network_sem
-            .acquire()
-            .await
-            .map_err(|e| ArcError::ProviderError(e.to_string()))?;
         spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
-            let cancel = libflatpak::gio::Cancellable::NONE;
             let prefix = format!("{}.", app_id);
 
             fn should_filter(suffix: &str) -> bool {
@@ -390,82 +350,56 @@ impl FlatpakProvider {
                 }
             }
 
-            // Collect installed extensions; grab appdata_name() while we have the InstalledRef
-            let mut installed_names: std::collections::HashMap<String, String> =
-                std::collections::HashMap::new();
-            for inst in all_installations() {
-                for r in inst
-                    .list_installed_refs_by_kind(libflatpak::RefKind::Runtime, cancel)
-                    .unwrap_or_default()
-                {
-                    let Some(name) = r.name() else { continue };
-                    if !name.starts_with(&prefix) {
-                        continue;
-                    }
-                    let suffix = name.strip_prefix(&prefix).unwrap_or(&name);
-                    if should_filter(suffix) {
-                        continue;
-                    }
-                    let display = r
-                        .appdata_name()
-                        .map(|s| s.to_string())
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or_else(|| fallback_name(suffix));
-                    installed_names.insert(name.to_string(), display);
-                }
-            }
+            let installed_names: std::collections::HashMap<String, String> =
+                crate::catalog::installed_runtimes_with_prefix(&prefix)
+                    .into_iter()
+                    .filter_map(|(name, display)| {
+                        let suffix = name.strip_prefix(&prefix).unwrap_or(&name).to_string();
+                        if should_filter(&suffix) {
+                            return None;
+                        }
+                        let display = if display.is_empty() {
+                            fallback_name(&suffix)
+                        } else {
+                            display
+                        };
+                        Some((name, display))
+                    })
+                    .collect();
 
-            let db = AppStreamDb::try_get();
             let mut extensions: Vec<Package> = Vec::new();
             let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-            for inst in all_installations() {
-                for remote in inst.list_remotes(cancel).unwrap_or_default() {
-                    let Some(remote_name) = remote.name() else {
-                        continue;
-                    };
-                    for r in inst
-                        .list_remote_refs_sync(remote_name.as_str(), cancel)
-                        .unwrap_or_default()
-                    {
-                        if r.kind() != libflatpak::RefKind::Runtime {
-                            continue;
-                        }
-                        let Some(name) = r.name() else { continue };
-                        if !name.starts_with(&prefix) {
-                            continue;
-                        }
-                        if !seen.insert(name.to_string()) {
-                            continue;
-                        }
-                        let suffix = name.strip_prefix(&prefix).unwrap_or(&name);
-                        if should_filter(suffix) {
-                            continue;
-                        }
-                        let installed = installed_names.contains_key(&name.to_string());
-                        let display = installed_names
-                            .get(&name.to_string())
-                            .cloned()
-                            .or_else(|| db.find_by_id(&name).map(|e| e.name))
-                            .unwrap_or_else(|| fallback_name(suffix));
-                        extensions.push(Package {
-                            id: name.to_string(),
-                            name: display,
-                            version: r.branch().map(|s| s.to_string()).unwrap_or_default(),
-                            description: String::new(),
-                            provider: libarc::Provider::Flatpak,
-                            installed,
-                            icon_url: None,
-                            remote: Some(remote_name.to_string()),
-                            screenshots: vec![],
-                            developer_name: None,
-                            homepage_url: None,
-                            content_rating: None,
-                            is_runtime: false,
-                            categories: vec![],
-                        });
-                    }
+            for (name, remote_name, branch) in crate::catalog::remote_refs_with_prefix(&prefix) {
+                if !seen.insert(name.clone()) {
+                    continue;
                 }
+                let suffix = name.strip_prefix(&prefix).unwrap_or(&name);
+                if should_filter(suffix) {
+                    continue;
+                }
+                let installed = installed_names.contains_key(&name);
+                let display = installed_names
+                    .get(&name)
+                    .cloned()
+                    .or_else(|| crate::catalog::name_of(&name))
+                    .unwrap_or_else(|| fallback_name(suffix));
+                extensions.push(Package {
+                    id: name.clone(),
+                    name: display,
+                    version: branch,
+                    description: String::new(),
+                    provider: libarc::Provider::Flatpak,
+                    installed,
+                    icon_url: None,
+                    remote: Some(remote_name),
+                    screenshots: vec![],
+                    developer_name: None,
+                    homepage_url: None,
+                    content_rating: None,
+                    is_runtime: false,
+                    categories: vec![],
+                });
             }
 
             // include installed extensions not found in any remote listing
@@ -499,24 +433,17 @@ impl FlatpakProvider {
     pub async fn get_app_info(&self, app_id: &str) -> Result<Option<Package>, ArcError> {
         let app_id = app_id.to_string();
         spawn_blocking(move || -> Result<Option<Package>, ArcError> {
-            let cancel = libflatpak::gio::Cancellable::NONE;
-            // same lookup list_installed() uses; installed_ref() with no
-            // explicit arch/branch doesn't reliably match despite being
-            // documented as optional
-            let installed = all_installations().iter().any(|inst| {
-                inst.list_installed_refs_by_kind(libflatpak::RefKind::App, cancel)
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|r| r.name().map(|n| n.to_string()).as_deref() == Some(app_id.as_str()))
-            });
-            // fast path: an installed app's own exported metainfo is a
-            // single small local file, independent of the shared
-            // AppStreamDb OnceLock's full-catalog parse, try it first so
-            // clicking into something you already have installed doesn't
-            // queue behind that bulk warm-up
-            let entry = crate::appstream_db::load_local_metainfo(&app_id)
-                .or_else(|| AppStreamDb::try_get().find_by_id(&app_id));
-            Ok(entry.map(|e| entry_to_flatpak_package(e, installed)))
+            // the installed table is kept current by the flatpak watcher and every transaction
+            let installed = crate::catalog::is_installed(&app_id);
+            // an installed app missing from every catalogue still has its own exported metainfo file
+            let catalog_pkg = crate::catalog::get(&app_id, &crate::appstream_db::system_locales())
+                .map(|a| a.into_package());
+            let pkg = catalog_pkg
+                .or_else(|| crate::appstream_db::load_local_metainfo(&app_id).map(entry_package));
+            Ok(pkg.map(|mut p| {
+                p.installed = installed;
+                p
+            }))
         })
         .await
         .map_err(|e| ArcError::ProviderError(e.to_string()))?
@@ -531,9 +458,7 @@ impl FlatpakProvider {
         let app_id = app_id.to_string();
         spawn_blocking(move || -> Result<(), ArcError> {
             let cancel = Some(&gio_cancel);
-            let primary_remote = AppStreamDb::try_get()
-                .find_by_id(&app_id)
-                .and_then(|e| e.remote);
+            let primary_remote = crate::catalog::remote_of(&app_id);
 
             let mut remotes_to_try: Vec<String> = Vec::new();
             if let Some(ref r) = primary_remote {
@@ -974,18 +899,40 @@ impl PackageProvider for FlatpakProvider {
     async fn search(&self, query: &str) -> Result<Vec<Package>, ArcError> {
         let query = query.to_string();
         spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
-            Ok(AppStreamDb::try_get()
-                .search_apps(&query)
-                .into_iter()
-                .map(|e| entry_to_flatpak_package(e, false))
-                .collect())
+            let locales = crate::appstream_db::system_locales();
+            Ok(crate::catalog::search(
+                &query,
+                &locales,
+                true,
+                &Default::default(),
+                0,
+                super::NO_LIMIT,
+            )
+            .items
+            .into_iter()
+            .filter(|a| a.provider == Some(Provider::Flatpak))
+            .map(|a| a.into_package())
+            .collect())
         })
         .await
         .map_err(|e| ArcError::ProviderError(e.to_string()))?
     }
 
     async fn search_category(&self, category: &str) -> Result<Vec<Package>, ArcError> {
-        self.search_category(category).await
+        let category = category.to_string();
+        spawn_blocking(move || -> Result<Vec<Package>, ArcError> {
+            let locales = crate::appstream_db::system_locales();
+            Ok(
+                crate::catalog::by_category(&category, &locales, &[], 0, super::NO_LIMIT)
+                    .items
+                    .into_iter()
+                    .filter(|a| a.provider == Some(Provider::Flatpak))
+                    .map(|a| a.into_package())
+                    .collect(),
+            )
+        })
+        .await
+        .map_err(|e| ArcError::ProviderError(e.to_string()))?
     }
 
     async fn get_app_info(&self, app_id: &str) -> Result<Option<Package>, ArcError> {
@@ -1049,9 +996,7 @@ impl PackageProvider for FlatpakProvider {
             let cancel = libflatpak::gio::Cancellable::NONE;
 
             // a cold miss falls through to the flathub fallback below
-            let primary_remote = AppStreamDb::try_get()
-                .find_by_id(&package_id)
-                .and_then(|e| e.remote);
+            let primary_remote = crate::catalog::remote_of(&package_id);
 
             // Build a list of remotes to try: primary from AppStream DB, then flathub as fallback
             let mut remotes_to_try = Vec::new();

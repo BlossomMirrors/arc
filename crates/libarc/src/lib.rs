@@ -36,11 +36,41 @@ pub trait ArcDaemon {
     async fn install_package(&self, package_id: &str, notify: bool) -> zbus::Result<String>;
     async fn install_flatpakref(&self, url: &str, notify: bool) -> zbus::Result<String>;
     async fn remove_package(&self, package_id: &str, notify: bool) -> zbus::Result<String>;
-    async fn remove_package_with_data(&self, package_id: &str, delete_data: bool, notify: bool) -> zbus::Result<String>;
+    async fn remove_package_with_data(
+        &self,
+        package_id: &str,
+        delete_data: bool,
+        notify: bool,
+    ) -> zbus::Result<String>;
     async fn search(&self, query: &str) -> zbus::Result<String>;
     async fn search_category(&self, category: &str) -> zbus::Result<String>;
+    #[allow(clippy::too_many_arguments)]
+    async fn search_page(
+        &self,
+        query: &str,
+        lang: &str,
+        provider: &str,
+        installed: i32,
+        sort_by_name: bool,
+        offset: u64,
+        limit: u64,
+    ) -> zbus::Result<String>;
+    async fn search_category_page(
+        &self,
+        category: &str,
+        lang: &str,
+        priority: Vec<String>,
+        offset: u64,
+        limit: u64,
+    ) -> zbus::Result<String>;
     async fn get_app_info(&self, package_id: &str) -> zbus::Result<String>;
     async fn get_app_metadata(&self, package_id: &str) -> zbus::Result<String>;
+    async fn resolve_images(
+        &self,
+        urls: &[String],
+        kind: &str,
+        width: u32,
+    ) -> zbus::Result<Vec<String>>;
     async fn list_installed(&self) -> zbus::Result<String>;
     async fn list_updates(&self) -> zbus::Result<String>;
     async fn refresh_catalog(&self) -> zbus::Result<()>;
@@ -90,6 +120,24 @@ pub trait ArcDaemon {
 
     #[zbus(signal)]
     fn catalog_refreshed(&self) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    fn catalog_changed(&self, generation: u64) -> zbus::Result<()>;
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct PackagePage {
+    pub total: u64,
+    pub items: Vec<Package>,
+    #[serde(default)]
+    pub providers: Vec<Provider>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SearchFilter {
+    pub provider: String,
+    pub installed: i32,
+    pub sort_by_name: bool,
 }
 
 pub async fn connect() -> Result<ArcDaemonProxy<'static>> {
@@ -104,7 +152,46 @@ impl ArcDaemonProxy<'_> {
     }
 
     pub async fn search_category_packages(&self, category: &str) -> Result<Vec<Package>> {
-        Ok(serde_json::from_str(&self.search_category(category).await?)?)
+        Ok(serde_json::from_str(
+            &self.search_category(category).await?,
+        )?)
+    }
+
+    pub async fn search_packages_page(
+        &self,
+        query: &str,
+        lang: &str,
+        filter: &SearchFilter,
+        offset: u64,
+        limit: u64,
+    ) -> Result<PackagePage> {
+        let json = self
+            .search_page(
+                query,
+                lang,
+                &filter.provider,
+                filter.installed,
+                filter.sort_by_name,
+                offset,
+                limit,
+            )
+            .await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    pub async fn category_packages_page(
+        &self,
+        category: &str,
+        lang: &str,
+        priority: Vec<String>,
+        offset: u64,
+        limit: u64,
+    ) -> Result<PackagePage> {
+        Ok(serde_json::from_str(
+            &self
+                .search_category_page(category, lang, priority, offset, limit)
+                .await?,
+        )?)
     }
 
     pub async fn installed_packages(&self) -> Result<Vec<Package>> {
@@ -132,6 +219,39 @@ impl ArcDaemonProxy<'_> {
     }
 
     pub async fn app_metadata(&self, package_id: &str) -> Result<AppMetadata> {
-        Ok(serde_json::from_str(&self.get_app_metadata(package_id).await?)?)
+        Ok(serde_json::from_str(
+            &self.get_app_metadata(package_id).await?,
+        )?)
+    }
+
+    pub async fn resolve_image_urls(&self, urls: &mut [&mut String], kind: ImageKind, width: u32) {
+        let wanted: Vec<String> = urls.iter().map(|u| u.to_string()).collect();
+        if wanted.is_empty() {
+            return;
+        }
+        let Ok(resolved) = self.resolve_images(&wanted, kind.as_str(), width).await else {
+            return;
+        };
+        if resolved.len() != urls.len() {
+            return;
+        }
+        for (slot, value) in urls.iter_mut().zip(resolved) {
+            **slot = value;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageKind {
+    Icon,
+    Image,
+}
+
+impl ImageKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            ImageKind::Icon => "icon",
+            ImageKind::Image => "image",
+        }
     }
 }

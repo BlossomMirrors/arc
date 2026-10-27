@@ -42,6 +42,8 @@ Kirigami.ScrollablePage {
         value: 0
     }
 
+    onVisibleChanged: if (!visible) ListController.clear()
+
     function openList(slug, label) {
         root.slug = slug;
         root.label = label ?? "";

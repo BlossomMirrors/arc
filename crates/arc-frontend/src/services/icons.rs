@@ -10,8 +10,15 @@ pub fn resolve(pkg_id: &str, raw_icon_url: Option<&str>) -> String {
         return padded_file_url(pkg_id, &p);
     }
     if let Some(url) = raw_icon_url {
-        if !url.is_empty() && !matches!(libarc::media::classify(url), libarc::media::MediaRef::Local) {
-            return url.to_string();
+        match libarc::media::classify(url) {
+            libarc::media::MediaRef::Remote(remote)
+                if !remote.starts_with(libarc::DAEMON_HTTP_BASE) =>
+            {
+                return libarc::media::icon_image_proxy_url(remote);
+            }
+            libarc::media::MediaRef::Local => {}
+            _ if !url.is_empty() => return url.to_string(),
+            _ => {}
         }
     }
     find_flatpak_appstream_icon(pkg_id)
@@ -25,12 +32,10 @@ fn padded_file_url(pkg_id: &str, source: &Path) -> String {
     format!("file://{}", path.display())
 }
 
-pub fn icon_cache_dir() -> Option<PathBuf> {
-    libarc::cache::namespace("icon-pad")
-}
-
 pub fn clear_icon_cache() -> std::io::Result<()> {
-    let Some(dir) = icon_cache_dir() else { return Ok(()) };
+    let Some(dir) = crate::cache::padded_icons_dir() else {
+        return Ok(());
+    };
     let result = match fs::remove_dir_all(&dir) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -46,12 +51,13 @@ fn normalized_icon_path(pkg_id: &str, source: &Path) -> Option<PathBuf> {
     let is_svg = ext.eq_ignore_ascii_case("svg") || ext.eq_ignore_ascii_case("svgz");
 
     let generation = CACHE_GENERATION.load(Ordering::Relaxed);
-    let cache_dir = icon_cache_dir()?;
-    // source (not just pkg_id) is part of the key so a theme switch, which
-    // changes which file resolve() finds for the same pkg_id, lands on a
-    // fresh cache entry instead of matching the old theme's stale one
+    let cache_dir = crate::cache::padded_icons_dir()?;
+
     let source_hash = hash_path(source);
-    let cache_path = cache_dir.join(format!("{}-{source_hash}-{generation}.png", sanitize_filename(pkg_id)));
+    let cache_path = cache_dir.join(format!(
+        "{}-{source_hash}-{generation}.png",
+        sanitize_filename(pkg_id)
+    ));
 
     let source_mtime = fs::metadata(source).ok()?.modified().ok()?;
     if let Ok(cache_mtime) = fs::metadata(&cache_path).and_then(|m| m.modified()) {
@@ -74,7 +80,13 @@ fn normalized_icon_path(pkg_id: &str, source: &Path) -> Option<PathBuf> {
 fn sanitize_filename(pkg_id: &str) -> String {
     pkg_id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 

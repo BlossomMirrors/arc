@@ -1,4 +1,5 @@
 mod bridge;
+mod cache;
 mod runtime;
 mod services;
 
@@ -14,9 +15,11 @@ extern "C" {
     fn arc_install_message_handler();
     fn arc_engine_has_root(engine: *mut c_void) -> bool;
     fn arc_set_icon_theme(name: *const std::ffi::c_char);
+    fn arc_single_instance(on_activate: extern "C" fn(args: *const *const std::ffi::c_char, count: i32));
 }
 
 fn main() {
+    bridge::startup_controller::mark_process_start();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -27,9 +30,11 @@ fn main() {
     unsafe { arc_install_message_handler() };
 
     runtime::init();
+    services::home_cache::preload();
     services::deeplink::init();
 
     let mut app = QApplication::new();
+    unsafe { arc_single_instance(bridge::deeplink_controller::on_activate) };
 
     if let Some(theme) = libarc::icons::system_theme_name() {
         if let Ok(theme) = CString::new(theme) {
@@ -66,12 +71,13 @@ fn main() {
             tracing::error!("Main.qml failed to load, see the qml errors above");
             std::process::exit(1);
         }
+        bridge::startup_controller::log_step("qml loaded");
     }
 
     if let Some(app) = app.as_mut() {
+        bridge::startup_controller::log_step("event loop");
         app.exec();
     }
 
     libarc::launcher::clear_blocking();
-    libarc::cache::flush_blocking();
 }

@@ -1,101 +1,61 @@
-use super::home::{Card, Category, HeroItem, HomeSection, LinkItem, Story};
-use libarc::cache::JsonCache;
-use std::sync::OnceLock;
+use super::home::{HomeSection, Story};
 
-#[derive(serde::Serialize, serde::Deserialize)]
-struct SectionDto {
-    item_type: String,
-    text: String,
-    title: String,
-    cards: Vec<Card>,
-    hero_items: Vec<HeroItem>,
-    editorial_items: Vec<HeroItem>,
-    link_title: String,
-    link_items: Vec<LinkItem>,
-    app_cloud_overlay: bool,
-    categories: Vec<Category>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct Snapshot {
-    #[serde(default)]
-    lang: String,
-    sections: Vec<SectionDto>,
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct Snapshot {
+    sections: Vec<HomeSection>,
     stories: Vec<Story>,
 }
 
-fn store() -> &'static JsonCache<Snapshot> {
-    static STORE: OnceLock<JsonCache<Snapshot>> = OnceLock::new();
-    STORE.get_or_init(|| {
-        JsonCache::new("frontend", "home.json")
-            .with_schema(1)
-            .with_ttl(std::time::Duration::from_secs(24 * 3600))
-    })
-}
-
-fn static_item_type(s: &str) -> &'static str {
-    match s {
-        "h1" => "h1",
-        "h2" => "h2",
-        "h3" => "h3",
-        "br" => "br",
-        "categories" => "categories",
-        "app-row" => "app-row",
-        "app-grid" => "app-grid",
-        "app-wide-grid" => "app-wide-grid",
-        "carousel" => "carousel",
-        "links" => "links",
-        _ => "p",
-    }
-}
-
 pub fn load() -> Option<Vec<HomeSection>> {
-    let snapshot = store().load()?;
-    if snapshot.lang != super::forge::user_lang() {
-        return None;
-    }
-    let sections = snapshot
-        .sections
-        .into_iter()
-        .map(|d| HomeSection {
-            item_type: static_item_type(&d.item_type),
-            text: d.text,
-            title: d.title,
-            cards: d.cards,
-            hero_items: d.hero_items,
-            editorial_items: d.editorial_items,
-            link_title: d.link_title,
-            link_items: d.link_items,
-            app_cloud_overlay: d.app_cloud_overlay,
-            categories: d.categories,
-            // save() only ever runs once every pending row has resolved, so
-            // a cached snapshot is always fully-resolved by construction
-            loading: false,
-        })
-        .collect();
+    let snapshot = crate::cache::home().get(&super::forge::user_lang())?;
     super::stories::seed(&snapshot.stories);
-    Some(sections)
+    Some(snapshot.sections)
+}
+
+pub struct Preloaded {
+    pub raw: Vec<HomeSection>,
+    pub display: Vec<HomeSection>,
+}
+
+static PRELOADED: std::sync::Mutex<Option<Preloaded>> = std::sync::Mutex::new(None);
+static PRELOAD_DONE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+static PRELOAD_FINISHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+const RESOLVE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
+
+pub fn preload() {
+    crate::runtime::spawn(async {
+        let raw = tokio::task::spawn_blocking(load).await.ok().flatten();
+        if let Some(raw) = raw {
+            let mut display = raw.clone();
+            let _ = tokio::time::timeout(RESOLVE_TIMEOUT, async {
+                let proxy = crate::runtime::proxy().await;
+                super::images::resolve_sections(proxy.as_ref(), &mut display).await;
+            })
+            .await;
+            *PRELOADED.lock().unwrap_or_else(|p| p.into_inner()) = Some(Preloaded { raw, display });
+        }
+        PRELOAD_FINISHED.store(true, std::sync::atomic::Ordering::Release);
+        PRELOAD_DONE.notify_waiters();
+    });
+}
+
+pub fn take_preloaded() -> Option<Preloaded> {
+    PRELOADED.lock().unwrap_or_else(|p| p.into_inner()).take()
+}
+
+pub async fn wait_preloaded() -> Option<Preloaded> {
+    let done = PRELOAD_DONE.notified();
+    if !PRELOAD_FINISHED.load(std::sync::atomic::Ordering::Acquire) {
+        done.await;
+    }
+    take_preloaded()
 }
 
 pub fn save(sections: &[HomeSection], stories: &[Story]) {
     let snapshot = Snapshot {
-        sections: sections
-            .iter()
-            .map(|s| SectionDto {
-                item_type: s.item_type.to_string(),
-                text: s.text.clone(),
-                title: s.title.clone(),
-                cards: s.cards.clone(),
-                hero_items: s.hero_items.clone(),
-                editorial_items: s.editorial_items.clone(),
-                link_title: s.link_title.clone(),
-                link_items: s.link_items.clone(),
-                app_cloud_overlay: s.app_cloud_overlay,
-                categories: s.categories.clone(),
-            })
-            .collect(),
+        sections: sections.to_vec(),
         stories: stories.to_vec(),
-        lang: super::forge::user_lang(),
     };
-    store().store(&snapshot);
+    crate::cache::home().insert(super::forge::user_lang(), snapshot);
 }

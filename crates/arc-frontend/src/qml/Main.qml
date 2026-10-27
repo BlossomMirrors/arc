@@ -20,6 +20,8 @@ Kirigami.ApplicationWindow {
     readonly property bool frontendVisible: root.visibility !== Window.Minimized && root.visibility !== Window.Hidden
     onFrontendVisibleChanged: SettingsController.setFrontendVisible(root.frontendVisible)
 
+    onFrameSwapped: StartupController.firstFrame()
+
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
 
     Binding {
@@ -45,27 +47,43 @@ Kirigami.ApplicationWindow {
             HomePage {
                 id: homePageItem
             }
-            SearchPage {
-                id: searchPageItem
+            LazyPage {
+                id: searchPage
+        order: 0
+                source: "pages/SearchPage.qml"
             }
-            InstalledPage {
-                id: installedPageItem
+            LazyPage {
+                id: installedPage
+        order: 1
+                source: "pages/InstalledPage.qml"
+                onLoaded: item.load()
             }
-            DownloadsPage {
-                id: downloadsPageItem
+            LazyPage {
+                id: downloadsPage
+        order: 2
+                source: "pages/DownloadsPage.qml"
+                onLoaded: item.load()
             }
-            SettingsPage {
-                onNotificationRequested: message => root.showPassiveNotification(message)
+            LazyPage {
+                id: settingsPage
+        order: 3
+                source: "pages/SettingsPage.qml"
             }
 
-            // InstalledPage and DownloadsPage share the PackageListModel singleton,
-            // so only the active tab may trigger a load or their requests race
-            // and clobber each other's results.
+            property int previousIndex: 0
+
             onCurrentIndexChanged: {
+                if (previousIndex === root.tabIndex.search) {
+                    searchPage.item?.release();
+                }
+                previousIndex = currentIndex;
+
                 if (currentIndex === root.tabIndex.installed) {
-                    installedPageItem.load();
+                    installedPage.page().load();
                 } else if (currentIndex === root.tabIndex.downloads) {
-                    downloadsPageItem.load();
+                    downloadsPage.page().load();
+                } else if (currentIndex === root.tabIndex.search) {
+                    searchPage.page().restore();
                 }
             }
         }
@@ -75,8 +93,10 @@ Kirigami.ApplicationWindow {
 
     property bool categoryVisible: false
 
-    CategoryPage {
-        id: categoryPageItem
+    LazyPage {
+        id: categoryPage
+        order: 5
+        source: "pages/CategoryPage.qml"
         y: 0
         width: parent.width
         height: parent.height
@@ -93,8 +113,10 @@ Kirigami.ApplicationWindow {
 
     property bool listVisible: false
 
-    ListPage {
-        id: listPageItem
+    LazyPage {
+        id: listPage
+        order: 6
+        source: "pages/ListPage.qml"
         y: 0
         width: parent.width
         height: parent.height
@@ -111,8 +133,10 @@ Kirigami.ApplicationWindow {
 
     property bool storyVisible: false
 
-    StoryPage {
-        id: storyPageItem
+    LazyPage {
+        id: storyPage
+        order: 7
+        source: "pages/StoryPage.qml"
         y: 0
         width: parent.width
         height: parent.height
@@ -127,8 +151,10 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    DetailPage {
-        id: detailPageItem
+    LazyPage {
+        id: detailPage
+        order: 4
+        source: "pages/DetailPage.qml"
         y: 0
         width: parent.width
         height: parent.height
@@ -145,8 +171,10 @@ Kirigami.ApplicationWindow {
 
     property bool eulaVisible: false
 
-    EulaPage {
-        id: eulaPageItem
+    LazyPage {
+        id: eulaPage
+        order: 8
+        source: "pages/dialogs/EulaPage.qml"
         y: 0
         width: parent.width
         height: parent.height
@@ -159,8 +187,6 @@ Kirigami.ApplicationWindow {
                 easing.type: Easing.OutCubic
             }
         }
-
-        onCloseRequested: root.eulaVisible = false
     }
 
     TapHandler {
@@ -176,11 +202,11 @@ Kirigami.ApplicationWindow {
     function entryComponent(entry) {
         switch (entry.kind) {
         case "flatpakref":
-            return installFlatpakrefPageComponent;
+            return Qt.resolvedUrl("pages/dialogs/InstallFlatpakrefPage.qml");
         case "addrepo":
-            return addRepoPageComponent;
+            return Qt.resolvedUrl("pages/dialogs/AddRepoPage.qml");
         case "installfile":
-            return installFilePageComponent;
+            return Qt.resolvedUrl("pages/dialogs/InstallFilePage.qml");
         }
         return null;
     }
@@ -198,13 +224,13 @@ Kirigami.ApplicationWindow {
     function overlayShows(entry) {
         switch (entry.kind) {
         case "detail":
-            return root.detailVisible && detailPageItem.pkgId === entry.a;
+            return root.detailVisible && detailPage.item?.pkgId === entry.a;
         case "category":
-            return root.categoryVisible && categoryPageItem.categoryId === entry.a;
+            return root.categoryVisible && categoryPage.item?.categoryId === entry.a;
         case "story":
-            return root.storyVisible && storyPageItem.storyId === entry.a;
+            return root.storyVisible && storyPage.item?.storyId === entry.a;
         case "list":
-            return root.listVisible && listPageItem.slug === entry.a;
+            return root.listVisible && listPage.item?.slug === entry.a;
         }
         return false;
     }
@@ -212,19 +238,19 @@ Kirigami.ApplicationWindow {
     function openOverlay(entry) {
         switch (entry.kind) {
         case "detail":
-            detailPageItem.openEntry(entry.a, entry.c ?? null);
+            detailPage.page().openEntry(entry.a, entry.c ?? null);
             root.detailVisible = true;
             break;
         case "category":
-            categoryPageItem.openCategory(entry.a, entry.b, entry.c ?? "", entry.d ?? "");
+            categoryPage.page().openCategory(entry.a, entry.b, entry.c ?? "", entry.d ?? "");
             root.categoryVisible = true;
             break;
         case "story":
-            storyPageItem.openStory(entry.a);
+            storyPage.page().openStory(entry.a);
             root.storyVisible = true;
             break;
         case "list":
-            listPageItem.openList(entry.a, entry.b ?? "");
+            listPage.page().openList(entry.a, entry.b ?? "");
             root.listVisible = true;
             break;
         }
@@ -277,8 +303,9 @@ Kirigami.ApplicationWindow {
                 pageStack.pop(pageStack.get(0));
             tabView.currentIndex = root.tabIndex[op.entry.kind] ?? 0;
             if (op.entry.kind === "search") {
-                searchPageItem.query = op.entry.a ?? "";
-                searchPageItem.focusSearch();
+                const search = searchPage.page();
+                search.query = op.entry.a ?? "";
+                search.focusSearch();
             } else if (op.entry.kind === "home") {
                 homePageItem.searchText = "";
             }
@@ -398,7 +425,7 @@ Kirigami.ApplicationWindow {
         if (root.currentView === "home") {
             homePageItem.focusSearch(prefill);
         } else if (root.currentView === "search") {
-            searchPageItem.focusSearch(prefill);
+            searchPage.page().focusSearch(prefill);
         } else {
             root.goSearch(prefill ?? "");
         }
@@ -430,41 +457,35 @@ Kirigami.ApplicationWindow {
         target: SettingsController
         function onDaemonReconnected() {
             HomeFeedModel.reload();
-            installedPageItem.load();
-            downloadsPageItem.load();
-            // a freshly (re)started daemon always boots with
-            // frontend_visible=false; since this property's QML value
-            // hasn't actually changed across the restart, onFrontendVisibleChanged
-            // never re-fires on its own to tell the new process the window
-            // is actually on screen
+            installedPage.item?.load();
+            downloadsPage.item?.load();
             SettingsController.setFrontendVisible(root.frontendVisible);
         }
         function onIconCacheCleared() {
             HomeFeedModel.reload();
-            installedPageItem.load();
-            downloadsPageItem.load();
+            installedPage.item?.load();
+            downloadsPage.item?.load();
         }
     }
 
-    Component {
-        id: installFlatpakrefPageComponent
-        InstallFlatpakrefPage {}
+    Connections {
+        target: settingsPage.item
+        function onNotificationRequested(message) {
+            root.showPassiveNotification(message);
+        }
     }
 
-    Component {
-        id: addRepoPageComponent
-        AddRepoPage {}
-    }
-
-    Component {
-        id: installFilePageComponent
-        InstallFilePage {}
+    Connections {
+        target: eulaPage.item
+        function onCloseRequested() {
+            root.eulaVisible = false;
+        }
     }
 
     Connections {
         target: TransactionsModel
         function onEulaRequired(pkgId, name, iconUrl, eulaUrl) {
-            eulaPageItem.open(pkgId, name, iconUrl, eulaUrl);
+            eulaPage.page().open(pkgId, name, iconUrl, eulaUrl);
             root.eulaVisible = true;
         }
     }
@@ -555,6 +576,7 @@ Kirigami.ApplicationWindow {
     }
 
     Component.onCompleted: {
+        DetailController.setShotWidth(Math.round(Kirigami.Units.gridUnit * 14 * 16 / 9 * 2));
         SettingsController.load();
         TransactionsModel.init();
         goHome();

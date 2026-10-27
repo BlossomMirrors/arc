@@ -1,8 +1,12 @@
 #!/bin/bash
 set -e
-./build.sh
-RPM=$(ls rpmbuild/RPMS/x86_64/*.rpm)
-sudo rpm-ostree usroverlay || true
+./release.sh
+RPM=$(ls -1t rpmbuild/RPMS/x86_64/*.rpm 2>/dev/null | head -1)
+if [ -z "$RPM" ]; then
+    echo "no RPM produced by release.sh, see build output above for the error"
+    exit 1
+fi
+sudo rpm-ostree usroverlay | true || true
 rpm2cpio $RPM | sudo cpio -fuidmv -D /
 
 sudo update-mime-database /usr/share/mime &>/dev/null || true

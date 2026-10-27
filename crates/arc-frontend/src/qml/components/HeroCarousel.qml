@@ -90,7 +90,7 @@ Item {
         highlightMoveDuration: 400
         highlightMoveVelocity: -1
         boundsBehavior: Flickable.StopAtBounds
-        cacheBuffer: width * 2
+        cacheBuffer: width
         clip: true
 
         delegate: Item {
@@ -109,21 +109,29 @@ Item {
             readonly property color fgColor: slide.darkBanner ? "white" : "black"
             readonly property color fgColorMuted: slide.darkBanner ? Qt.rgba(1, 1, 1, 0.85) : Qt.rgba(0, 0, 0, 0.75)
 
-            Image {
+            CachedImage {
                 id: bannerImage
                 anchors.fill: parent
                 source: slide.modelData.is_story ? slide.modelData.banner_url : ""
                 fillMode: Image.PreserveAspectCrop
-                asynchronous: true
                 visible: slide.modelData.is_story && slide.modelData.banner_url.length > 0
             }
+
+            property int brightnessSamples: 0
 
             Timer {
                 interval: 400
                 repeat: true
                 running: slide.modelData.is_story && slide.bannerLuminance < 0
+                    && bannerImage.status !== Image.Error && slide.brightnessSamples < 10
                 triggeredOnStart: true
-                onTriggered: brightnessSampler.requestPaint()
+                onTriggered: {
+                    if (bannerImage.status !== Image.Ready) {
+                        return;
+                    }
+                    slide.brightnessSamples += 1;
+                    brightnessSampler.requestPaint();
+                }
             }
 
             Canvas {
@@ -163,8 +171,10 @@ Item {
             }
 
             MouseArea {
+                id: slideMouse
                 anchors.fill: parent
                 enabled: slide.index === view.currentIndex
+                hoverEnabled: !slide.modelData.is_story
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                     if (view.moving) {
@@ -176,6 +186,11 @@ Item {
                         root.appActivated(slide.modelData.id);
                     }
                 }
+            }
+
+            HoverPrefetch {
+                pkgId: slide.modelData.is_story ? "" : slide.modelData.id
+                hovered: slideMouse.containsMouse
             }
 
             ColumnLayout {
@@ -321,6 +336,11 @@ Item {
 
                             TapHandler {
                                 onTapped: root.appActivated(appRow.modelData.id)
+                            }
+
+                            HoverPrefetch {
+                                pkgId: appRow.modelData.id
+                                hovered: rowHover.hovered
                             }
 
                             RowLayout {
