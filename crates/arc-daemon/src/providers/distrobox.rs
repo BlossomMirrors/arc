@@ -1162,6 +1162,14 @@ export_all() {
 
 touch "$EXPORT_LOG"
 
+# Maintainer scripts can create desktop entries that aren't in the package's
+# file list. Remember existing contents so we only export entries created or
+# changed by this install, rather than every application in the container.
+declare -A desktop_before=()
+while IFS= read -r -d '' desktop; do
+    desktop_before["$desktop"]="$(sha256sum < "$desktop")"
+done < <(find -L /usr/share/applications -name '*.desktop' -type f -print0 2>/dev/null)
+
 # Some postinst scripts call xdg-desktop-menu to register a menu entry.
 # There's no writable system menu dir / desktop session in a distrobox
 # container, so it exits nonzero and can fail the whole package install.
@@ -1214,7 +1222,13 @@ if [ "$PKG_TYPE" = "deb" ]; then
     fi
 fi
 
-export_all "$file_list"
+while IFS= read -r -d '' desktop; do
+    if [[ "${desktop_before["$desktop"]-}" != "$(sha256sum < "$desktop")" ]]; then
+        file_list+=$'\n'"$desktop"
+    fi
+done < <(find -L /usr/share/applications -name '*.desktop' -type f -print0 2>/dev/null)
+
+export_all "$(sort -u <<< "$file_list")"
 "#;
 
 const DEBIAN_COMPAT_HELPER: &str = r#"#!/bin/bash
