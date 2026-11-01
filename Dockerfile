@@ -42,19 +42,22 @@ COPY --from=builder /build/target/release/arc-daemon /usr/local/bin/arc-daemon
 # silently empty/broken catalog from the appstream sync above would ship and
 # stay broken for the container's whole lifetime. Boot the daemon here and
 # fail the build if well-known Flathub apps can't be searched.
+# The daemon serves HTTP before the catalogue sync finishes (each remote is
+# ingested in the background and committed in one transaction), so an early
+# empty result is expected: keep polling until every app shows up.
 RUN set -e; \
     ARC_HTTP_ONLY=1 /usr/local/bin/arc-daemon & \
     daemon_pid=$!; \
     trap 'kill "$daemon_pid" 2>/dev/null || true' EXIT; \
-    ready=0; \
-    for i in $(seq 1 30); do \
-        if curl -sf "http://127.0.0.1:1312/api/v1/search?q=spotify" >/dev/null 2>&1; then ready=1; break; fi; \
-        sleep 1; \
-    done; \
-    [ "$ready" = "1" ] || { echo "arc-daemon did not become ready in time"; exit 1; }; \
     for app in spotify helium; do \
-        result=$(curl -sf "http://127.0.0.1:1312/api/v1/search?q=$app"); \
-        echo "$result" | grep -q '"id"' || { echo "search for '$app' returned no results: $result"; exit 1; }; \
+        found=0; result=""; \
+        for i in $(seq 1 180); do \
+            kill -0 "$daemon_pid" 2>/dev/null || { echo "arc-daemon exited unexpectedly"; exit 1; }; \
+            result=$(curl -sf "http://127.0.0.1:1312/api/v1/search?q=$app" 2>/dev/null || true); \
+            if echo "$result" | grep -q '"id"'; then found=1; break; fi; \
+            sleep 1; \
+        done; \
+        [ "$found" = "1" ] || { echo "search for '$app' returned no results after 180s: $result"; exit 1; }; \
     done
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
