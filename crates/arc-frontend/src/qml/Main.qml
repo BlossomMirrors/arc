@@ -1,3 +1,4 @@
+import QtCore
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Window
@@ -22,8 +23,14 @@ Kirigami.ApplicationWindow {
 
     onFrameSwapped: StartupController.firstFrame()
     visible: !StartupController.startHidden
-    onVisibleChanged: if (visible && StartupController.standby) HomeFeedModel.refresh()
+    onVisibleChanged: {
+        if (visible && StartupController.standby)
+            HomeFeedModel.refresh();
+        if (visible)
+            root.restoreMaximized();
+    }
     onClosing: close => {
+        root.saveWindowState();
         if (StartupController.preloadEnabled()) {
             close.accepted = false;
             StartupController.returnToStandby();
@@ -31,6 +38,71 @@ Kirigami.ApplicationWindow {
     }
 
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
+
+    // read once at startup so state changes while showing cannot overwrite it before it is applied
+    property bool pendingMaximize: false
+
+    Settings {
+        id: windowSettings
+        category: "Window"
+        property int x: 0
+        property int y: 0
+        property int width: 0
+        property int height: 0
+        property bool positionSaved: false
+        property bool maximized: false
+    }
+
+    // debounced because the wm can report the maximized geometry before the visibility change
+    Timer {
+        id: windowStateSaveTimer
+        interval: 500
+        onTriggered: root.saveWindowState()
+    }
+
+    onXChanged: windowStateSaveTimer.restart()
+    onYChanged: windowStateSaveTimer.restart()
+    onWidthChanged: windowStateSaveTimer.restart()
+    onHeightChanged: windowStateSaveTimer.restart()
+    onVisibilityChanged: windowStateSaveTimer.restart()
+
+    function restoreWindowState() {
+        if (windowSettings.width > 0 && windowSettings.height > 0) {
+            root.width = Math.max(windowSettings.width, root.minimumWidth);
+            root.height = Math.max(windowSettings.height, root.minimumHeight);
+        }
+        if (windowSettings.positionSaved) {
+            root.x = windowSettings.x;
+            root.y = windowSettings.y;
+        }
+        root.pendingMaximize = windowSettings.maximized;
+    }
+
+    function restoreMaximized() {
+        if (!root.pendingMaximize)
+            return;
+        root.pendingMaximize = false;
+        root.showMaximized();
+    }
+
+    function saveWindowState() {
+        if (!root.visible || root.pendingMaximize)
+            return;
+        if (root.visibility === Window.Maximized) {
+            windowSettings.maximized = true;
+        } else if (root.visibility === Window.Windowed) {
+            windowSettings.maximized = false;
+            windowSettings.x = root.x;
+            windowSettings.y = root.y;
+            windowSettings.width = root.width;
+            windowSettings.height = root.height;
+            windowSettings.positionSaved = true;
+        } else {
+            return;
+        }
+        // returning to standby replaces the process so nothing gets flushed on exit
+        windowSettings.sync();
+    }
 
     Binding {
         target: root.pageStack.columnView
@@ -601,6 +673,9 @@ Kirigami.ApplicationWindow {
     }
 
     Component.onCompleted: {
+        restoreWindowState();
+        if (root.visible)
+            restoreMaximized();
         DetailController.setShotWidth(Math.round(Kirigami.Units.gridUnit * 14 * 16 / 9 * 2));
         SettingsController.load();
         TransactionsModel.init();
