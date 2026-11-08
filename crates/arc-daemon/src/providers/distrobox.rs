@@ -1090,6 +1090,17 @@ export_desktop_file() {
     app_name="$(basename "$src" .desktop)"
     dest_dir="$HOME/.local/share/applications"
     dest="$dest_dir/${app_name}.desktop"
+
+    # Never shadow a desktop entry the host already ships (e.g. a container
+    # copy of systemsettings.desktop or org.kde.kwalletd6.desktop would make
+    # the host launch/activate the container's build instead of its own).
+    local host_dir
+    for host_dir in /run/host/usr/share/applications \
+                    /run/host/usr/local/share/applications \
+                    /run/host/var/lib/flatpak/exports/share/applications; do
+        [ -e "$host_dir/${app_name}.desktop" ] && return 0
+    done
+
     mkdir -p "$dest_dir"
 
     while IFS= read -r line; do
@@ -1222,9 +1233,24 @@ if [ "$PKG_TYPE" = "deb" ]; then
     fi
 fi
 
+# Package that owns a file, empty if unowned (i.e. created by a maintainer script).
+file_owner() {
+    case "$PKG_TYPE" in
+        deb)    dpkg -S "$1" 2>/dev/null | head -n1 | cut -d: -f1 || true ;;
+        rpm)    rpm -qf --queryformat '%{NAME}' "$1" 2>/dev/null || true ;;
+        pacman) pacman -Qqo "$1" 2>/dev/null || true ;;
+    esac
+}
+
+# Only pick up new entries that belong to this package or to no package at all.
+# Entries shipped by dependencies pulled in by the install (KDE frameworks,
+# systemsettings, kwalletd6, portals, ...) must not be exported to the host.
 while IFS= read -r -d '' desktop; do
     if [[ "${desktop_before["$desktop"]-}" != "$(sha256sum < "$desktop")" ]]; then
-        file_list+=$'\n'"$desktop"
+        owner="$(file_owner "$desktop")"
+        if [ -z "$owner" ] || [ "$owner" = "$pkg_name" ]; then
+            file_list+=$'\n'"$desktop"
+        fi
     fi
 done < <(find -L /usr/share/applications -name '*.desktop' -type f -print0 2>/dev/null)
 
