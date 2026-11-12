@@ -1,0 +1,13 @@
+-xc++
+-std=c++17
+-fPIC
+-I/usr/include/qt6
+-I/usr/include/qt6/QtCore
+-I/usr/include/qt6/QtGui
+-I/usr/include/qt6/QtQml
+-I/usr/include/qt6/QtQuick
+-I/usr/include/qt6/QtDBus
+-I/usr/include/qt6/QtQmlIntegration
+-I/usr/include/KF6/KI18n
+-I/usr/include/KF6/KDBusAddons
+-I/usr/include/KF6/KWindowSystem

@@ -123,6 +123,7 @@ public:
         const QList<QVariant> args = message.arguments();
         QStringList arguments;
         if (message.member() == QStringLiteral("Open") && !args.isEmpty()) {
+            arguments << QCoreApplication::applicationFilePath();
             for (const QString &uri : args.at(0).toStringList()) {
                 const QUrl url(uri);
                 arguments << (url.isLocalFile() ? url.toLocalFile() : uri);
@@ -155,7 +156,7 @@ extern "C" void arc_single_instance(ActivateFn on_activate) {
     });
     // the launcher hands over files and links directly when the desktop file is dbus activatable
     QObject::connect(service, &KDBusService::openRequested, service, [on_activate](const QList<QUrl> &urls) {
-        QStringList arguments;
+        QStringList arguments{QCoreApplication::applicationFilePath()};
         for (const QUrl &url : urls) {
             arguments << (url.isLocalFile() ? url.toLocalFile() : url.toString());
         }

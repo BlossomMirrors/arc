@@ -30,3 +30,8 @@ for MIMEAPPS in /usr/share/applications/mimeapps.list /etc/xdg/mimeapps.list; do
         sudo sed -i "\|^\[Default Applications\]|a $ENTRY" "$MIMEAPPS"
     done
 done
+
+echo "\nInstall complete! RPM: $RPM"
+echo "Killing old arc-frontend process... Its recomended to restart the daemon in the Arc settings."
+pkill -x arc-frontend || true
+echo "Done"

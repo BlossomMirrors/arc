@@ -1,0 +1,10 @@
+{
+  "lsp": {
+    "clangd": {
+      "binary": {
+        "path": "/usr/bin/podman",
+        "arguments": ["exec", "-i", "arc-build", "clangd"],
+      },
+    },
+  },
+}

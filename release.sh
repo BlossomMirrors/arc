@@ -9,7 +9,7 @@ if [ -f /run/.toolboxenv ]; then
     sudo dnf install -y rpm-build rust cargo clang pkg-config gettext-devel \
         glib2-devel flatpak-devel ostree-devel openssl-devel sqlite-devel \
         qt6-qtbase-devel qt6-qtdeclarative-devel kf6-kirigami-devel kf6-ki18n-devel \
-        kf6-kdbusaddons-devel kf6-kwindowsystem-devel
+        kf6-kdbusaddons-devel kf6-kwindowsystem-devel clang-tools-extra
 elif command -v toolbox >/dev/null 2>&1; then
     # build in a toolbox so compilers and devel packages never touch the system image
     FEDORA=$(. /etc/os-release && echo "$VERSION_ID")
