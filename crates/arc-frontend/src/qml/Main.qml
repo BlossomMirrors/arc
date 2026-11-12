@@ -302,8 +302,13 @@ Kirigami.ApplicationWindow {
 
     function pushEntry(entry) {
         const component = entryComponent(entry);
-        if (component)
-            pageStack.push(component);
+        if (!component)
+            return;
+        const duration = pageStack.columnView.scrollDuration;
+        if (root.instantNav)
+            pageStack.columnView.scrollDuration = 0;
+        pageStack.push(component);
+        pageStack.columnView.scrollDuration = duration;
     }
 
     function isOverlayKind(kind) {
@@ -630,8 +635,7 @@ Kirigami.ApplicationWindow {
             root.instantNav = true;
             root.openDeepLink();
             root.instantNav = false;
-            if (DeepLinkController.kind === "detail" || DeepLinkController.kind === "list")
-                StartupController.showWindow();
+            StartupController.showWindow();
         }
     }
 

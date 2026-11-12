@@ -98,7 +98,14 @@ pub enum LaunchIntent {
 
 impl LaunchIntent {
     pub fn opens_page(&self) -> bool {
-        matches!(self, LaunchIntent::Detail { .. } | LaunchIntent::List { .. })
+        matches!(
+            self,
+            LaunchIntent::Detail { .. }
+            | LaunchIntent::List { .. }
+            | LaunchIntent::AddRepo { .. }
+            | LaunchIntent::InstallFlatpakref { .. }
+            | LaunchIntent::InstallFile { .. }
+        )
     }
 }
 
