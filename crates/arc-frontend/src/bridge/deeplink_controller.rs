@@ -130,10 +130,7 @@ impl qobject::DeepLinkController {
                     };
                     let (title, app_id, repo_url) = deeplink::parse_flatpakref(&content);
 
-                    // flathub refs are known apps so skip the confirmation
-                    let is_flathub = is_local_file
-                        && (repo_url.contains("dl.flathub.org")
-                            || repo_url.contains("flathub.org"));
+                    let catalog_id = catalog_id_for_ref(&app_id, &repo_url).await;
 
                     let install_source = if is_local_file {
                         format!("file://{source}")
@@ -143,8 +140,8 @@ impl qobject::DeepLinkController {
 
                     qt_thread
                         .queue(move |mut this| {
-                            if is_flathub {
-                                this.as_mut().set_pkg_id(QString::from(&app_id));
+                            if let Some(id) = catalog_id {
+                                this.as_mut().set_pkg_id(QString::from(&id));
                                 this.as_mut().set_kind(QString::from("detail"));
                             } else {
                                 this.as_mut().set_ref_title(QString::from(&title));
@@ -229,4 +226,14 @@ async fn find_flatpak_alternative(pkg_name: &str) -> Option<(String, String)> {
     pkgs.into_iter()
         .find(|p| p.provider == libarc::Provider::Flatpak)
         .map(|p| (p.id, p.name))
+}
+
+async fn catalog_id_for_ref(app_id: &str, repo_url: &str) -> Option<String> {
+    let proxy = runtime::proxy().await?;
+    let repo_url = repo_url.trim_end_matches("/");
+    let known_remote = proxy.remotes().await.ok()?.iter().any(|r| r.url.trim_end_matches("/") == repo_url);
+    if !known_remote {
+        return None;
+    }
+    proxy.app_info(app_id).await.ok()?.map(|pkg| pkg.id)
 }
