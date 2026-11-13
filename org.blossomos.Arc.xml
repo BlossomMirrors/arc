@@ -5,4 +5,19 @@
     <glob pattern="*.pkg.tar.xz"/>
     <glob pattern="*.pkg.tar.zst"/>
   </mime-type>
+  <mime-type type="application/x-arc-appimage">
+    <comment>AppImage application</comment>
+    <generic-icon name="application-vnd.appimage"/>
+    <magic priority="60">
+      <match value="ELF" type="string" offset="1">
+        <match value="0x41" type="byte" offset="8">
+          <match value="0x49" type="byte" offset="9">
+            <match value="0x01" type="byte" offset="10"/>
+            <match value="0x02" type="byte" offset="10"/>
+          </match>
+        </match>
+      </match>
+    </magic>
+    <glob weight="70" pattern="*.appimage"/>
+  </mime-type>
 </mime-info>

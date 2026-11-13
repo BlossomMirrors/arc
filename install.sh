@@ -23,7 +23,8 @@ for MIMEAPPS in /usr/share/applications/mimeapps.list /etc/xdg/mimeapps.list; do
         "x-scheme-handler/appstream=org.blossomos.Arc.Handler.desktop" \
         "x-scheme-handler/flatpak+https=org.blossomos.Arc.Handler.desktop" \
         "application/vnd.flatpak.ref=org.blossomos.Arc.desktop" \
-        "application/vnd.flatpak=org.blossomos.Arc.desktop"
+        "application/vnd.flatpak=org.blossomos.Arc.desktop" \
+        "application/x-arc-appimage=org.blossomos.Arc.desktop"
     do
         KEY=$(echo "$ENTRY" | cut -d= -f1)
         sudo sed -i "\|^${KEY}=|d" "$MIMEAPPS"

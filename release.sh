@@ -190,7 +190,8 @@ for MIMEAPPS in /usr/share/applications/mimeapps.list /etc/xdg/mimeapps.list; do
         '\|x-scheme-handler/appstream=org\.blossomos\.Arc\.Handler\.desktop|d
          \|x-scheme-handler/flatpak+https=org\.blossomos\.Arc\.Handler\.desktop|d
          \|application/vnd\.flatpak\.ref=org\.blossomos\.Arc\.desktop|d
-         \|application/vnd\.flatpak=org\.blossomos\.Arc\.desktop|d' \
+         \|application/vnd\.flatpak=org\.blossomos\.Arc\.desktop|d
+         \|application/x-arc-appimage=org\.blossomos\.Arc\.desktop|d' \
         "\$MIMEAPPS" 2>/dev/null || :
 done
 
